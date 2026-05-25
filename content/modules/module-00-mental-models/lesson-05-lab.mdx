@@ -1,0 +1,114 @@
+---
+title: "Lab: Build the Bare-Metal Agent"
+module: "module-00-mental-models"
+lesson: 5
+slug: "lesson-05-lab"
+---
+
+# Lesson 5 · Lab: Build the Bare-Metal Agent
+
+<LabBrief title="Build a Bare-Metal Agent" time="2–3 hours">
+
+#### Objective
+
+Build a working agent loop from scratch — no framework, no SDK abstractions beyond the HTTP client. You must be able to point at every line and explain it.
+
+#### Setup
+
+- Python 3.11+
+- One LLM API key (OpenAI or Anthropic)
+- No other dependencies beyond `httpx` or the minimal provider SDK
+
+#### Deliverables
+
+- `agent.py` — the complete agent (~50 lines)
+- `tools.py` — at least one hardcoded tool (calculator or web search stub)
+- `README.md` — one paragraph: what your agent does, what breaks if you remove the loop, what changes at temperature 1.0 vs 0.0
+
+#### Constraints
+
+- No LangChain, LangGraph, or agent frameworks
+- No OpenAI Agents SDK or similar abstractions
+- Raw API calls only
+- Loop must have a working termination condition and a `max_steps` guardrail
+
+</LabBrief>
+
+## Starter code
+
+You'll receive a scaffold with the following structure. The functions have signatures and docstrings — no logic. Fill in each `TODO`.
+
+```
+module-00-lab/
+  agent.py          ← main loop, fill in 5 TODOs
+  tools.py          ← one complete tool + one stub to implement
+  tests/
+    test_loop.py    ← 3 tests: loop runs, terminates, tool is called
+  requirements.txt
+  README.md         ← you write this
+```
+
+The five TODOs in `agent.py`:
+
+```python
+def run_agent(goal: str) -> str:
+    messages = build_initial_messages(goal)
+
+    for step in range(MAX_STEPS):
+        # TODO 1: build the messages list from goal + history
+        # TODO 2: call the LLM and get a response
+        # TODO 3: parse whether the response wants to call a tool
+        # TODO 4: execute the tool and append the result to messages
+        # TODO 5: decide whether we are done and return the result
+
+    return "max steps reached"
+```
+
+## Rubric
+
+<Rubric
+  threshold="Meets (3) on all five criteria. A Below (1) on any criterion requires re-submission of that section before advancing."
+  criteria={[
+    {
+      name: "Loop correctness",
+      exceeds: "Runs, terminates, and handles tool errors without crashing",
+      meets: "Runs and terminates correctly",
+      approaching: "Runs but termination is fragile",
+      below: "Never terminates"
+    },
+    {
+      name: "Code clarity",
+      exceeds: "Explains every line cold — the why, not just the what",
+      meets: "Explains every line with minimal prompting",
+      approaching: "Gaps on parsing or termination logic",
+      below: "Cannot explain core sections"
+    },
+    {
+      name: "Conceptual accuracy",
+      exceeds: "Explains where the model fits vs. where Python fits; explains hallucination",
+      meets: "Draws and explains the loop correctly",
+      approaching: "Loop diagram correct; shaky on model vs. agent boundary",
+      below: "Cannot articulate the loop"
+    },
+    {
+      name: "Judgment gate",
+      exceeds: "Gives a concrete argued case where a plain LLM call beats an agent",
+      meets: "Valid case with basic reasoning",
+      approaching: "Case named but reasoning is vague",
+      below: "Cannot name a case"
+    },
+    {
+      name: "README",
+      exceeds: "Covers what breaks if the loop is removed AND temperature effects — written for a stranger",
+      meets: "Covers both prompts clearly",
+      approaching: "Covers one prompt well",
+      below: "Missing or one-line answers"
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 4](/modules/module-00-mental-models/lesson-04) · [Failure Museum exhibit →](/modules/module-00-mental-models/failure-museum)
+
+<Checkpoint />

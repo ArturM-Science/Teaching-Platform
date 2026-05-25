@@ -1,6 +1,30 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+const protectedRoutePrefixes = ['/dashboard', '/modules', '/workshops', '/instructor']
+const guestRoutePrefixes = ['/login', '/signup']
+
+function matchesRoute(pathname: string, route: string) {
+  return pathname === route || pathname.startsWith(`${route}/`)
+}
+
+function redirectWithSupabaseCookies(
+  request: NextRequest,
+  pathname: string,
+  supabaseResponse: NextResponse
+) {
+  const redirectUrl = request.nextUrl.clone()
+  redirectUrl.pathname = pathname
+  redirectUrl.search = ''
+
+  const response = NextResponse.redirect(redirectUrl)
+  supabaseResponse.cookies.getAll().forEach((cookie) => {
+    response.cookies.set(cookie)
+  })
+
+  return response
+}
+
 export async function proxy(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
@@ -23,13 +47,21 @@ export async function proxy(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  const isProtected =
-    request.nextUrl.pathname.startsWith('/dashboard') ||
-    request.nextUrl.pathname.startsWith('/modules') ||
-    request.nextUrl.pathname.startsWith('/workshops')
+  const { pathname } = request.nextUrl
+  const isProtected = protectedRoutePrefixes.some((route) =>
+    matchesRoute(pathname, route)
+  )
 
   if (isProtected && !user) {
-    return NextResponse.redirect(new URL('/login', request.url))
+    return redirectWithSupabaseCookies(request, '/login', supabaseResponse)
+  }
+
+  const isGuestRoute =
+    pathname === '/' ||
+    guestRoutePrefixes.some((route) => matchesRoute(pathname, route))
+
+  if (isGuestRoute && user) {
+    return redirectWithSupabaseCookies(request, '/dashboard', supabaseResponse)
   }
 
   return supabaseResponse

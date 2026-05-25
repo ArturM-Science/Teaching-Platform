@@ -1,10 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    turbo: {
-      root: __dirname,
-    },
+  transpilePackages: ['next-mdx-remote'],
+  turbopack: {
+    root: __dirname,
   },
 };
 

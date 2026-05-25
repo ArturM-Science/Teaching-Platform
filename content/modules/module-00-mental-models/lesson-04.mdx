@@ -1,0 +1,168 @@
+---
+title: "The Agent Loop"
+module: "module-00-mental-models"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · The Agent Loop
+
+Everything in this course is built on one idea: the agent loop. Understanding it in detail — not just drawing the diagram — is the difference between an engineer who can debug agents and one who can't.
+
+## The five steps
+
+```
+perceive → reason → act → observe → repeat
+```
+
+**Perceive:** Read the current context. What's the goal? What has already happened? What did the last tool return?
+
+**Reason:** Call the LLM with the current context. The model reads everything and decides what to do next — call a tool, ask a clarifying question, or declare it's done.
+
+**Act:** Execute whatever the model decided. If it wants to call a tool, your code calls the tool. The model does not call the tool directly.
+
+**Observe:** Append the result to the context. The tool output becomes part of the message history so the model can see it on the next call.
+
+**Repeat:** Loop back to perceive. The model now has more context — the previous reasoning step plus the tool result — and makes a better decision.
+
+<Callout type="key">
+The model does not run your tools. It produces text that describes wanting to call a tool. Your Python code reads that text and decides whether to call it. This distinction matters enormously for security (Module 8).
+</Callout>
+
+## In code, no framework
+
+```python
+def run_agent(goal: str) -> str:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": goal},
+    ]
+
+    for step in range(MAX_STEPS):  # always bound the loop
+        # Reason: call the LLM
+        response = call_llm(messages)
+
+        # Parse: does the model want to call a tool?
+        action = parse_action(response)
+
+        if action.type == "done":
+            return action.result
+
+        if action.type == "tool_call":
+            # Act: your code calls the tool
+            tool_result = run_tool(action.tool_name, action.args)
+
+            # Observe: append to context
+            messages.append({"role": "assistant", "content": response})
+            messages.append({"role": "tool", "content": tool_result})
+
+    return "max steps reached — agent did not complete"
+```
+
+Notice `for step in range(MAX_STEPS)`. This is a `max_steps` guardrail. Every agent needs one. An unbounded `while True` loop will run (and bill you) forever if the stopping condition is wrong. The Failure Museum exhibit for this module shows exactly what happens.
+
+## The stopping condition
+
+The loop exits when:
+- The model declares it's done (returns a final answer, not a tool call)
+- `max_steps` is reached
+
+The second case is your safety net. The first case is the normal exit. Your job is to make the "I'm done" signal reliable — which means constraining the model's output format so you always know which one you're getting.
+
+<Callout type="tip">
+Before you write a single tool, ask: "How does this agent know it's done?" If you can't answer that clearly, you're not ready to build the loop.
+</Callout>
+
+## What frameworks abstract
+
+LangChain, LangGraph, OpenAI Agents SDK — they all implement this loop. What they add on top:
+- Tool registration and dispatch (so you don't write `run_tool()` by hand)
+- Message history management
+- Retry logic and error handling
+- Streaming output
+
+These are useful. But if you don't understand the loop underneath, you won't understand why a framework behaves unexpectedly — and frameworks always eventually behave unexpectedly.
+
+Build the bare-metal loop first. Then frameworks become tools, not black boxes.
+
+## ReAct: naming the pattern
+
+In 2022, Yao et al. published a paper called *ReAct: Synergizing Reasoning and Acting in Language Models*. It formalised something that practitioners had been doing informally: making the model write explicit reasoning before each action.
+
+The name is a portmanteau — **Re**asoning + **Act**ing. A ReAct trace looks like this:
+
+```
+Thought: I need the current population of Tokyo to answer this.
+Action: search("Tokyo population 2024")
+Observation: Tokyo city proper has approximately 13.96 million people.
+Thought: The user asked about the metro area too. I need one more search.
+Action: search("Greater Tokyo Area population")
+Observation: The Greater Tokyo Area has approximately 37.4 million people.
+Thought: I have both numbers now. I can finish.
+Action: finish("City: ~14M. Metro area: ~37M.")
+```
+
+This maps directly to the loop you already know:
+
+| ReAct label | Loop step |
+|---|---|
+| `Thought:` | reason — but written out explicitly |
+| `Action:` | act |
+| `Observation:` | observe |
+| (repeat) | repeat |
+
+The only difference from a basic loop is that the model's reasoning is **explicit text in the context**, not just an implicit computation. This matters for two reasons:
+
+**Debuggability.** When the agent fails, you can read the `Thought:` traces and see exactly where its reasoning went wrong. With a plain loop, you only see tool calls and results.
+
+**Quality.** Writing the reasoning out before committing to an action tends to produce better decisions. The model "thinks on paper" rather than jumping straight to output — the same reason chain-of-thought prompting works.
+
+<Callout type="key">
+ReAct is not a framework or a library. It is a prompting pattern — a way of structuring the model's output so that reasoning traces appear alongside actions. You can implement it in the bare-metal loop from this lesson with no additional dependencies.
+</Callout>
+
+You will see ReAct referenced constantly in agent papers and framework docs. Now you know it is just the loop with explicit `Thought:` steps.
+
+<Quiz
+  question="In the code above, why does messages.append happen after run_tool, not before? What would break if you swapped the order?"
+  options={[
+    {
+      label: "It wouldn't matter — the model sees the full context at the start of each loop iteration either way.",
+      correct: false,
+      explanation: "The model sees whatever is in messages at the time it is called. If you appended a tool result before the tool ran, messages would contain an empty or nonexistent result — and the model's next reasoning step would be built on nothing."
+    },
+    {
+      label: "tool_result doesn't exist yet, so Python raises a NameError. But the deeper issue is conceptual: observe means recording what actually happened. Appending first means the model reasons about a result that hasn't been produced yet.",
+      correct: true,
+      explanation: "Both are true. The NameError is the immediate crash, but the real lesson is about the loop's semantics: act produces a result, then observe records it. Swapping the order breaks the causal chain the loop depends on."
+    },
+    {
+      label: "The loop uses messages.length to decide whether to keep running, so appending earlier would cause it to exit prematurely.",
+      correct: false,
+      explanation: "The loop is bounded by MAX_STEPS, not by the length of messages. The append order question is about when the model gets to see the tool result — not about loop termination."
+    }
+  ]}
+/>
+
+<Quiz
+  question="What does ReAct add to the basic agent loop?"
+  options={[
+    {
+      label: "A built-in retry mechanism and structured error handling when tool calls fail.",
+      correct: false,
+      explanation: "ReAct doesn't add retry logic — that's a framework concern. ReAct is purely a prompting pattern about how the model structures its output."
+    },
+    {
+      label: "Explicit Thought: traces written to the context before each action, making the agent's reasoning inspectable and improving decision quality.",
+      correct: true,
+      explanation: "That's the whole idea. The loop steps are identical — reason, act, observe, repeat. ReAct just surfaces the reasoning step as visible text in the output rather than leaving it implicit. This makes failures debuggable and tends to improve the quality of decisions."
+    },
+    {
+      label: "A faster execution model that batches multiple tool calls into a single LLM request.",
+      correct: false,
+      explanation: "ReAct doesn't change execution or batching — it changes what the model writes. Each loop iteration still makes one LLM call and one tool call. The difference is that the model writes its reasoning explicitly before acting."
+    }
+  ]}
+/>
+
+[← Lesson 3](/modules/module-00-mental-models/lesson-03) · [Lab: Build it →](/modules/module-00-mental-models/lesson-05-lab)

@@ -1,0 +1,86 @@
+---
+title: "Determinism, Temperature, and 'It Worked Yesterday'"
+module: "module-00-mental-models"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · Determinism, Temperature, and "It Worked Yesterday"
+
+One of the most disorienting things about building with LLMs is that the same input doesn't always produce the same output. This lesson explains why — and what to do about it.
+
+## Temperature and sampling, revisited
+
+From Lesson 1: the model produces a probability distribution and samples from it. Temperature controls the shape of that distribution.
+
+- **Temperature 0**: always pick the highest-probability token. Near-deterministic — same input almost always gives the same output.
+- **Temperature 0.7** (typical default): sample proportionally. Outputs vary run to run.
+- **Temperature 1.0+**: flatten the distribution further, allowing lower-probability tokens. More creative, more surprising, less reliable.
+
+For agent tasks that need structured output — tool calls, JSON, code — use low temperature. The goal is reliability, not creativity.
+
+## Why "temperature 0" isn't truly deterministic
+
+Even at temperature 0, you can get different outputs. Three reasons:
+
+1. **Model version changes.** Providers silently update their models. `gpt-4o` today is not `gpt-4o` three months ago.
+2. **Floating point non-determinism.** GPU parallelism introduces tiny numerical differences that can change which token wins a tie.
+3. **System prompt drift.** If your system prompt is dynamic (includes a timestamp, user info, etc.), the context changes even if your task input doesn't.
+
+<Callout type="warning">
+"It worked in testing" is not a guarantee. Pin your model version. Make your system prompt deterministic. Log inputs and outputs. You'll thank yourself later.
+</Callout>
+
+## What this means for agent reliability
+
+A single non-deterministic step early in an agent run can cascade. If the first tool call parses differently from what you expect, everything downstream is wrong.
+
+The defenses:
+- **Structured outputs** — constrain the model's output format so parsing can't fail (Module 1)
+- **Schema validation** — use Pydantic to validate what the model returned before acting on it
+- **Regression tests** — record known-good runs and test against them (Module 4)
+- **Logging** — capture every input/output so you can reproduce failures (Module 9)
+
+```python
+# Pin the model version — never use an alias that moves
+response = client.chat.completions.create(
+    model="gpt-4o-2024-08-06",  # ✓ pinned version
+    # model="gpt-4o",           # ✗ alias — moves over time
+    temperature=0,
+    messages=messages,
+)
+```
+
+## The practical upshot
+
+When a colleague says "it worked yesterday," the diagnosis checklist is:
+1. Did the model version change?
+2. Did the context change (system prompt, user data)?
+3. Was the previous run actually tested, or just run once?
+
+Non-determinism is a fact of the architecture. Your job is to build systems that are robust to it — not to wish it away.
+
+---
+
+<Quiz
+  question="You set temperature to 0 and your agent works reliably for two weeks. Then it starts failing. You haven't changed your code. What are three things you'd check first?"
+  options={[
+    {
+      label: "Add retry logic to handle transient failures, increase temperature to 0.1 for more stability, and check if your API rate limits changed.",
+      correct: false,
+      explanation: "None of these address the root cause. Retries mask the problem. Raising temperature makes outputs less predictable, not more. Rate limits would cause errors, not wrong outputs. The lesson's checklist is about why a pinned-temperature agent drifts without code changes."
+    },
+    {
+      label: "Check if the provider silently updated the model alias, check if anything in your system prompt is dynamic (timestamps, user data, config that could have changed), and verify the original 'working' runs were actually tested — not just assumed to pass.",
+      correct: true,
+      explanation: "These are exactly the three items from the diagnosis checklist. Temperature 0 gives you near-determinism within a fixed model and context — but model aliases move, dynamic prompts drift, and 'it worked' is often optimistic memory rather than a verified test record."
+    },
+    {
+      label: "Roll back to the previous version of your code, check network latency to the API, and switch to a different model provider.",
+      correct: false,
+      explanation: "You said you haven't changed your code, so rolling it back changes nothing. Latency affects speed, not output correctness. Switching providers doesn't diagnose why the current setup broke — and brings new non-determinism. The failure is almost certainly on the input side: model version or prompt drift."
+    }
+  ]}
+/>
+
+[← Lesson 2](/modules/module-00-mental-models/lesson-02) · [Lesson 4: The agent loop →](/modules/module-00-mental-models/lesson-04)

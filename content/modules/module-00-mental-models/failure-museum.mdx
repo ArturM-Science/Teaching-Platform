@@ -1,0 +1,92 @@
+---
+title: "Failure Museum — Exhibit 0-A: The Infinite Loop"
+module: "module-00-mental-models"
+lesson: 0
+slug: "failure-museum"
+---
+
+# Failure Museum · Exhibit 0-A
+
+<FailureMuseum
+  exhibit="Exhibit 0-A: The Infinite Loop"
+  symptom="Agent runs without error output but never finishes. Token spend grows unbounded."
+>
+
+#### The broken agent
+
+Your task: find the bug before reading the diagnosis.
+
+```python
+def should_stop(response: dict) -> bool:
+    return response["done"]  # something's wrong here
+
+step = 0
+while True:
+    step += 1
+    response = call_llm(messages)
+    action = parse_action(response)
+    if action.tool:
+        result = run_tool(action.tool, action.args)
+        messages.append({"role": "tool", "content": result})
+    if should_stop(response):
+        break
+```
+
+The LLM returns: `{"finished": True, "content": "The answer is 42."}`
+
+#### Diagnosis path
+
+1. Add `print(f"Step {step}: keys={list(response.keys())}")` at the top of the loop
+2. Run the agent — observe the step counter climbing past 20 with no break
+3. Look at the printed keys: `["finished", "content"]` — `done` never appears
+4. Find the mismatch: `should_stop` checks `response["done"]`, but the model returns `"finished"`
+5. `response["done"]` raises `KeyError`, which is silently swallowed upstream, so `should_stop` always returns `False`
+
+#### Root cause
+
+The stopping condition assumed a specific response schema without validating it. The LLM's output format was never pinned — it either changed between calls due to non-determinism, or was never what the developer assumed.
+
+#### Two fixes
+
+**Option A — defensive key access (quick fix):**
+
+```python
+def should_stop(response: dict) -> bool:
+    return response.get("done") or response.get("finished", False)
+```
+
+**Option B — structured output (preview of Module 1):**
+
+```python
+from pydantic import BaseModel
+
+class AgentResponse(BaseModel):
+    finished: bool
+    content: str
+
+# Validate before inspecting — fail loudly on schema mismatch
+parsed = AgentResponse.model_validate(response)
+if parsed.finished:
+    break
+```
+
+Option B is better. It fails loudly if the schema is wrong, instead of silently looping. You'll build this pattern in Module 1.
+
+#### What this teaches
+
+Stopping conditions are load-bearing. Non-determinism in LLM outputs means you cannot assume a key exists just because it appeared in your tests.
+
+**And always add a `max_steps` guardrail.** An agent that can loop forever should not be deployed.
+
+```python
+MAX_STEPS = 20  # never omit this
+
+for step in range(MAX_STEPS):
+    ...
+```
+
+</FailureMuseum>
+
+---
+
+[← Back to lab](/modules/module-00-mental-models/lesson-05-lab) · [Module overview →](/modules/module-00-mental-models)

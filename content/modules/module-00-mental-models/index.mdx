@@ -1,0 +1,37 @@
+---
+title: "Mental Models & the Bare-Metal Agent"
+module: "module-00-mental-models"
+part: 1
+slug: "module-00-mental-models"
+---
+
+# Module 0 · Mental Models & the Bare-Metal Agent
+
+**Part 1 — Foundations** · 5 lessons · ~4 hours total
+
+<LearningObjectives>
+- Explain how LLMs generate text — tokens, context windows, temperature, and sampling
+- Describe why LLMs hallucinate and under what conditions it gets worse
+- Articulate the core agent loop: perceive → reason → act → observe → repeat
+- Build a working agent in ~50 lines of plain Python with no framework
+</LearningObjectives>
+
+## What you'll build
+
+A working agent in ~50 lines of Python that takes a user goal, makes an LLM call, parses a tool call from the response, executes the tool, and loops until done or stuck. No LangChain. No framework. Pure API calls and Python.
+
+This is the foundation everything else builds on. If you understand every line of this agent, every framework you encounter later will make sense — because you'll see what it's abstracting.
+
+## Lessons
+
+| | Lesson | Time |
+|--|--------|------|
+| 1 | [How LLMs actually work](/modules/module-00-mental-models/lesson-01) | ~30 min |
+| 2 | [Context windows, tokens, and cost](/modules/module-00-mental-models/lesson-02) | ~30 min |
+| 3 | [Determinism, temperature, and "it worked yesterday"](/modules/module-00-mental-models/lesson-03) | ~30 min |
+| 4 | [The agent loop](/modules/module-00-mental-models/lesson-04) | ~45 min |
+| 5 | [Lab: Build the bare-metal agent](/modules/module-00-mental-models/lesson-05-lab) | ~2–3 hrs |
+
+---
+
+[Start Lesson 1 →](/modules/module-00-mental-models/lesson-01)

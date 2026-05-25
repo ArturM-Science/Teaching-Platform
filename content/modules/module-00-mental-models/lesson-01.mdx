@@ -1,0 +1,134 @@
+---
+title: "How LLMs Actually Work"
+module: "module-00-mental-models"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · How LLMs Actually Work
+
+You don't need to understand how a language model is trained to build agents with one. But you do need to understand what it's doing at inference time — because that shapes every design decision you'll make.
+
+<Video src="https://www.youtube.com/watch?v=F28_DkMWgeI" title="How LLMs Learn" />
+
+## Text is tokens, not characters
+
+When you send a message to an LLM, the first thing that happens is tokenization. The text is split into tokens — roughly word-sized chunks, though not exactly. "agent" might be one token. "tokenization" might be two. Spaces and punctuation are often their own tokens.
+
+This matters because the model never sees your text as characters. It sees a sequence of integers. Each token maps to a number, and those numbers flow through the model.
+
+<Callout type="key">
+The model's input and output are both sequences of tokens. When you "send a message," you're really sending a list of integers. When it "responds," it's producing integers one at a time.
+</Callout>
+
+## The prediction loop
+
+Here's what the model does on every call: given all the tokens so far — your system prompt, your message, and any prior conversation — it produces a probability distribution over the entire vocabulary of possible next tokens.
+
+Then it samples from that distribution to pick one token. Appends it. Repeats. This is called autoregressive generation.
+
+That's it. The model is a function: `tokens in → probability distribution over next token → pick one → repeat`.
+
+```
+tokens_so_far = [system_prompt] + [user_message]
+
+while not done:
+    probs = model(tokens_so_far)   # distribution over all vocab tokens
+    next_token = sample(probs)     # pick one
+    tokens_so_far.append(next_token)
+    if next_token == END_TOKEN:
+        break
+```
+
+This is a simplified view, but it's accurate enough to reason about agent behavior.
+
+## Why hallucination is structural, not a bug
+
+The model doesn't have a fact database. It doesn't look things up. It predicts the most plausible continuation of the token sequence it's been given.
+
+When it says something false, it's not "lying" — it's completing the pattern. The pattern of a question followed by a confident answer is extremely common in training data. So the model produces confident answers even when the pattern it's completing is wrong.
+
+<Callout type="warning">
+Hallucination is not a bug that will be patched away. It is a consequence of the architecture. Your job as an agent engineer is to design systems where a confident-but-wrong model output is caught before it causes harm.
+</Callout>
+
+The antidote is validation: structured outputs, tool results that can be verified, human-in-the-loop checkpoints. You'll build all of these. But understanding *why* hallucination happens is the prerequisite for designing those defenses correctly.
+
+## What sampling controls
+
+Temperature controls how the sampling step works. At temperature 0, you always pick the highest-probability token — the model behaves near-deterministically. At temperature 1, you sample proportionally from the distribution — the model is more creative, more varied, and more likely to produce unexpected outputs.
+
+Higher temperature isn't "smarter" or "dumber." It's more or less explorative. For tasks that need reliable structure (function calls, JSON output, code), low temperature. For brainstorming or creative writing, higher.
+
+## See it in practice
+
+The concepts above — tokenization, embeddings, and semantic similarity — are easier to internalise when you can see the actual numbers. This notebook loads a real BERT model and lets you watch every step happen.
+
+<Callout type="tip">
+Open the notebook in Google Colab and run each cell in order. You don't need to understand the full model — focus on what the outputs look like at each stage.
+
+**[Open notebook →](https://colab.research.google.com/drive/15eXa7hVvbSpMqssfD8RExJYsCv6PopxD)**
+</Callout>
+
+### What the notebook shows
+
+**Step 1 — Tokenization.** You can watch how the tokenizer splits real text into subword units. "unhappiness" becomes `['un', '##happiness']`. "don't stop believing" becomes `["don", "'", "t", "stop", "believing"]`. The IDs are the actual integers the model receives.
+
+```python
+tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+
+text = "LLMs are amazing"
+tokens = tokenizer.tokenize(text)
+token_ids = tokenizer.encode(text, add_special_tokens=True)
+
+# tokens   → ['ll', '##ms', 'are', 'amazing']
+# token_ids → [101, 11783, 2015, 2024, 6429, 102]
+```
+
+**Step 2 — Embeddings.** Each token is converted to a 768-dimensional vector — a list of 768 floating-point numbers. That vector is the model's internal representation of the word in context. You can't read it directly, but you can measure the distance between two vectors.
+
+```python
+inputs = tokenizer("cat", return_tensors='pt')
+outputs = model(**inputs)
+
+# outputs.last_hidden_state shape: [1, seq_len, 768]
+embedding = outputs.last_hidden_state[0, 0, :].numpy()
+# → array([-0.18,  0.43, -0.07, ..., 0.21])  # 768 numbers
+```
+
+**Step 3 — Cosine similarity.** Two embeddings that point in the same direction in 768-dimensional space represent semantically similar words. The notebook computes this for a set of words and draws the result as a heatmap.
+
+```python
+from sklearn.metrics.pairwise import cosine_similarity
+
+# cat vs kitten:  ~0.89  (very similar)
+# cat vs truck:   ~0.61  (low similarity)
+# happy vs joyful: ~0.91 (near-synonyms)
+```
+
+**Step 4 — PCA visualisation.** 768 dimensions can't be plotted directly. The notebook uses PCA to compress the vectors to 2D and 3D, showing how similar words cluster together in space. Animals cluster near each other. Vehicles cluster separately. Emotions form their own group.
+
+This is why LLMs can do semantic search, analogies, and intent classification — the geometry of the vector space encodes meaning.
+
+<Quiz
+  question="If a model generates a wrong answer at temperature 0, would increasing temperature to 1.0 fix it?"
+  options={[
+    {
+      label: "Yes — higher temperature makes the model explore more, so it's more likely to land on the correct answer.",
+      correct: false,
+      explanation: "Temperature doesn't add new knowledge. It only changes how randomly you sample from the probability distribution the model already has."
+    },
+    {
+      label: "No — temperature only affects the sampling step. If the wrong token is already highly probable, raising temperature just adds noise to an already-wrong distribution.",
+      correct: true,
+      explanation: "Exactly. Hallucination is structural — the model predicts the most plausible continuation of the token sequence regardless of truth. Temperature can't fix a wrong probability distribution, it just changes how you sample from it."
+    },
+    {
+      label: "It depends — if the correct answer was just barely below the top token, temperature might surface it.",
+      correct: false,
+      explanation: "While technically possible in a narrow case, this isn't reliable. Temperature doesn't steer the model toward correct answers — it just broadens sampling unpredictably."
+    }
+  ]}
+/>
+
+[← Module overview](/modules/module-00-mental-models) · [Lesson 2: Context windows →](/modules/module-00-mental-models/lesson-02)
