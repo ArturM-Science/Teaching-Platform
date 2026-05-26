@@ -85,15 +85,27 @@ export function TemperatureExplorer() {
             </span>
           </div>
 
-          {/* Gradient track */}
-          <div className="relative">
-            <div className="h-2 rounded-full bg-gradient-to-r from-blue-400 via-green-400 via-amber-400 to-red-500 mb-1" />
+          {/* Gradient track + draggable thumb */}
+          <div className="relative h-6 flex items-center">
+            <div className="absolute w-full h-2 rounded-full bg-gradient-to-r from-blue-400 via-green-400 via-amber-400 to-red-500 pointer-events-none" />
             <input
               type="range"
               min={0} max={2} step={0.1}
               value={temperature}
               onChange={e => setTemperature(parseFloat(e.target.value))}
-              className="absolute inset-0 w-full opacity-0 cursor-pointer h-2"
+              className="relative w-full cursor-grab active:cursor-grabbing appearance-none bg-transparent
+                [&::-webkit-slider-thumb]:appearance-none
+                [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5
+                [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-white
+                [&::-webkit-slider-thumb]:shadow-md
+                [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-zinc-300
+                [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-5
+                [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white
+                [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:border-2
+                [&::-moz-range-thumb]:border-zinc-300 [&::-moz-range-thumb]:border-solid
+                [&::-webkit-slider-runnable-track]:bg-transparent
+                [&::-moz-range-track]:bg-transparent"
             />
           </div>
 
