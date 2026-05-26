@@ -6,6 +6,7 @@ import { Checkpoint } from './Checkpoint'
 import { Quiz } from './Quiz'
 import { Video } from './Video'
 import { Rubric } from './Rubric'
+import { SlideViewer } from './SlideViewer'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -18,4 +19,5 @@ export const mdxComponents = {
   Quiz,
   Video,
   Rubric,
+  SlideViewer,
 }

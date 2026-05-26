@@ -28,7 +28,7 @@ export default function SlidesPage() {
     const res = await fetch('/api/admin/save-lesson', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mdx: result.mdx, moduleSlug, lessonSlug }),
+      body: JSON.stringify({ mdx: result.mdx, moduleSlug, lessonSlug, slides: result.slides }),
     })
     const data = await res.json()
     setSaving(false)

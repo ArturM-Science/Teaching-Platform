@@ -13,15 +13,17 @@ const SYSTEM_PROMPT = `You are converting PowerPoint slide content into a struct
 - <Rubric threshold="..." criteria={[{name, exceeds, meets, approaching, below}]} /> — 4-level grading table
 - <Quiz question="..." options={[{label, correct?, explanation?}]} /> — MCQ with instant feedback. Exactly one option must have correct: true.
 - <FailureMuseum exhibit="..." symptom="..."> — collapsible failure case study
+- <SlideViewer moduleSlug="..." lessonSlug="..." /> — inline slide carousel. Always include this once, right after the intro, using the module and lesson slugs provided.
 
 ## Required lesson structure
 
 1. Frontmatter (title, module, lesson number, slug)
 2. Plain-language intro — 2-3 sentences, no jargon, acronyms defined on first use
-3. Core concept sections (## headings) — prose with Callout and Quiz woven inline, not appended at the end
-4. At least one Callout per section
-5. At least one Quiz per concept section
-6. FailureMuseum if slide content includes a failure case or gotcha
+3. <SlideViewer> immediately after the intro (use the moduleSlug and lessonSlug from the request)
+4. Core concept sections (## headings) — prose with Callout and Quiz woven inline, not appended at the end
+5. At least one Callout per section
+6. At least one Quiz per concept section
+7. FailureMuseum if slide content includes a failure case or gotcha
 
 ## Constraints
 
