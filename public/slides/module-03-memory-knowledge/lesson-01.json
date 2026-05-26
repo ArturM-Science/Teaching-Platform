@@ -1,0 +1,9 @@
+[
+  {"index":1,"text":"Understanding Alzheimer's Disease: A Journey into the Mind's Maze\nArtur Moura\nCapstone sprint 1","notes":""},
+  {"index":2,"text":"Alzheimer disease is a progressive, irreversible brain disorder\n1 in 3 seniors dies with Alzheimer's or another dementia. It kills more than breast cancer and prostate cancer combined.","notes":""},
+  {"index":3,"text":"Early detection with machine learning could lead to better management and improved patient outcomes\nOnly 1 in 4 people with dementia receive a diagnosis. Lack of diagnosis prevents access to treatment and care\nReduce healthcare costs through earlier identification rather than later treatment","notes":""},
+  {"index":4,"text":"If Alzheimer was a country\nIt would be the 18th largest economy in the world\nAt $1 trillion per year, dementia costs rival major economies like Canada and Indonesia","notes":""},
+  {"index":5,"text":"Data Introduction\nMRI scans of Alzheimer's and healthy patients\nImages cover cross-sections of the brain and show structural differences\nNon demented\nVery early demented\nModerately demented\nMild demented","notes":""},
+  {"index":6,"text":"NEXT STEPS\nPreprocess images - rescale, make consistent sizes, normalize pixel values\nExtract image features through convolutional layers of deep learning model\nTrain and validate model on dataset with evaluation metrics","notes":""},
+  {"index":7,"text":"The dataset used for this project was from the OASIS dataset created by Dr. Randy Buckner at the Howard Hughes Medical Institute (HHMI) at Harvard University in collaboration with the Washington University Alzheimer's Disease Research Center.\nhttps://www.oasis-brains.org/#dataAccess","notes":""}
+]
