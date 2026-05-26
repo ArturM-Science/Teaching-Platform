@@ -28,6 +28,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
               >
                 Slides → MDX
               </Link>
+              <Link
+                href="/admin/manage"
+                className="rounded-md px-3 py-1.5 text-sm text-zinc-400 transition hover:bg-zinc-800 hover:text-zinc-100"
+              >
+                Manage
+              </Link>
             </nav>
           </div>
           <form action={logOut}>
