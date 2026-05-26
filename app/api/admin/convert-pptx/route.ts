@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@/lib/supabase/server'
 import { parsePptx, slidesToPrompt } from '@/lib/pptx'
-
-const anthropic = new Anthropic()
 
 const SYSTEM_PROMPT = `You are converting PowerPoint slide content into a structured MDX lesson for an AI Agents teaching platform built with Next.js and next-mdx-remote.
 
@@ -74,31 +71,38 @@ export async function POST(req: NextRequest) {
 
   const slideText = slidesToPrompt(slides)
 
-  // Call Claude
-  const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8192,
-    system: [
-      {
-        type: 'text',
-        text: SYSTEM_PROMPT,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [
-      {
-        role: 'user',
-        content: `Convert the following slide content into an MDX lesson.
+  // Call DeepSeek
+  const response = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat',
+      max_tokens: 8192,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `Convert the following slide content into an MDX lesson.
 
 Module slug: ${moduleSlug}
 Lesson number: ${lessonNumber}
 
 ${slideText}`,
-      },
-    ],
+        },
+      ],
+    }),
   })
 
-  const mdx = message.content[0].type === 'text' ? message.content[0].text : ''
+  if (!response.ok) {
+    const err = await response.text()
+    return NextResponse.json({ error: `DeepSeek API error: ${err}` }, { status: 502 })
+  }
+
+  const json = await response.json()
+  const mdx: string = json.choices?.[0]?.message?.content ?? ''
 
   return NextResponse.json({
     slides: slides.map(s => ({ index: s.index, text: s.text, notes: s.notes })),
