@@ -87,7 +87,7 @@ export function TemperatureExplorer() {
 
           {/* Gradient track + draggable thumb */}
           <div className="relative h-6 flex items-center">
-            <div className="absolute w-full h-2 rounded-full bg-gradient-to-r from-blue-400 via-green-400 via-amber-400 to-red-500 pointer-events-none" />
+            <div className="absolute w-full h-2 rounded-full bg-zinc-900 pointer-events-none" />
             <input
               type="range"
               min={0} max={2} step={0.01}
