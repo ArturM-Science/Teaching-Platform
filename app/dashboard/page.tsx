@@ -1,13 +1,24 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { access } from 'fs/promises'
+import { join } from 'path'
 import { logOut } from '@/app/auth/actions'
 import { createClient } from '@/lib/supabase/server'
+
+async function hasContent(slug: string) {
+  try {
+    await access(join(process.cwd(), 'content', 'modules', slug, 'index.mdx'))
+    return true
+  } catch {
+    return false
+  }
+}
 
 const modules = [
   { number: '00', slug: 'module-00-mental-models',                  title: 'Mental Models & the Bare-Metal Agent',    part: 'Part 1 — Foundations',                  status: 'ready' },
   { number: '01', slug: 'module-01-prompting-reasoning',            title: 'Prompting & Reasoning',                   part: 'Part 1 — Foundations',                  status: 'coming' },
   { number: '02', slug: 'module-02-tools-function-calling',         title: 'Tools & Function Calling',                part: 'Part 2 — A Single Capable Agent',       status: 'locked' },
-  { number: '03', slug: 'module-03-memory-knowledge',               title: 'Memory & Knowledge',                      part: 'Part 2 — A Single Capable Agent',       status: 'locked' },
+  { number: '03', slug: 'module-03-memory-knowledge',               title: 'Memory & Knowledge',                      part: 'Part 2 — A Single Capable Agent',       status: 'ready' },
   { number: '04', slug: 'module-04-evaluation',                     title: 'Evaluation',                              part: 'Part 2 — A Single Capable Agent',       status: 'locked' },
   { number: '05', slug: 'module-05-workflow-patterns',              title: 'Workflow Patterns & Control Flow',        part: 'Part 3 — Orchestration & Multi-Agent',  status: 'locked' },
   { number: '06', slug: 'module-06-multi-agent-systems',            title: 'Multi-Agent Systems',                     part: 'Part 3 — Orchestration & Multi-Agent',  status: 'locked' },
@@ -32,6 +43,16 @@ export default async function DashboardPage() {
   const { data: { user } } = await supabase.auth.getUser()
 
   if (!user) redirect('/login')
+
+  // Override status to locked if the module has no index.mdx on disk
+  const modulesWithStatus = await Promise.all(
+    modules.map(async m => ({
+      ...m,
+      status: (m.status === 'ready' || m.status === 'coming') && !(await hasContent(m.slug))
+        ? 'locked'
+        : m.status,
+    }))
+  )
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-900">
@@ -68,7 +89,7 @@ export default async function DashboardPage() {
                   <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">{part}</p>
                 </div>
                 <div className="divide-y divide-zinc-100">
-                  {modules.filter(m => m.part === part).map(m => {
+                  {modulesWithStatus.filter(m => m.part === part).map(m => {
                     const isClickable = m.status === 'ready' || m.status === 'coming'
                     const row = (
                       <div className={`flex items-center justify-between gap-4 px-5 py-4 ${isClickable ? 'hover:bg-zinc-50 transition-colors' : 'opacity-50'}`}>
