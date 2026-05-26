@@ -7,6 +7,7 @@ import { Quiz } from './Quiz'
 import { Video } from './Video'
 import { Rubric } from './Rubric'
 import { SlideViewer } from './SlideViewer'
+import { TemperatureExplorer } from './TemperatureExplorer'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -20,4 +21,5 @@ export const mdxComponents = {
   Video,
   Rubric,
   SlideViewer,
+  TemperatureExplorer,
 }
