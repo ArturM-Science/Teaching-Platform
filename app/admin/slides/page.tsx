@@ -15,7 +15,26 @@ export default function SlidesPage() {
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ConvertResult | null>(null)
   const [copied, setCopied] = useState(false)
+  const [saved, setSaved] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const lessonSlug = `lesson-${String(lessonNumber).padStart(2, '0')}`
+
+  async function handleSave() {
+    if (!result) return
+    setSaving(true)
+    setSaved(null)
+    const res = await fetch('/api/admin/save-lesson', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mdx: result.mdx, moduleSlug, lessonSlug }),
+    })
+    const data = await res.json()
+    setSaving(false)
+    if (res.ok) setSaved(data.path)
+    else setError(data.error ?? 'Save failed')
+  }
 
   async function handleConvert() {
     if (!file) return
@@ -51,7 +70,7 @@ export default function SlidesPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Slides → MDX</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Upload a .pptx file. Claude will extract the slide text and generate a structured MDX lesson.
+          Upload a .pptx file. DeepSeek will extract the slide text and generate a structured MDX lesson.
         </p>
       </div>
 
@@ -154,7 +173,7 @@ export default function SlidesPage() {
               </h2>
               <div className="flex items-center gap-3">
                 <p className="text-xs text-zinc-600">
-                  Save to: <code className="text-zinc-400">content/modules/{moduleSlug}/lesson-{String(lessonNumber).padStart(2, '0')}.mdx</code>
+                  <code className="text-zinc-400">content/modules/{moduleSlug}/{lessonSlug}.mdx</code>
                 </p>
                 <button
                   onClick={handleCopy}
@@ -162,8 +181,20 @@ export default function SlidesPage() {
                 >
                   {copied ? 'Copied!' : 'Copy'}
                 </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving || !!saved}
+                  className="rounded-md bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-900 transition hover:bg-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save to disk'}
+                </button>
               </div>
             </div>
+            {saved && (
+              <p className="mb-4 rounded-lg bg-green-950 border border-green-800 px-4 py-3 text-sm text-green-300">
+                Saved to <code className="font-mono">{saved}</code>
+              </p>
+            )}
             <pre className="overflow-x-auto rounded-lg bg-zinc-950 p-4 text-xs text-zinc-300 leading-relaxed max-h-[600px] overflow-y-auto">
               <code>{result.mdx}</code>
             </pre>
