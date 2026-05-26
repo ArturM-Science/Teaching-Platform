@@ -33,7 +33,7 @@ export function TemperatureExplorer() {
     const res = await fetch('/api/temperature-demo', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, temperature }),
+      body: JSON.stringify({ prompt, temperature: Math.round(temperature * 10) / 10 }),
     })
     const data = await res.json()
     setLoading(false)
@@ -90,7 +90,7 @@ export function TemperatureExplorer() {
             <div className="absolute w-full h-2 rounded-full bg-gradient-to-r from-blue-400 via-green-400 via-amber-400 to-red-500 pointer-events-none" />
             <input
               type="range"
-              min={0} max={2} step={0.1}
+              min={0} max={2} step={0.01}
               value={temperature}
               onChange={e => setTemperature(parseFloat(e.target.value))}
               className="relative w-full cursor-grab active:cursor-grabbing appearance-none bg-transparent
