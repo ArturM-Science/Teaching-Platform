@@ -1,4 +1,5 @@
 import { MDXRemote } from 'next-mdx-remote/rsc'
+import remarkGfm from 'remark-gfm'
 import { getMdxContent } from '@/lib/content'
 import { mdxComponents } from '@/components/mdx'
 
@@ -15,7 +16,7 @@ export default async function LessonPage({
       <MDXRemote
         source={raw}
         components={mdxComponents}
-        options={{ parseFrontmatter: true, blockJS: false }}
+        options={{ parseFrontmatter: true, blockJS: false, mdxOptions: { remarkPlugins: [remarkGfm] } }}
       />
     </article>
   )
