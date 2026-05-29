@@ -1,0 +1,193 @@
+---
+title: "Regression Testing for Non-Deterministic Systems"
+module: "module-04-evaluation"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · Regression Testing for Non-Deterministic Systems
+
+A regression test for a function is simple: fix the bug, write a test that would have caught it, run the test before every merge. Agents make this harder because the same input doesn't always produce the same output. This lesson covers how to write regression tests that work despite non-determinism, and how to integrate them into CI.
+
+## The non-determinism problem
+
+A standard regression test looks like this:
+
+```python
+def test_no_tool_loop():
+    trajectory = run_agent("compare Python and JavaScript for web development")
+    calls = [tc.tool for tc in trajectory.tool_calls]
+    # Bug: agent was calling web_search twice with identical queries
+    assert calls.count("web_search") <= 2
+```
+
+This test is checking a trajectory property, not an exact string — that already handles some non-determinism. But what if the number of tool calls varies between 1 and 3 depending on the run? With temperature > 0, this test might pass on some runs and fail on others.
+
+There are three approaches to handling this:
+
+**Temperature-0 testing** — set `temperature=0` for eval runs. This maximises determinism at the cost of not testing your actual production configuration.
+
+```python
+def run_agent_deterministic(query: str) -> Trajectory:
+    return run_agent(query, temperature=0, seed=42)
+
+def test_no_tool_loop():
+    traj = run_agent_deterministic("compare Python and JavaScript")
+    assert len([tc for tc in traj.tool_calls if tc.tool == "web_search"]) <= 2
+```
+
+**Statistical thresholds** — run the agent N times and require the criterion to pass on at least K% of runs.
+
+```python
+def statistical_pass(test_fn: Callable, n_runs: int = 10, threshold: float = 0.8) -> bool:
+    passes = sum(1 for _ in range(n_runs) if test_fn())
+    return passes / n_runs >= threshold
+
+def test_no_tool_loop_statistical():
+    assert statistical_pass(
+        lambda: len(run_agent("compare Python and JavaScript").tool_calls) <= 3,
+        n_runs=10,
+        threshold=0.9,  # must pass 9/10 runs
+    )
+```
+
+**Criteria-based assertions** — test invariants that should hold regardless of the specific output. These are more robust than exact counts.
+
+```python
+def test_research_agent_invariants():
+    traj = run_agent("what is the capital of France?")
+
+    # Invariant: always uses web_search (regardless of how many times)
+    assert any(tc.tool == "web_search" for tc in traj.tool_calls)
+
+    # Invariant: never makes more than 5 tool calls for a simple factual query
+    assert len(traj.tool_calls) <= 5
+
+    # Invariant: final output contains the answer
+    assert "paris" in traj.final_output.lower()
+
+    # Invariant: no identical consecutive tool calls (the loop bug)
+    for i in range(len(traj.tool_calls) - 1):
+        assert not (
+            traj.tool_calls[i].tool == traj.tool_calls[i+1].tool
+            and traj.tool_calls[i].args == traj.tool_calls[i+1].args
+        )
+```
+
+## The regression runner
+
+<RegressionRunnerViz />
+
+The runner above simulates what a CI regression suite looks like in practice. Notice: when the bug is introduced, the happy-path tests still pass. Only the regression cases catch it. This is the point — regression cases exist specifically to catch failures that happy-path tests miss.
+
+## Integrating with CI
+
+A regression suite that doesn't run automatically is documentation, not engineering. The minimum CI integration:
+
+```yaml
+# .github/workflows/eval.yml
+name: Eval regression suite
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests/eval/ -v --tb=short
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+One practical constraint: LLM calls in CI are slow and cost money. Two strategies keep this manageable:
+
+**Tiered suites.** Fast deterministic tests (exact match, rubric with no LLM calls) run on every PR. Statistical tests and LLM-as-judge run nightly or on merge to main.
+
+```python
+# pytest marks to separate tiers
+@pytest.mark.fast     # runs on every PR — no LLM calls, temperature=0
+def test_tool_routing():
+    traj = run_agent_deterministic("find Anthropic's founding year")
+    assert any(tc.tool == "web_search" for tc in traj.tool_calls)
+
+@pytest.mark.slow     # runs nightly — uses real LLM, multiple runs
+def test_answer_quality():
+    assert statistical_pass(
+        lambda: llm_judge("find Anthropic's founding year",
+                          run_agent("find Anthropic's founding year").final_output)["accuracy"]["score"] >= 3,
+        n_runs=5, threshold=0.8
+    )
+```
+
+**Snapshot testing for known-good outputs.** For cases where the output is stable, capture the output and test against the snapshot. Fail when the snapshot changes — that's a signal to review, not necessarily a failure.
+
+```python
+def test_snapshot_research_summary(snapshot):
+    result = run_agent_deterministic("summarise the transformer architecture")
+    # First run: creates the snapshot
+    # Subsequent runs: fails if output changed — forces explicit review
+    assert result == snapshot
+```
+
+<Callout type="tip">
+Every bug that reaches review should generate a regression case before the fix is merged. Make this a team norm: "No bug fix without a regression case" is the highest-leverage practice in this entire module.
+</Callout>
+
+## Writing a regression case from a real failure
+
+The workflow is always the same:
+
+1. Reproduce the failure in a test
+2. Verify the test fails on the unfixed code
+3. Fix the bug
+4. Verify the test passes on the fixed code
+5. Merge both the fix and the test
+
+```python
+# Step 1: write the test before fixing
+def test_regression_ambiguous_query_loop():
+    """
+    Bug (2026-05-15): queries containing 'compare' triggered identical
+    web_search calls, running until max_iterations. Fixed in PR #47.
+    """
+    traj = run_agent_deterministic("compare RAG and fine-tuning for domain adaptation")
+    tool_args = [(tc.tool, str(tc.args)) for tc in traj.tool_calls]
+    # No two consecutive tool calls should be identical
+    for i in range(len(tool_args) - 1):
+        assert tool_args[i] != tool_args[i+1], \
+            f"Duplicate consecutive call: {tool_args[i]}"
+
+# Step 2: run this test — it should FAIL on the unfixed code
+# Step 3: fix the bug
+# Step 4: run this test — it should PASS
+# Step 5: merge fix + test together
+```
+
+<Quiz
+  question="Your regression test uses `temperature=0` and passes consistently in CI. A colleague says 'but our production agent runs at temperature=0.7 — this test doesn't reflect reality.' How do you respond?"
+  options={[
+    {
+      label: "They're right — we should remove temperature=0 and accept flaky tests.",
+      correct: false,
+      explanation: "Accepting flaky tests is worse than testing at temperature=0. A test that fails 20% of the time for random reasons provides no signal — you can't tell when it's failing because of a real regression versus noise."
+    },
+    {
+      label: "Temperature-0 tests check deterministic invariants; statistical tests at production temperature check distributional properties. Both are needed for different things.",
+      correct: true,
+      explanation: "Correct framing. Temperature-0 tests are precise, cheap, and reliable for invariant checking (tool call counts, no duplicate calls, output format). Statistical tests at production temperature catch distributional regressions that only manifest at higher temperatures. Run both — in different CI tiers."
+    },
+    {
+      label: "Switch all tests to temperature=0.7 and use statistical thresholds.",
+      correct: false,
+      explanation: "Statistical tests at production temperature are valuable, but they're slower and more expensive. For invariant tests (does the agent call the right tool at least once?), temperature=0 is strictly better — it's faster, cheaper, and deterministic. Don't replace deterministic tests with statistical ones where deterministic is sufficient."
+    }
+  ]}
+/>
+
+[← Lesson 4](/modules/module-04-evaluation/lesson-04) · [Lab →](/modules/module-04-evaluation/lesson-06-lab)

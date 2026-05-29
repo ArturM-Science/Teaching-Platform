@@ -1,0 +1,230 @@
+---
+title: "CLAUDE.md, Rules, Auto Memory, Skills, MCP, and Hooks"
+module: "module-14-claude-code"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 - CLAUDE.md, Rules, Auto Memory, Skills, MCP, and Hooks
+
+Claude Code has several ways to carry knowledge across turns and sessions. Use the smallest mechanism that fits the job. A project rule, a skill, an MCP server, and a hook all solve different problems.
+
+## The extension map
+
+| Mechanism | Best for | Loaded when |
+|---|---|---|
+| `CLAUDE.md` | Durable project instructions everyone should follow | At session start |
+| `.claude/rules/` | Modular or path-scoped project rules | At start or when matching files are opened |
+| Auto memory | Lessons Claude learns from your corrections | At session start, with limits |
+| Skills | Repeatable workflows with progressive disclosure | When invoked or judged relevant |
+| MCP | External tools and data sources | When connected and used |
+| Hooks | Deterministic automation at lifecycle events | At the configured event |
+
+<Callout type="key">
+Instructions influence the model. Hooks and permission rules enforce behavior. If something must always happen, do not rely only on a sentence in `CLAUDE.md`.
+</Callout>
+
+## CLAUDE.md
+
+`CLAUDE.md` is the project memory file Claude Code reads at the start of sessions. Put things there that you would otherwise repeat every time.
+
+Good entries are specific:
+
+```md
+# CLAUDE.md
+
+## Build and verify
+
+- Run `npm run build` after touching MDX rendering or route code.
+- Run `npm run lint` after touching `.tsx` files.
+
+## MDX
+
+- Do not put `'use client'` in MDX files.
+- Use only components exported from `components/mdx/index.ts`.
+- If changing `MDXRemote`, preserve `blockJS: false`.
+
+## Scope
+
+- Do not edit Supabase policies unless the task explicitly asks for auth or data access changes.
+```
+
+Weak entries are vibes:
+
+```md
+- Write clean code.
+- Be careful with security.
+- Make it production ready.
+```
+
+`CLAUDE.md` is context, not policy enforcement. If Claude ignores a rule, make the rule more concrete or move enforcement into permissions or hooks.
+
+## Sharing AGENTS.md with Claude Code
+
+Claude Code reads `CLAUDE.md`, not `AGENTS.md`. If a repo already uses `AGENTS.md`, create a small `CLAUDE.md` that imports it:
+
+```md
+@AGENTS.md
+
+## Claude Code
+
+- Use plan mode before changes under `app/auth/`.
+- Ask before adding dependencies.
+```
+
+This avoids duplicating agent instructions across tools. On Windows, prefer the import form over a symlink unless Developer Mode or admin privileges are already configured.
+
+## Rules and path scoping
+
+Large repos should not put every rule in one huge file. Use `.claude/rules/` for modular rules:
+
+```text
+.claude/
+  CLAUDE.md
+  rules/
+    testing.md
+    security.md
+    frontend.md
+```
+
+Path-scoped rules load only when Claude works with matching files:
+
+```md
+---
+paths:
+  - "app/api/**/*.ts"
+  - "lib/server/**/*.ts"
+---
+
+# API Rules
+
+- Validate all inputs at the route boundary.
+- Return structured error objects.
+- Do not log secrets or access tokens.
+```
+
+This keeps the context window lean. Use path scoping when a rule is important but not universal.
+
+## Auto memory
+
+Auto memory lets Claude save learnings for future sessions. Examples:
+
+- the real test command for a repo
+- a debugging pattern it discovered
+- your preference for a package manager
+- where a confusing subsystem lives
+
+Auto memory is useful, but it should be auditable. Use `/memory` to see what Claude loaded and what it saved. If a memory becomes an official team rule, move it into `CLAUDE.md` or `.claude/rules/`.
+
+## Skills
+
+Skills are repeatable workflows. They are better than `CLAUDE.md` when the instruction is a procedure, not a global rule.
+
+Examples:
+
+| Skill | Why it belongs in a skill |
+|---|---|
+| `pr-review` | Multi-step review workflow with output format |
+| `release-notes` | Template-driven changelog generation |
+| `migration-planner` | Repeatable discovery, risk mapping, and rollout plan |
+| `incident-summary` | Parse logs, group causes, draft report |
+
+Skills use progressive disclosure: Claude can see enough metadata to know a skill exists, but the full content loads only when needed. That is better for context than putting long procedures in `CLAUDE.md`.
+
+## MCP
+
+MCP connects Claude Code to external tools and data sources. Use it for:
+
+- issue trackers
+- design docs
+- internal APIs
+- database schema browsers
+- current official docs
+- custom team tools
+
+MCP expands the agent's world. That means it also expands the blast radius. Treat MCP servers as tools: scope them, document them, and decide whether each tool should be read-only, ask-first, or allowed.
+
+```text
+Use the official docs MCP server to check the current framework API.
+Do not use random blog posts.
+If docs and repo code conflict, stop and report the conflict before editing.
+```
+
+## Hooks
+
+Hooks run shell commands automatically at lifecycle events. They are deterministic, which makes them different from instructions.
+
+Good hook use cases:
+
+- notify when Claude needs input
+- format after edits
+- block edits to protected files
+- audit configuration changes
+- re-inject context after compaction
+- auto-approve narrow permission prompts
+
+Example: block edits to `.env` files with a `PreToolUse` hook:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python scripts/block_secret_edits.py"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook script receives structured input from Claude Code and decides whether to allow or block. This is stronger than saying "do not edit `.env`" in a prompt.
+
+<Quiz
+  question="A rule says: 'After any file edit, run the formatter on that file.' Where does it belong?"
+  options={[
+    {
+      label: "Only in CLAUDE.md, because Claude should remember it.",
+      correct: false,
+      explanation: "CLAUDE.md influences behavior but does not guarantee a command runs after each edit."
+    },
+    {
+      label: "In a PostToolUse hook, because the action must run deterministically at a lifecycle event.",
+      correct: true,
+      explanation: "Correct. Hooks are the right mechanism for deterministic automation tied to tool events."
+    },
+    {
+      label: "In auto memory, because Claude can decide whether it matters later.",
+      correct: false,
+      explanation: "Auto memory is useful for learned preferences, not enforced file-edit automation."
+    }
+  ]}
+/>
+
+<Quiz
+  question="When should a repeated correction become a CLAUDE.md entry?"
+  options={[
+    {
+      label: "When it is a durable project fact or workflow that future sessions and teammates should inherit.",
+      correct: true,
+      explanation: "Correct. CLAUDE.md is for rules you would otherwise re-explain every session."
+    },
+    {
+      label: "Whenever Claude makes any mistake, even if it was task-specific.",
+      correct: false,
+      explanation: "Task-specific corrections clutter context. Keep CLAUDE.md small and durable."
+    },
+    {
+      label: "Only after the project has more than one developer.",
+      correct: false,
+      explanation: "Solo projects benefit too. The key question is whether the instruction should persist."
+    }
+  ]}
+/>
+
+[Previous: Lesson 2](/modules/module-14-claude-code/lesson-02) - [Lesson 4 ->](/modules/module-14-claude-code/lesson-04)

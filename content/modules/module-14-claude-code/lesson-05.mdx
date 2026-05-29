@@ -1,0 +1,174 @@
+---
+title: "Parallel Work: Subagents, Agent View, Worktrees, and Dynamic Workflows"
+module: "module-14-claude-code"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 - Parallel Work: Subagents, Agent View, Worktrees, and Dynamic Workflows
+
+Claude Code has several forms of parallel work. They are not interchangeable. Choose based on who coordinates the work, whether agents need separate context, and whether edits must be isolated.
+
+## The parallel-work map
+
+| Approach | What coordinates it | Best for |
+|---|---|---|
+| Subagents | The current conversation | Side research, reviews, log analysis, isolated context |
+| Agent view | You | Several independent background sessions |
+| Worktrees | Git and filesystem isolation | Parallel sessions that may edit files |
+| Agent teams | A lead agent | Coordinated workers with shared task list; experimental |
+| Dynamic workflows | A generated orchestration script | Large audits, migrations, cross-checked plans; research preview |
+
+<Callout type="key">
+Parallel agents multiply token use and coordination risk. Use them when the work is genuinely independent or when independent verification is worth the cost.
+</Callout>
+
+## Subagents
+
+Subagents run side tasks in separate context and return summaries. They are useful when the work would pollute the main conversation:
+
+```text
+Use subagents to inspect this diff from three angles:
+1. Security issues
+2. Missing test coverage
+3. Framework API misuse
+
+Each subagent should return only blocking findings with file references. Do not edit files.
+```
+
+Subagents are strongest for reading, analysis, and review. For writing, give each subagent a separate worktree or a non-overlapping file boundary.
+
+## Agent view
+
+Agent view is a terminal interface opened with:
+
+```bash
+claude agents
+```
+
+It lets you dispatch and monitor multiple background Claude Code sessions from one screen. Each row shows whether a session is working, needs input, completed, failed, or opened a pull request. You can peek, reply, attach to a session, or send an existing session into the background.
+
+Good agent view tasks:
+
+- investigate a flaky test
+- write docs for one module
+- review a pull request
+- fix one lint category
+- update one dependency and report breakage
+
+Bad agent view tasks:
+
+- "clean up the entire app"
+- several sessions editing the same files
+- sensitive work without separate worktrees or clear prompts
+
+## Worktrees
+
+Worktrees are the filesystem boundary for parallel writing. Agent view can move dispatched sessions into their own worktrees automatically, and you can create worktrees manually when running several sessions yourself.
+
+Use one branch per task:
+
+```bash
+git worktree add ../repo-flaky-test -b claude/flaky-test
+git worktree add ../repo-docs-update -b claude/docs-update
+```
+
+When the work is done, review each branch independently. Parallel work is only helpful if each result remains reviewable.
+
+## Agent teams
+
+Agent teams let a lead coordinate multiple Claude Code sessions with a shared task list and inter-agent messaging. They are powerful, but experimental. Use them when the work naturally decomposes into roles:
+
+```text
+Lead: coordinate a small API migration.
+
+Teammates:
+- Mapper: list affected routes and clients.
+- Implementer: edit the API handlers.
+- Test reviewer: add or update tests.
+
+Partition files so teammates do not edit the same file at the same time.
+```
+
+If the work can be done by one session with a few subagents, use that first.
+
+## Dynamic workflows
+
+Dynamic workflows are one of the latest Claude Code capabilities. Claude writes an orchestration script that runs many subagents in parallel, checks their results, and converges on a coordinated output.
+
+They are for work too large for one pass:
+
+- codebase-wide bug hunts
+- migration planning across hundreds of files
+- security audits
+- profiler-guided optimization sweeps
+- critical plans you want independently challenged
+
+Example prompt:
+
+```text
+Create a dynamic workflow to audit all API routes for missing input validation.
+
+Constraints:
+- Do not edit files.
+- Produce a findings report grouped by severity.
+- Each finding must be independently verified by a second agent.
+- Include file references and a minimal suggested fix.
+```
+
+Dynamic workflows can consume substantially more usage than a normal session. Start on a scoped read-only audit before attempting a migration that writes code.
+
+## Choosing the right one
+
+| Situation | Use |
+|---|---|
+| One bug in one area | One normal session |
+| Need a reviewer without bloating context | Subagent |
+| Three independent backlog items | Agent view |
+| Two writing tasks in same repo | Worktrees |
+| One project with coordinated roles | Agent team |
+| Huge audit or migration with cross-checking | Dynamic workflow |
+
+<Quiz
+  question="You want Claude to review a large diff for security, tests, and framework misuse, but you do not want the main conversation filled with every search result. What should you use?"
+  options={[
+    {
+      label: "Subagents, each with a focused review angle and a compact findings-only output.",
+      correct: true,
+      explanation: "Correct. Subagents isolate context and return summaries."
+    },
+    {
+      label: "One background bash command.",
+      correct: false,
+      explanation: "A background command runs a shell command. It does not create specialist review agents."
+    },
+    {
+      label: "Bypass permissions.",
+      correct: false,
+      explanation: "Permission mode does not solve review structure or context isolation."
+    }
+  ]}
+/>
+
+<Quiz
+  question="When should you consider a dynamic workflow?"
+  options={[
+    {
+      label: "For a tiny typo fix, because workflows are always more reliable.",
+      correct: false,
+      explanation: "Dynamic workflows add cost and coordination overhead. They are not for tiny tasks."
+    },
+    {
+      label: "For large audits, migrations, or critical plans where many independent agents can work and cross-check results.",
+      correct: true,
+      explanation: "Correct. Dynamic workflows fit broad, high-value work that benefits from parallelism and independent verification."
+    },
+    {
+      label: "Whenever you want to avoid reviewing the final result.",
+      correct: false,
+      explanation: "A workflow can improve coverage, but the human still reviews the output and decides what ships."
+    }
+  ]}
+/>
+
+[Previous: Lesson 4](/modules/module-14-claude-code/lesson-04) - [Lesson 6 ->](/modules/module-14-claude-code/lesson-06)

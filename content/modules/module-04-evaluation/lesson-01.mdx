@@ -1,0 +1,107 @@
+---
+title: "Why Eval Is the Hard Part"
+module: "module-04-evaluation"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · Why Eval Is the Hard Part
+
+Testing a function that returns `42` is easy — you write `assert result == 42` and you're done. Testing an agent that writes a research summary is not. There is no `42`. The agent is non-deterministic, the task is open-ended, and the path it takes to the answer matters as much as the answer itself. This lesson explains why those three properties make evaluation genuinely hard — and why teams who skip it always regret it.
+
+## Non-determinism breaks unit tests
+
+A standard unit test checks that a specific input produces a specific output. LLMs don't work that way. Given the same prompt, an LLM at temperature > 0 will produce different outputs every run. Even at temperature 0, model updates, infrastructure changes, and subtle context differences can shift the output.
+
+```python
+def test_agent_answer():
+    result = run_agent("What is the capital of France?")
+    assert result == "Paris"  # passes today
+    # Fails after a prompt wording change that adds ", France" to the output
+    # Fails after a model update that says "The capital of France is Paris."
+    # Fails when the agent adds a sentence of context
+```
+
+This is not a hypothetical failure mode. It is the most common reason agent test suites rot. The test was written for a specific string that the agent happened to produce once. Any change anywhere in the stack — prompt, model, retrieval, temperature — can break it.
+
+The fix is not to freeze your stack. It is to test against **criteria**, not strings.
+
+```python
+def test_agent_answer():
+    result = run_agent("What is the capital of France?")
+    assert "paris" in result.lower()          # criterion: contains the answer
+    assert len(result.split()) < 100          # criterion: concise
+    assert not any(w in result.lower()        # criterion: no hallucinated countries
+                   for w in ["berlin", "london", "madrid"])
+```
+
+## There is often no ground truth
+
+For factual questions, ground truth exists: the capital of France is Paris, and any response that says otherwise is wrong. But most agent tasks are not factual questions with a single right answer.
+
+"Summarise the key risks of deploying LLMs in healthcare" has no ground truth. There are many valid summaries. Some emphasise hallucination; some emphasise regulation; some emphasise bias. All can be correct. Some are better than others — but "better" requires a definition, and that definition is a design choice, not a fact.
+
+<EvalChallengeViz />
+
+The challenge above makes this concrete: three outputs from the same agent prompt, evaluated by two domain experts who pick different winners. Neither expert is wrong. They're optimising for different criteria. This is the ground truth problem.
+
+**Implication:** before you can evaluate anything, you must decide what you're measuring. That decision should happen before you collect a single eval case — not after, when it's tempting to reverse-engineer criteria that make your current system look good.
+
+## Multi-step trajectories
+
+A single-turn LLM call either answers correctly or it doesn't. An agent may take 10 tool calls across multiple reasoning steps before producing an answer. This creates a new failure mode: the agent gets the right answer via the wrong path.
+
+```
+User: "What was Anthropic's last fundraising round?"
+
+Correct path:
+  1. web_search("Anthropic fundraising round 2024")
+  2. read_url(result_url)
+  3. extract and return the figure
+
+Wrong-path-right-answer:
+  1. web_search("Anthropic funding history")        ← too broad
+  2. web_search("Anthropic series D amount")        ← redundant
+  3. web_search("Anthropic fundraising round 2024") ← what it should have done first
+  4. read_url(result_url)
+  5. extract and return the figure                  ← correct answer, but wasted 2 tool calls
+```
+
+Checking only the final answer misses: excessive tool calls (cost), wrong tools called (reliability), tool calls in the wrong order (correctness in more complex tasks), and hallucinated tool results that happen to produce a correct conclusion.
+
+<Callout type="key">
+Three properties make agent eval hard: non-determinism (you can't test exact strings), no ground truth (for open-ended tasks, there is no single right answer), and trajectory complexity (the path to the answer matters, not just the answer). Ignoring any one of them produces an eval suite that passes when the agent is broken.
+</Callout>
+
+## The cost of skipping eval
+
+Teams skip evaluation for three reasons: it takes time, it's not glamorous, and when you skip it nothing immediately breaks. The failure is slow. It looks like this:
+
+1. Prompt change ships. Two cases that were passing now fail. Nobody notices — there's no suite.
+2. Model upgrade ships. Retrieval quality drops slightly. Aggregate quality drops slightly. Nobody notices.
+3. Six months later: "Why does the agent seem worse than it used to?"
+
+There is no way to answer that question without historical eval data. You can't diff behaviour you never measured.
+
+<Quiz
+  question="An agent that was returning correct answers last week now returns correct answers this week, but is making 3× as many tool calls. Which eval strategy would catch this regression?"
+  options={[
+    {
+      label: "Exact match on the final answer",
+      correct: false,
+      explanation: "Exact match checks the output string — it would still pass if the final answer is correct. It doesn't inspect the path the agent took to get there."
+    },
+    {
+      label: "Rubric scoring on answer quality",
+      correct: false,
+      explanation: "Rubric scoring evaluates the quality of the response. A 3× increase in tool calls doesn't affect answer quality — the rubric would still pass."
+    },
+    {
+      label: "Trajectory analysis that counts tool calls per task",
+      correct: true,
+      explanation: "Trajectory analysis inspects the agent's intermediate steps. A criterion like 'max 2 tool calls for this task type' would flag the 3× increase as a regression — even though the final answer is still correct."
+    }
+  ]}
+/>
+
+[← Module overview](/modules/module-04-evaluation) · [Lesson 2: Building eval datasets →](/modules/module-04-evaluation/lesson-02)

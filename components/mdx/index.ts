@@ -19,6 +19,11 @@ import { RAGPipelineViz } from './RAGPipelineViz'
 import { AgenticRAGLoop } from './AgenticRAGLoop'
 import { MemoryConsolidationViz } from './MemoryConsolidationViz'
 import { EmbeddingExplorer } from './EmbeddingExplorer'
+import { EvalChallengeViz } from './EvalChallengeViz'
+import { EvalSetBuilder } from './EvalSetBuilder'
+import { ScoringPlayground } from './ScoringPlayground'
+import { JudgeBiasDemo } from './JudgeBiasDemo'
+import { RegressionRunnerViz } from './RegressionRunnerViz'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -44,4 +49,9 @@ export const mdxComponents = {
   AgenticRAGLoop,
   MemoryConsolidationViz,
   EmbeddingExplorer,
+  EvalChallengeViz,
+  EvalSetBuilder,
+  ScoringPlayground,
+  JudgeBiasDemo,
+  RegressionRunnerViz,
 }

@@ -1,0 +1,173 @@
+---
+title: "Permissions, Sandboxing, and Safe Autonomy"
+module: "module-14-claude-code"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 - Permissions, Sandboxing, and Safe Autonomy
+
+Claude Code can run commands and change files. Permission modes, permission rules, sandboxing, protected paths, and worktrees are how you give it useful autonomy without handing it the whole machine.
+
+## Permission modes
+
+Permission modes control how often Claude Code pauses for approval.
+
+| Mode | What runs without asking | Best for |
+|---|---|---|
+| `default` | Reads only | Starting out, sensitive work |
+| `acceptEdits` | Reads, file edits, common filesystem commands in scope | Iterating on code you will review |
+| `plan` | Reads and exploration, no source edits | Understanding before implementation |
+| `auto` | Tool calls with background safety checks | Longer trusted tasks; research preview |
+| `dontAsk` | Only tools you pre-approved | CI and locked-down scripts |
+| `bypassPermissions` | Everything except some circuit breakers | Isolated containers or VMs only |
+
+Start with less autonomy. Increase only when the task and environment justify it.
+
+<Callout type="warning">
+`bypassPermissions` is for isolated environments, not your everyday laptop checkout. It skips the permission layer, including many protected-path prompts.
+</Callout>
+
+## Permission rules
+
+Permission rules let you allow, ask, or deny specific tools and tool patterns. They are enforced by Claude Code, not by the model.
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(git status)",
+      "Bash(git diff *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "Read(./.env)",
+      "WebFetch(domain:pastebin.com)"
+    ]
+  }
+}
+```
+
+Deny rules win. Use deny rules for secrets, production operations, destructive commands, and external domains that should never be used.
+
+## Prompt constraints are not permissions
+
+These two are not equivalent:
+
+```text
+Prompt:
+Do not read .env.
+```
+
+```json
+{
+  "permissions": {
+    "deny": ["Read(./.env)"]
+  }
+}
+```
+
+The first asks the model to behave. The second blocks the tool use.
+
+## Sandboxing
+
+Sandboxing defines where commands execute and what they can access. Claude Code has multiple sandbox options, including the built-in sandboxed Bash tool, dev containers, Docker, and VMs.
+
+Choose based on the threat model:
+
+| Task | Reasonable boundary |
+|---|---|
+| Explain code | `default` or `plan` mode, no extra sandbox |
+| Small local edit | `acceptEdits`, Git branch, no secrets |
+| Run untrusted code | Container or VM, no credentials |
+| Package install experiment | Disposable branch or container |
+| Broad migration | Worktree isolation plus staged review |
+| Production automation | Managed settings, deny rules, audit logs, and no broad write tools |
+
+## Protected paths and secrets
+
+Some paths need explicit protection:
+
+- `.env`, `.env.local`, private keys
+- cloud credentials
+- production dumps
+- `.git`
+- `.claude`
+- deployment configs
+- database migration output
+
+Tell Claude not to read them, but also configure permission rules or hooks where possible.
+
+```text
+Do not open `.env` or private key files. If you need an environment variable name, infer it from `.env.example` or ask me.
+```
+
+## Worktrees
+
+Git worktrees give parallel sessions separate checkouts. This matters when multiple agents work at the same time.
+
+```bash
+git worktree add ../repo-auth-fix -b claude/auth-fix
+git worktree add ../repo-docs-pass -b claude/docs-pass
+```
+
+Use worktrees when:
+
+- two Claude sessions might edit overlapping files
+- agent view dispatches independent tasks
+- dynamic workflows or batch-like work may create many branches
+- you want isolated diffs for separate PRs
+
+## Safe autonomy checklist
+
+Before you loosen permissions, answer:
+
+1. Is the repo clean or are there user changes to protect?
+2. Is the task scoped?
+3. Is there a verification command?
+4. Are secrets blocked?
+5. Are destructive commands denied or ask-first?
+6. Is the environment disposable if the command goes wrong?
+
+<FailureMuseum
+  exhibit="Auto Mode on a Dirty Checkout"
+  symptom="Claude fixed the bug but also reformatted unrelated user changes"
+>
+
+#### What happened
+
+The user had uncommitted manual edits. They started Claude Code in a loose permission mode and asked it to fix a bug. Claude ran formatting and modified files that contained the user's unfinished work.
+
+#### Root cause
+
+The operator did not check Git state before granting autonomy.
+
+#### How to avoid
+
+Run `git status --short` first. Commit, stash, or explicitly tell Claude which files are off-limits. Use a branch or worktree for larger work.
+
+</FailureMuseum>
+
+<Quiz
+  question="What is the safest first mode for investigating an unfamiliar production bug?"
+  options={[
+    {
+      label: "Plan mode, because Claude can read and reason before source edits happen.",
+      correct: true,
+      explanation: "Correct. Start by understanding and proposing a plan before mutation."
+    },
+    {
+      label: "Bypass permissions, because bugs are urgent.",
+      correct: false,
+      explanation: "Urgency does not reduce blast radius. Broad access is only reasonable in an isolated environment."
+    },
+    {
+      label: "Auto mode with no deny rules, because background checks replace human review.",
+      correct: false,
+      explanation: "Auto mode can reduce prompts, but it does not replace task scoping, protected paths, or final review."
+    }
+  ]}
+/>
+
+[Previous: Lesson 3](/modules/module-14-claude-code/lesson-03) - [Lesson 5 ->](/modules/module-14-claude-code/lesson-05)

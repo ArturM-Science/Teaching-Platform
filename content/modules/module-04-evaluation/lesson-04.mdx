@@ -1,0 +1,146 @@
+---
+title: "LLM-as-Judge: Powerful, Biased, and How to Keep It Honest"
+module: "module-04-evaluation"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · LLM-as-Judge: Powerful, Biased, and How to Keep It Honest
+
+LLM-as-judge is the most seductive eval technique. You write a prompt, feed it your agent's outputs, and get scores back. It scales to any task, handles open-ended criteria, and costs a fraction of human review. It is also wrong in predictable ways that are easy to miss if you never look for them. This lesson covers what LLM-as-judge is good for, its documented failure modes, and how to design prompts that reduce bias.
+
+## What LLM-as-judge is for
+
+LLM-as-judge is best suited to tasks where: the evaluation criteria are qualitative (clarity, helpfulness, tone), the output space is too large for a rubric of simple boolean checks, or you need to scale beyond what human review can handle.
+
+```python
+JUDGE_PROMPT = """You are an expert evaluator for a research agent.
+
+Evaluate the following response on these criteria:
+1. Factual accuracy — does the response contain verifiable claims only?
+2. Completeness — does it answer all parts of the question?
+3. Clarity — is it well-organised and easy to follow?
+4. Appropriate uncertainty — does it acknowledge what it doesn't know?
+
+For each criterion, score 1 (poor) to 4 (excellent) and give a one-sentence justification.
+Return as JSON: {"accuracy": {"score": N, "reason": "..."}, ...}
+
+Question: {question}
+Response: {response}"""
+
+def llm_judge(question: str, response: str, model: str = "claude-opus-4-7") -> dict:
+    import anthropic, json
+    client = anthropic.Anthropic()
+    result = client.messages.create(
+        model=model,
+        max_tokens=512,
+        messages=[{
+            "role": "user",
+            "content": JUDGE_PROMPT.format(question=question, response=response),
+        }],
+    )
+    return json.loads(result.content[0].text)
+```
+
+## The failure modes
+
+LLM judges fail in three well-documented ways. Knowing them before you trust any judge output is not optional.
+
+**Position bias** — when comparing two responses, LLM judges systematically favour the response that appears first (or second, depending on the model). The bias is strong enough to reverse verdicts. A judge that rates A > B when A is shown first will often rate B > A when the order is swapped.
+
+**Length bias** — LLM judges tend to score longer responses higher, conflating verbosity with quality. A response that says the same thing in 200 words will usually outscore one that says it in 50 words, even when the 50-word version is better.
+
+**Sycophancy** — if the judge is given information about who wrote a response (a famous author, an "expert", even just a confident framing), it scores that response higher. The content is identical; the label changes the score.
+
+<JudgeBiasDemo />
+
+The demo above makes position bias and length bias interactive. Run the judge, then swap the order. If you see the verdict flip, you've witnessed the bias live — not as a theoretical concern, but as something that would have corrupted your eval results.
+
+## Prompt design for reliable judging
+
+Bias can be reduced but not eliminated. These four practices make the most difference:
+
+**Evaluate one response at a time.** Never ask the judge to compare A and B directly — that is exactly where position bias lives. Evaluate each response independently against the criteria, then compare scores.
+
+```python
+# Wrong: comparative evaluation (position bias enters here)
+prompt = f"Which response is better — A or B?\nA: {response_a}\nB: {response_b}"
+
+# Right: independent evaluation of each
+score_a = llm_judge(question, response_a)
+score_b = llm_judge(question, response_b)
+winner = "A" if score_a["total"] > score_b["total"] else "B"
+```
+
+**Calibrate with known-verdict cases.** Before trusting your judge on new cases, run it on cases where the correct verdict is known from human review. Target ≥ 80% agreement. If you're below 80%, the judge prompt is wrong — not the agent.
+
+**Run multiple passes, swap order, take the average.** For any pairwise comparison, run the judge with A first, then again with B first, and average the scores. This doesn't eliminate position bias, but it cancels it out.
+
+```python
+def bias_corrected_compare(question: str, response_a: str, response_b: str) -> dict:
+    # Pass 1: A then B
+    score_a1 = llm_judge(question, response_a)
+    score_b1 = llm_judge(question, response_b)
+    # Pass 2: B then A
+    score_b2 = llm_judge(question, response_b)
+    score_a2 = llm_judge(question, response_a)
+    # Average across passes
+    avg_a = (score_a1["total"] + score_a2["total"]) / 2
+    avg_b = (score_b1["total"] + score_b2["total"]) / 2
+    return {"a": avg_a, "b": avg_b, "winner": "A" if avg_a > avg_b else "B"}
+```
+
+**Use criteria that penalise length.** If your rubric includes a "conciseness" criterion that actively penalises unnecessary length, the judge has to trade length against brevity. This doesn't eliminate length bias, but it counteracts it.
+
+## What LLM-as-judge cannot replace
+
+LLM-as-judge is not a replacement for domain expertise, ground truth checks, or trajectory analysis. It is a tool for scaling qualitative criteria that humans have already defined and calibrated. Using it without calibration is how teams end up with eval suites that show 9/10 on everything and miss the regression that ships to production.
+
+<Callout type="warning">
+A common failure pattern: judge prompt says "score 1–10." The judge returns 7–9 for every response. The team interprets this as "our agent is good." What actually happened: the judge anchored to the middle of the scale and the prompt gave it no criteria to discriminate on. If your judge scores everything within a 2-point range, the criteria are underspecified.
+</Callout>
+
+<FailureMuseum
+  exhibit="The 100% Pass Judge"
+  symptom="LLM-as-judge returned 8–9/10 on every eval case, even for responses with clear errors"
+>
+
+#### What happened
+A team built an LLM-as-judge for their research agent. The judge prompt asked for a score from 1–10 on "helpfulness and accuracy." The eval suite showed a 100% pass rate (all cases scored ≥ 7). Two weeks later, a production incident revealed the agent had been returning hallucinated citations for 15% of queries.
+
+#### Root cause
+Three compounding failures:
+1. The judge prompt had no criteria for factual accuracy — only "helpfulness"
+2. The judge had no access to ground truth, so it couldn't verify citations
+3. Length bias caused the judge to score longer, more detailed responses higher — and hallucinated citations make responses look more detailed
+
+#### How to find it
+Run the judge on outputs you know are wrong. Fabricate a response with obvious hallucinations and score it. If the judge gives it ≥ 7, the judge is broken. A judge that can't fail known-bad inputs is not a judge.
+
+#### Fix
+Separate factual accuracy from qualitative criteria. Factual accuracy requires ground truth access — verify citations with a retrieval check before passing to the judge. Only route qualitative criteria (clarity, helpfulness, tone) through the LLM judge.
+
+</FailureMuseum>
+
+<Quiz
+  question="Your LLM judge is scoring almost everything 8 or 9 out of 10, even responses you believe are mediocre. What is the most likely cause?"
+  options={[
+    {
+      label: "Your agent has gotten genuinely better and the high scores are correct.",
+      correct: false,
+      explanation: "Possible, but the right response to 'scores look suspiciously high' is to verify, not accept. Run the judge on known-bad outputs. If those also score 8–9, the judge is broken, not the agent impressive."
+    },
+    {
+      label: "The judge criteria are underspecified — the prompt gives the judge nothing to discriminate on.",
+      correct: true,
+      explanation: "This is the most common cause of score clustering. A judge prompt that asks for 'helpfulness' without defining what unhelpful looks like will anchor to the middle-high range. Add specific criteria that can be failed, and include negative examples of each criterion."
+    },
+    {
+      label: "You need a stricter model — switch to a larger LLM as judge.",
+      correct: false,
+      explanation: "A larger model with underspecified criteria will still cluster scores. The problem is the prompt, not the model. Fix the criteria first — if scores still cluster after that, then consider the model."
+    }
+  ]}
+/>
+
+[← Lesson 3](/modules/module-04-evaluation/lesson-03) · [Lesson 5: Regression testing →](/modules/module-04-evaluation/lesson-05)

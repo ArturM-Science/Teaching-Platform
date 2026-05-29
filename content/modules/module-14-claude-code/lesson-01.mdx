@@ -1,0 +1,140 @@
+---
+title: "What Claude Code Is: The Harness Around the Model"
+module: "module-14-claude-code"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 - What Claude Code Is: The Harness Around the Model
+
+Claude Code is an agentic coding tool that can read a repository, edit files, run commands, use Git, search, and keep working through feedback. The important word is not "Claude." The important word is "harness": Claude Code wraps the model in tools, context management, permissions, checkpoints, sessions, memory, and interfaces.
+
+## The Claude Code loop
+
+Claude Code describes its work as three blended phases:
+
+```
+gather context -> take action -> verify results -> repeat
+```
+
+That maps directly to the agent loop from Module 0:
+
+| Claude Code phase | Agent-loop meaning |
+|---|---|
+| Gather context | Perceive: read files, inspect Git state, search logs, understand the task |
+| Take action | Act: edit files, run shell commands, call tools, spawn subagents |
+| Verify results | Observe and evaluate: run tests, read command output, inspect diffs, revise |
+
+The model chooses the next step. Claude Code provides the tools and guardrails.
+
+```text
+Task:
+Fix the API test failure.
+
+Likely Claude Code loop:
+1. Run the failing test command
+2. Read the error output
+3. Search for the failing function
+4. Read the relevant files
+5. Edit the smallest fix
+6. Run the same test again
+7. Summarize the diff and residual risk
+```
+
+<Callout type="key">
+The best Claude Code tasks have an objective feedback signal. "Make this better" is hard to verify. "Make `npm run lint` pass without touching auth" is a task the agent can drive.
+</Callout>
+
+## Tools make it agentic
+
+Without tools, a model can only answer. With Claude Code tools, it can act:
+
+| Tool category | What Claude can do |
+|---|---|
+| File operations | Read, write, edit, create, rename, reorganize |
+| Search | Glob files, grep content, find references |
+| Execution | Run tests, start servers, call build tools, use Git |
+| Web | Search or fetch docs and error messages |
+| Code intelligence | See type errors, warnings, definitions, and references when available |
+| Orchestration | Spawn subagents, create tasks, run background commands, ask clarifying questions |
+
+The tool result feeds back into the next model call. That is why a failed test is useful: it becomes fresh context.
+
+## Where it runs
+
+Claude Code can run in several execution environments:
+
+| Environment | Where code executes | Good for |
+|---|---|---|
+| Local | Your machine | Close pairing, local tools, private unpushed work |
+| Cloud | Anthropic-managed infrastructure | Long-running work, repos you do not have locally, parallel tasks |
+| Remote Control | Your machine, controlled from browser/mobile | Keep execution local while steering from another device |
+
+It can also be accessed through the terminal, desktop app, IDE extensions, web, Slack, and CI/CD integrations. The interface changes how you interact. The underlying loop stays the same.
+
+## Sessions, context, and checkpoints
+
+A Claude Code session is a conversation plus tool history. Sessions can be resumed or forked, and file edits have local checkpoints so you can rewind a session-level mistake. Checkpoints are not a replacement for Git: they cover file edits inside the session, not remote side effects, database changes, deployments, or package registry changes.
+
+Context fills up over long runs. Claude Code compacts automatically, but detailed instructions from early in a conversation can fade. Durable project rules belong in `CLAUDE.md`, not only in chat.
+
+```text
+Weak:
+Remember not to touch auth in this thread.
+
+Better:
+Add this to CLAUDE.md:
+- Changes under app/dashboard must not modify auth, middleware, or Supabase policies unless the task explicitly asks for it.
+```
+
+## Your job as operator
+
+Claude Code can move fast. Your job is to operate it like an engineering system:
+
+1. Give it a task with a boundary.
+2. Choose a permission mode.
+3. Give it something to verify.
+4. Interrupt when it drifts.
+5. Review the diff before merge.
+
+<FailureMuseum
+  exhibit="The Infinite Helpful Session"
+  symptom="A simple bug fix became a refactor, docs rewrite, and dependency update"
+>
+
+#### What happened
+
+The user asked Claude Code to "fix the checkout bug." Claude explored the codebase, found inconsistent validation, old tests, and a stale dependency. It tried to fix everything in one session.
+
+#### Root cause
+
+The task had no boundary and no definition of done. The agent found adjacent work and kept going.
+
+#### How to avoid
+
+Start with plan mode. Ask for the smallest fix, name non-goals, and require the same failing command to pass before any optional cleanup.
+
+</FailureMuseum>
+
+<Quiz
+  question="What is the most accurate way to describe Claude Code?"
+  options={[
+    {
+      label: "A model that writes code when prompted.",
+      correct: false,
+      explanation: "The model is only one part. Claude Code is the harness that gives the model tools, permissions, memory, sessions, and verification loops."
+    },
+    {
+      label: "An agentic coding harness that lets Claude gather context, act through tools, verify results, and stay under human-controlled permissions.",
+      correct: true,
+      explanation: "Correct. The harness is what turns a language model into a coding agent."
+    },
+    {
+      label: "A CI replacement that can merge changes automatically once it thinks tests pass.",
+      correct: false,
+      explanation: "Claude Code can help in CI, but merge responsibility and release judgment still belong to humans or explicitly governed automation."
+    }
+  ]}
+/>
+
+[Module overview](/modules/module-14-claude-code) - [Lesson 2 ->](/modules/module-14-claude-code/lesson-02)

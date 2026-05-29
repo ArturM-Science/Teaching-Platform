@@ -6,7 +6,7 @@ const modules = [
   { part: "Part 3", title: "Orchestration & Multi-Agent", modules: "Modules 5–6", desc: "Workflow patterns, LangGraph, multi-agent systems" },
   { part: "Part 4", title: "Production", modules: "Modules 7–10", desc: "Deploy, secure, observe, and build UX for real agents" },
   { part: "Part 5", title: "Frontiers & Capstone", modules: "Modules 11–12", desc: "Computer-use, voice, multimodal — then ship to a real user" },
-  { part: "Part 6", title: "Practitioner Tools", modules: "Module 13", desc: "Use OpenAI Codex as a supervised software engineering agent" },
+  { part: "Part 6", title: "Practitioner Tools", modules: "Modules 13-14", desc: "Use Codex and Claude Code as supervised software engineering agents" },
 ]
 
 const outcomes = [
@@ -36,7 +36,7 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="max-w-4xl mx-auto px-6 pt-20 pb-16 text-center">
         <div className="inline-block text-xs font-medium bg-zinc-100 text-zinc-600 px-3 py-1 rounded-full mb-6 uppercase tracking-wide">
-          14 modules · Build-first · Production-focused
+          15 modules · Build-first · Production-focused
         </div>
         <h1 className="text-5xl font-bold tracking-tight leading-tight mb-6">
           Learn to build and ship<br />autonomous AI agents
@@ -68,7 +68,7 @@ export default function LandingPage() {
       {/* Curriculum */}
       <section id="curriculum" className="max-w-4xl mx-auto px-6 py-16">
         <h2 className="text-2xl font-bold mb-2">The curriculum</h2>
-        <p className="text-zinc-500 mb-10">Six parts. Fourteen modules. One integrated system at the end.</p>
+        <p className="text-zinc-500 mb-10">Six parts. Fifteen modules. One integrated system at the end.</p>
         <div className="space-y-3">
           {modules.map(m => (
             <div key={m.part} className="flex items-start gap-6 p-5 border border-zinc-100 rounded-xl hover:border-zinc-200 transition-colors">

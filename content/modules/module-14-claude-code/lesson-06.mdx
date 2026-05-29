@@ -1,0 +1,214 @@
+---
+title: "Claude Managed Agents: From Coding Agent to Hosted Runtime"
+module: "module-14-claude-code"
+lesson: 6
+slug: "lesson-06"
+---
+
+# Lesson 6 - Claude Managed Agents: From Coding Agent to Hosted Runtime
+
+Claude Code teaches you how to operate an agent on a repository. Claude Managed Agents turns the same underlying idea into a hosted runtime: a configurable agent harness with sandboxes, sessions, events, tools, tracing, permissions, and long-running execution.
+
+## Why Managed Agents exists
+
+Production agents need infrastructure:
+
+- sandboxed code execution
+- stateful sessions
+- credential handling
+- scoped permissions
+- tool execution
+- checkpointing and recovery
+- tracing and troubleshooting
+- long-running background work
+- multi-agent coordination
+
+You can build that yourself with an SDK and your own runtime. Managed Agents is Anthropic hosting the harness for you.
+
+<Callout type="key">
+Managed Agents is not "Claude Code in the cloud" as a product surface. It is a platform API for running Claude as an autonomous agent with managed or self-hosted execution environments.
+</Callout>
+
+## The four core objects
+
+Managed Agents is built around four concepts:
+
+| Object | Meaning |
+|---|---|
+| Agent | Versioned configuration: model, system prompt, tools, MCP servers, skills, and optional multiagent roster |
+| Environment | Where sessions run: Anthropic-managed cloud sandbox or self-hosted sandbox |
+| Session | A running instance of an agent performing a specific task |
+| Events | Messages, tool calls, status updates, confirmations, and streamed outputs |
+
+The flow:
+
+```
+create agent -> create environment -> start session -> send events -> stream results -> steer or interrupt
+```
+
+## Agent as release artifact
+
+An agent configuration is versioned. That matters. Changing the model, prompt, tools, skills, MCP servers, or multiagent setup changes the behavior of future sessions.
+
+```text
+Agent release artifact:
+- model
+- system prompt
+- built-in toolset configuration
+- custom tools
+- MCP servers
+- skills
+- permission policies
+- metadata
+- version
+```
+
+This is the same production idea from the CI/CD discussion: the deployable unit is the whole agent, not only code.
+
+## Tools and permission policies
+
+Managed Agents has a built-in toolset that can include:
+
+- bash
+- read, write, edit
+- glob and grep
+- web fetch and web search
+- MCP tools
+- custom tools you execute from your application
+
+Start from least privilege:
+
+```json
+{
+  "type": "agent_toolset_20260401",
+  "default_config": { "enabled": false },
+  "configs": [
+    { "name": "read", "enabled": true },
+    { "name": "grep", "enabled": true },
+    { "name": "glob", "enabled": true }
+  ]
+}
+```
+
+Then enable write, bash, web, or MCP tools only when the task needs them.
+
+Permission policies are simpler than local Claude Code permission modes:
+
+| Policy | Behavior |
+|---|---|
+| `always_allow` | Tool executes without confirmation |
+| `always_ask` | Session pauses and waits for approval |
+
+Use `always_ask` for bash, write, external MCP tools, or anything with side effects. Custom tools are executed by your application, so your app is responsible for deciding whether to run them and returning the result.
+
+## Sessions and events
+
+Managed Agents sessions are event-driven. You send a user event; the agent streams back messages, tool uses, and status updates. If a tool requires confirmation, the session goes idle with a requires-action state until your application sends an allow or deny event.
+
+```text
+user.message
+  -> agent.message
+  -> agent.tool_use
+  -> session.status_idle requires_action
+  -> user.tool_confirmation allow
+  -> session.status_running
+  -> agent.message
+  -> session.status_idle done
+```
+
+This gives you a clean place to build a product UI: progress indicators, review queues, approval prompts, trace views, and resumable sessions.
+
+## Environments: cloud and self-hosted
+
+Managed Agents can run in an Anthropic-managed cloud sandbox or a self-hosted sandbox on infrastructure you control.
+
+Cloud sandboxes are useful when you want minimal infrastructure and safe hosted execution.
+
+Self-hosted sandboxes are useful when:
+
+- code or data must stay inside your perimeter
+- you need custom runtime images
+- you need specific CPU, memory, GPU, or long-running build capacity
+- network policies and audit logging already exist inside your enterprise environment
+
+The May 2026 update added self-hosted sandboxes in public beta and MCP tunnels in research preview. MCP tunnels let agents reach private MCP servers without exposing them publicly: a gateway makes an outbound connection, and the agent can use internal tools through that tunnel.
+
+## Outcomes and self-evaluation
+
+Managed Agents can be used like a normal prompt-and-response workflow, but its strongest shape is outcome-driven work:
+
+```text
+Outcome:
+Open a pull request that fixes the failing user-session test.
+
+Success criteria:
+- The failing test passes.
+- No auth policy files changed.
+- The PR description includes root cause, verification, and residual risk.
+- If the same error appears twice, stop and ask for help.
+```
+
+Outcome-driven agents need measurable criteria. If success cannot be checked, the agent will keep guessing.
+
+## Data and beta caveats
+
+Managed Agents is currently beta and requires a beta header on API requests. Some features, such as MCP tunnels and dreaming/persistent memory capabilities, may be research preview. Managed Agents is stateful by design: sessions store conversation history, sandbox state, and outputs server-side. That makes long-running work possible, but it also means you must review data retention, compliance, deletion, and eligibility constraints before using it with sensitive workloads.
+
+<Callout type="warning">
+Do not move sensitive code, regulated data, or production credentials into a managed runtime just because the API is convenient. Choose the environment, retention policy, and permission model before you choose the prompt.
+</Callout>
+
+## When to choose what
+
+| Need | Choose |
+|---|---|
+| One interactive repo task | Claude Code local or IDE |
+| Several independent coding tasks | Claude Code agent view |
+| A custom hosted agent with your own loop | Claude Agent SDK |
+| A long-running hosted agent without building the harness | Claude Managed Agents |
+| Strict data perimeter with hosted orchestration | Managed Agents with self-hosted sandbox |
+| Private internal tools | MCP server or MCP tunnel |
+
+<Quiz
+  question="What is the best mental model for a Managed Agents agent?"
+  options={[
+    {
+      label: "A single prompt string.",
+      correct: false,
+      explanation: "An agent is broader than a prompt. It bundles model, system prompt, tools, MCP servers, skills, metadata, and version."
+    },
+    {
+      label: "A versioned release artifact containing model, prompt, tools, MCP servers, skills, and permissions.",
+      correct: true,
+      explanation: "Correct. Treat the agent configuration as the artifact you promote, evaluate, and roll back."
+    },
+    {
+      label: "A local Claude Code session copied into the cloud without changes.",
+      correct: false,
+      explanation: "Managed Agents is a platform API with agents, environments, sessions, and events. It is related to the same agentic ideas, but it is not just a local session copy."
+    }
+  ]}
+/>
+
+<Quiz
+  question="When is a self-hosted sandbox preferable to a managed cloud sandbox?"
+  options={[
+    {
+      label: "When code, data, network access, runtime image, or audit requirements must stay inside your controlled infrastructure.",
+      correct: true,
+      explanation: "Correct. Self-hosted sandboxes keep tool execution inside your perimeter while the managed harness handles orchestration."
+    },
+    {
+      label: "Whenever you want fewer security decisions.",
+      correct: false,
+      explanation: "Self-hosting gives more control, not fewer decisions. You still own runtime, network, secrets, and monitoring choices."
+    },
+    {
+      label: "Only for toy demos.",
+      correct: false,
+      explanation: "The feature is specifically useful for enterprise and sensitive workloads that need control over execution."
+    }
+  ]}
+/>
+
+[Previous: Lesson 5](/modules/module-14-claude-code/lesson-05) - [Lab: Configure a safe Claude Code workflow ->](/modules/module-14-claude-code/lesson-07-lab)

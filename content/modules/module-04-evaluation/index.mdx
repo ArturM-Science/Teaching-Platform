@@ -1,0 +1,43 @@
+---
+title: "Evaluation"
+module: "module-04-evaluation"
+part: 2
+slug: "module-04-evaluation"
+---
+
+# Module 4 · Evaluation
+
+**Part 2 — A Single Capable Agent** · 5 lessons + lab · ~6 hours total
+
+<LearningObjectives>
+- Explain why evaluation is the hardest part of agent engineering — non-determinism, no ground truth, multi-step trajectories
+- Build eval datasets that include happy path, adversarial, edge case, and regression cases
+- Apply and compare three scoring strategies: exact match, rubric scoring, and trajectory analysis
+- Use LLM-as-judge correctly and identify its failure modes (position bias, length bias, sycophancy)
+- Write regression tests for non-deterministic systems and integrate them into a CI pipeline
+</LearningObjectives>
+
+## What you'll build
+
+An eval harness for the Module 3 research agent. By the end of the lab you'll have: a suite of 15+ eval cases spanning all four categories, a response-level scorer, a step-level scorer that validates tool call sequences, an LLM-as-judge for qualitative criteria, and a regression runner that flags when a change breaks a previously passing case. This harness carries forward into every module that follows.
+
+## Why evaluation comes this early
+
+You could ship an agent without an eval suite. Teams do it all the time. They discover the failure modes later — in production, under user load, after a prompt change silently broke something. This module is placed before any workflow or multi-agent work deliberately: **if you can't measure your agent, you can't safely change it.** The eval harness you build here is the foundation everything else is built on.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [Why eval is the hard part](/modules/module-04-evaluation/lesson-01) | ~45 min |
+| 2 | [Building eval datasets](/modules/module-04-evaluation/lesson-02) | ~45 min |
+| 3 | [Metric design: what are you actually measuring?](/modules/module-04-evaluation/lesson-03) | ~45 min |
+| 4 | [LLM-as-judge: powerful, biased, and how to keep it honest](/modules/module-04-evaluation/lesson-04) | ~45 min |
+| 5 | [Regression testing for non-deterministic systems](/modules/module-04-evaluation/lesson-05) | ~45 min |
+| 6 | [Lab: eval harness for the research agent](/modules/module-04-evaluation/lesson-06-lab) | ~2–3 hrs |
+
+<Callout type="tip">
+Lesson 4 (LLM-as-judge) is where most teams go wrong — they set up a judge, see high scores, and trust it. Run the bias demo before you trust any judge output. Seeing position bias live is more convincing than reading about it.
+</Callout>
+
+[**Start Lesson 1 →**](/modules/module-04-evaluation/lesson-01)

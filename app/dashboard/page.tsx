@@ -19,7 +19,7 @@ const modules = [
   { number: '01', slug: 'module-01-prompting-reasoning',            title: 'Prompting & Reasoning',                   part: 'Part 1 — Foundations',                  status: 'coming' },
   { number: '02', slug: 'module-02-tools-function-calling',         title: 'Tools & Function Calling',                part: 'Part 2 — A Single Capable Agent',       status: 'ready' },
   { number: '03', slug: 'module-03-memory-knowledge',               title: 'Memory & Knowledge',                      part: 'Part 2 — A Single Capable Agent',       status: 'ready' },
-  { number: '04', slug: 'module-04-evaluation',                     title: 'Evaluation',                              part: 'Part 2 — A Single Capable Agent',       status: 'coming' },
+  { number: '04', slug: 'module-04-evaluation',                     title: 'Evaluation',                              part: 'Part 2 — A Single Capable Agent',       status: 'ready' },
   { number: '05', slug: 'module-05-workflow-patterns',              title: 'Workflow Patterns & Control Flow',        part: 'Part 3 — Orchestration & Multi-Agent',  status: 'locked' },
   { number: '06', slug: 'module-06-multi-agent-systems',            title: 'Multi-Agent Systems',                     part: 'Part 3 — Orchestration & Multi-Agent',  status: 'locked' },
   { number: '07', slug: 'module-07-deployment-serving',             title: 'Deployment & Serving',                    part: 'Part 4 — Production',                   status: 'locked' },
@@ -29,6 +29,7 @@ const modules = [
   { number: '11', slug: 'module-11-frontiers',                      title: 'Frontiers',                               part: 'Part 5 — Frontiers & Capstone',         status: 'locked' },
   { number: '12', slug: 'module-12-capstone',                       title: 'Capstone',                                part: 'Part 5 — Frontiers & Capstone',         status: 'locked' },
   { number: '13', slug: 'module-13-openai-codex',                   title: 'OpenAI Codex: Agentic Software Engineering', part: 'Part 6 — Practitioner Tools',           status: 'ready' },
+  { number: '14', slug: 'module-14-claude-code',                    title: 'Claude Code: Operating Agentic Coding Workflows', part: 'Part 6 — Practitioner Tools',          status: 'ready' },
 ]
 
 const parts = [...new Set(modules.map(m => m.part))]
@@ -81,7 +82,7 @@ export default async function DashboardPage() {
           <div className="rounded-lg border border-zinc-200 bg-white">
             <div className="border-b border-zinc-200 p-6">
               <h2 className="text-lg font-semibold tracking-tight">Course path</h2>
-              <p className="mt-1 text-sm text-zinc-500">14 modules across 6 parts.</p>
+              <p className="mt-1 text-sm text-zinc-500">15 modules across 6 parts.</p>
             </div>
 
             {parts.map(part => (

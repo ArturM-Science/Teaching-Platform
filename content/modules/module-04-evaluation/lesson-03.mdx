@@ -1,0 +1,169 @@
+---
+title: "Metric Design: What Are You Actually Measuring?"
+module: "module-04-evaluation"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · Metric Design: What Are You Actually Measuring?
+
+Picking a metric is a design decision. It determines what behaviour your eval rewards, what it ignores, and what failure modes it will miss. This lesson covers the three main scoring strategies for agents — exact match, rubric scoring, and trajectory analysis — and when to use each.
+
+## Exact match: precise but brittle
+
+Exact match checks whether the agent's output is identical (or functionally identical) to an expected reference answer. It is the easiest metric to implement and the most fragile in practice.
+
+```python
+def exact_match(output: str, expected: str) -> bool:
+    return output.strip().lower() == expected.strip().lower()
+
+def fuzzy_match(output: str, expected: str, threshold: float = 0.9) -> bool:
+    from difflib import SequenceMatcher
+    ratio = SequenceMatcher(None, output.lower(), expected.lower()).ratio()
+    return ratio >= threshold
+```
+
+Exact match works well when: the output format is tightly constrained (JSON with specific fields, a single numeric answer, a structured code block), the task has a uniquely correct answer, and you control the prompt in a way that produces consistent formatting.
+
+Exact match fails when: the task has multiple valid phrasings, the model produces correct content in a different structure, or any prompt or model change shifts the output format without changing correctness. In practice, exact match fails on almost any natural language output from an agent.
+
+## Rubric scoring: flexible but requires definition
+
+A rubric breaks the evaluation into named criteria, each scored independently. This separates the question "is the output good?" into specific, answerable sub-questions.
+
+```python
+@dataclass
+class RubricCriterion:
+    name: str
+    check: Callable[[str], bool]
+    weight: float = 1.0
+
+def rubric_score(output: str, criteria: list[RubricCriterion]) -> dict:
+    results = {}
+    for c in criteria:
+        results[c.name] = {
+            "pass": c.check(output),
+            "weight": c.weight,
+        }
+    total_weight = sum(c.weight for c in criteria)
+    weighted_score = sum(
+        c.weight for c in criteria if results[c.name]["pass"]
+    ) / total_weight
+    return {"criteria": results, "score": weighted_score}
+
+# Example criteria for a research summary task
+criteria = [
+    RubricCriterion("contains_answer", lambda o: "2021" in o, weight=2.0),
+    RubricCriterion("cites_source",   lambda o: "according to" in o.lower() or "source:" in o.lower()),
+    RubricCriterion("no_hallucination", lambda o: "founded in 1998" not in o),  # known wrong answer
+    RubricCriterion("concise",         lambda o: len(o.split()) < 200),
+]
+```
+
+Rubric scoring requires upfront work — you have to define what "good" means before you collect cases. This is the point. The discipline of writing criteria forces clarity about what the agent is supposed to do that you often don't have until you try.
+
+## Trajectory analysis: the path, not just the destination
+
+Trajectory analysis evaluates the sequence of tool calls the agent made, not just the final output. This is the only metric that catches cost regressions, unnecessary tool calls, and wrong-tool usage.
+
+```python
+@dataclass
+class ToolCall:
+    tool: str
+    args: dict
+    result: str
+
+@dataclass
+class Trajectory:
+    tool_calls: list[ToolCall]
+    final_output: str
+
+def trajectory_score(traj: Trajectory, expected: dict) -> dict:
+    results = {}
+
+    # Check: correct tools used
+    used_tools = {tc.tool for tc in traj.tool_calls}
+    expected_tools = set(expected.get("required_tools", []))
+    results["correct_tools"] = expected_tools.issubset(used_tools)
+
+    # Check: no forbidden tools
+    forbidden = set(expected.get("forbidden_tools", []))
+    results["no_forbidden_tools"] = not (forbidden & used_tools)
+
+    # Check: tool call count within budget
+    max_calls = expected.get("max_tool_calls", float("inf"))
+    results["within_budget"] = len(traj.tool_calls) <= max_calls
+
+    # Check: no repeated identical calls
+    calls = [(tc.tool, str(tc.args)) for tc in traj.tool_calls]
+    results["no_duplicate_calls"] = len(calls) == len(set(calls))
+
+    score = sum(results.values()) / len(results)
+    return {"criteria": results, "score": score}
+```
+
+Trajectory analysis is the metric most teams skip and most regret skipping. A 3× increase in tool calls doubles your cost and latency with no improvement in output quality. Without trajectory analysis, your eval suite will never catch it.
+
+## Choosing the right metric for each task
+
+No single metric is best for all tasks. The right approach is to use all three, weighted by what matters for the specific task.
+
+<ScoringPlayground />
+
+The playground above shows the same agent response scored by all three metrics. The exact match fails (string mismatch), the rubric passes (all criteria met), and the trajectory passes (correct tools, no redundancy). Which one should you trust? All three — they're measuring different things.
+
+| Task type | Primary metric | Secondary |
+|---|---|---|
+| Structured data extraction | Exact match | Rubric (field presence) |
+| Research summarisation | Rubric | LLM-as-judge |
+| Tool-use efficiency | Trajectory | Rubric |
+| Multi-step reasoning | Trajectory | Rubric |
+| Code generation | Exact match (tests pass) | Rubric (style, security) |
+
+<Callout type="warning">
+Metrics optimise for what you measure. If you only measure answer correctness, the agent will produce correct answers via expensive, fragile paths. If you only measure trajectory efficiency, it may cut corners on quality. Always pair a quality metric with a cost/efficiency metric.
+</Callout>
+
+## Calibrating your rubric
+
+A rubric is only useful if it agrees with human judgement. Before you trust a rubric, calibrate it: run it on 10–20 cases where you know the correct verdict (from human review), and check the agreement rate. A rubric that disagrees with human judgement 30% of the time is not measuring what you think it is.
+
+```python
+def calibrate_rubric(
+    rubric_fn: Callable,
+    cases: list[dict],  # each has "output" and "human_verdict" (pass/fail)
+) -> float:
+    agreements = 0
+    for case in cases:
+        rubric_result = rubric_fn(case["output"])
+        rubric_pass = rubric_result["score"] >= 0.75
+        if rubric_pass == case["human_verdict"]:
+            agreements += 1
+    return agreements / len(cases)
+
+# A calibrated rubric should agree with human judgement ≥ 80% of the time
+# Below 80%: your criteria are wrong, not your agent
+```
+
+<Quiz
+  question="Your agent's eval suite shows 100% rubric pass rate after a major prompt refactor. Before shipping, what should you check?"
+  options={[
+    {
+      label: "Nothing — 100% pass rate means the refactor is safe.",
+      correct: false,
+      explanation: "100% pass rate can mean the system is excellent, or it can mean your criteria are too weak to catch real failures. Before trusting a perfect score, verify that your rubric actually catches the failure modes you care about by running it on known-bad outputs."
+    },
+    {
+      label: "Check trajectory analysis — rubric scores don't catch cost or efficiency regressions.",
+      correct: true,
+      explanation: "Rubric scoring evaluates output quality, not the path taken. A prompt refactor that adds 2 extra tool calls per query will pass the rubric but fail trajectory analysis. Always pair quality metrics with efficiency metrics before shipping."
+    },
+    {
+      label: "Add more rubric criteria — more criteria means a stricter test.",
+      correct: false,
+      explanation: "More criteria doesn't help if they're measuring the same thing. The gap is in what you're measuring, not how many criteria you have. Trajectory analysis measures something the rubric fundamentally cannot."
+    }
+  ]}
+/>
+
+[← Lesson 2](/modules/module-04-evaluation/lesson-02) · [Lesson 4: LLM-as-judge →](/modules/module-04-evaluation/lesson-04)

@@ -1,0 +1,132 @@
+---
+title: "Building Eval Datasets"
+module: "module-04-evaluation"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Building Eval Datasets
+
+An eval suite is only as good as the cases in it. A suite of 100 happy-path cases will pass even when your agent is broken in the ways that matter. This lesson covers how to build a dataset that actually finds failures — where to get cases, how to categorise them, and how to know when your coverage is good enough.
+
+## The four categories every suite needs
+
+A complete eval dataset needs cases in four distinct categories. Each catches a different class of failure.
+
+**Happy path** — the golden path where inputs are clean, expectations are clear, and the agent should succeed with high confidence. These are your baseline. If happy-path cases fail, something is fundamentally broken.
+
+**Adversarial** — deliberate attempts to break the agent: prompt injection in retrieved documents, jailbreak attempts, contradictory instructions, and inputs designed to trigger known model weaknesses. These test robustness.
+
+**Edge cases** — unusual but valid inputs: empty strings, extremely long inputs, inputs in unexpected languages, inputs with special characters, inputs that are technically within spec but hit boundary conditions. These test completeness.
+
+**Regression cases** — every bug that ever made it to review becomes a regression case. These are the most valuable category. A regression case is a guarantee: "this specific failure mode will never ship again."
+
+<EvalSetBuilder />
+
+## Where eval cases come from
+
+The three best sources are real usage, synthetic generation, and past failures.
+
+**Real usage** is the gold standard. If you have production logs, mine them for cases that were handled incorrectly, cases that required human escalation, and cases where the agent took an unusual path. Real inputs contain distributions and edge cases that you would never think to invent.
+
+```python
+def mine_production_logs(logs: list[dict]) -> list[EvalCase]:
+    cases = []
+    for log in logs:
+        if log.get("escalated") or log.get("human_corrected"):
+            cases.append(EvalCase(
+                input=log["user_input"],
+                expected_criteria=["correct_answer", "no_tool_loop"],
+                category="regression",
+                source=f"prod_log_{log['id']}"
+            ))
+    return cases
+```
+
+**Synthetic generation** fills gaps before you have production traffic. Use an LLM to generate adversarial cases, edge cases, and variations on your happy-path cases. The key discipline: generate cases before you see your agent's outputs, not after.
+
+```python
+GENERATE_CASES_PROMPT = """
+You are building an eval dataset for a research agent that searches the web and summarises findings.
+
+Generate 5 adversarial test cases — inputs designed to trigger failure modes:
+- Prompt injection in a realistic user query
+- A query where the correct answer is "I don't know" (no reliable source exists)
+- A query with a subtle ambiguity that could send the agent down the wrong path
+- A query where the agent should stop after 1 tool call but might loop
+- A query that looks like a happy path but has a trap in it
+
+For each case, specify:
+- input: the user query
+- failure_mode: what you expect to go wrong
+- pass_criterion: what the agent must do to pass despite the trap
+"""
+```
+
+**Past failures** — every time a real failure is found (in review, in testing, in production), it immediately becomes an eval case before the bug is fixed. This is a discipline, not a one-time activity.
+
+## Seeding from real failures
+
+The most common mistake in eval dataset construction is seeding exclusively from cases where the agent currently succeeds. This produces an eval suite that validates your existing system rather than finding its weaknesses.
+
+The right approach is adversarial seeding: deliberately construct cases based on your agent's known weaknesses, then verify that your current system fails them before adding them to the suite. If the agent already passes a case, that case is less valuable as a test — it's not finding anything.
+
+```python
+@dataclass
+class EvalCase:
+    input: str
+    expected_criteria: list[str]  # what the agent must satisfy to pass
+    category: Literal["happy", "adversarial", "edge", "regression"]
+    source: str                   # where this case came from
+    failing_before_fix: bool      # True if agent failed this before the fix
+
+def add_regression_case(bug_description: str, input: str, criteria: list[str]):
+    # Call this BEFORE fixing the bug, to document the failure
+    case = EvalCase(
+        input=input,
+        expected_criteria=criteria,
+        category="regression",
+        source=f"bug:{bug_description}",
+        failing_before_fix=True,
+    )
+    eval_suite.append(case)
+    # Now fix the bug — the case will pass after the fix
+```
+
+## How many cases is enough?
+
+There is no universal answer. A useful heuristic: your eval suite is large enough when adding new cases stops changing the pass rate — you're sampling from a stable distribution. In practice this usually requires:
+
+- 5–10 happy-path cases (you don't need many; happy paths are cheap to pass)
+- 10–20 adversarial cases (this is where the suite earns its keep)
+- 5–10 edge cases (boundary conditions specific to your agent)
+- 1 regression case per past bug (grows over time; never shrinks)
+
+The total case count matters less than the category distribution. An eval suite of 50 happy-path cases is weaker than a suite of 30 cases with real adversarial and regression coverage.
+
+<Callout type="warning">
+Never write eval cases after looking at your agent's outputs. It is tempting to collect cases where the agent does well and label them as ground truth. This produces a suite that measures consistency, not correctness — it will pass even when the agent degrades gracefully (and incorrectly).
+</Callout>
+
+<Quiz
+  question="Your research agent just shipped a bug in production: when the user's query contains the word 'compare', the agent calls the search tool twice with identical queries, wasting cost and doubling latency. You fix the bug. What should you do with this failure case?"
+  options={[
+    {
+      label: "Document it in a comment in the code and move on.",
+      correct: false,
+      explanation: "A comment documents the past. An eval case prevents the future. Comments don't run in CI — eval cases do."
+    },
+    {
+      label: "Add it as a regression case in the eval suite before merging the fix.",
+      correct: true,
+      explanation: "Correct. Add the case before the fix is merged — verify the suite fails on the un-fixed code, then passes after the fix. That's a real regression test. If you add it after, you only know it passes now; you have no evidence it would catch a recurrence."
+    },
+    {
+      label: "Skip it — the fix is merged, so it can't regress.",
+      correct: false,
+      explanation: "Any change to the prompt, the model, or the tool routing logic could reintroduce this exact failure. 'It's fixed' is only true for the current version of the code. Regression cases exist precisely because things that were fixed can un-fix themselves."
+    }
+  ]}
+/>
+
+[← Lesson 1](/modules/module-04-evaluation/lesson-01) · [Lesson 3: Metric design →](/modules/module-04-evaluation/lesson-03)

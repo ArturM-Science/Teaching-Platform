@@ -1,0 +1,185 @@
+---
+title: "Prompting, Plan Mode, Checkpoints, and Verification"
+module: "module-14-claude-code"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 - Prompting, Plan Mode, Checkpoints, and Verification
+
+Claude Code is conversational, but good sessions still need engineering discipline. The pattern is simple: explore first when uncertain, implement with a boundary, verify with a command, and review the diff.
+
+## Prompt shape
+
+A strong Claude Code prompt contains five parts:
+
+1. **Goal** - what should be true after the change.
+2. **Context** - files, errors, screenshots, logs, relevant docs.
+3. **Boundary** - what is in scope and out of scope.
+4. **Verification** - command, test, build, or manual check.
+5. **Reporting** - what you want back at the end.
+
+```text
+Goal:
+Fix the failing lesson render when an MDX component receives an array prop.
+
+Context:
+- Rendering uses next-mdx-remote/rsc.
+- Read AGENTS.md before editing.
+- The symptom is Quiz options becoming undefined.
+
+Boundary:
+- Start in app/(learner)/modules/[module]/[lesson]/page.tsx.
+- Do not change MDX content or Quiz.tsx unless the root cause requires it.
+
+Verification:
+- Run npm run build.
+- If build passes, compile one affected MDX lesson directly if possible.
+
+Report:
+- Root cause
+- Files changed
+- Verification result
+- Remaining test gap
+```
+
+<Callout type="tip">
+If you are not sure where the bug lives, do not ask for a fix first. Ask Claude Code to investigate and propose the smallest plan.
+</Callout>
+
+## Plan mode
+
+Plan mode lets Claude read and investigate before editing. It is the right default for:
+
+- unfamiliar repositories
+- security-sensitive areas
+- large migrations
+- ambiguous product requests
+- bugs without a known reproduction
+
+```text
+/plan
+
+Investigate why the dashboard shows modules with content as locked.
+
+Return:
+1. The files involved
+2. The current control flow
+3. The smallest likely fix
+4. The verification command
+
+Do not edit files until I approve the plan.
+```
+
+Plan mode is not bureaucracy. It is how you separate understanding from mutation.
+
+## Interrupt and steer
+
+Claude Code does not need to finish a wrong path. You can interrupt and redirect:
+
+```text
+Stop. This is broader than the task.
+
+Only fix the failing test in test_content_loader.py.
+Do not refactor the loader.
+Rerun the same test after the fix.
+```
+
+Good steering is specific. "No, not that" is less useful than "do not touch auth; the issue is the route guard."
+
+## Checkpoints and Git
+
+Claude Code creates local checkpoints before file edits, but Git is still your review surface.
+
+Before a real task:
+
+```bash
+git status --short
+git switch -c claude-code/mdx-array-props
+```
+
+During a task:
+
+```bash
+git diff --stat
+git diff
+```
+
+After a task:
+
+```bash
+npm run build
+git diff --check
+```
+
+Use checkpoints to rewind a bad agent turn. Use Git to review, commit, branch, and merge.
+
+## Verification loops
+
+Claude Code performs best when the verification signal is objective:
+
+| Task | Better verification |
+|---|---|
+| Bug fix | Re-run the failing test or reproduction |
+| TypeScript change | `npm run build` or type check |
+| Formatting change | formatter plus `git diff --check` |
+| UI behavior | screenshot or Playwright check |
+| Docs change | link check or MDX compile |
+
+When verification fails, use a repair prompt:
+
+```text
+The verification command failed.
+
+Command:
+npm run build
+
+Relevant output:
+[paste output]
+
+Diagnose the root cause before editing. Make the smallest fix, then rerun the same command. If the same error appears twice, stop and explain the blocker.
+```
+
+<Quiz
+  question="Why is plan mode useful before editing a security-sensitive area?"
+  options={[
+    {
+      label: "Because it makes Claude Code unable to read files.",
+      correct: false,
+      explanation: "Plan mode is read-first, not blind. It is useful because Claude can inspect and propose without mutating source files."
+    },
+    {
+      label: "Because it separates understanding from mutation, giving the human a chance to approve the target and risk before edits happen.",
+      correct: true,
+      explanation: "Correct. Sensitive work deserves a plan before the agent starts changing files."
+    },
+    {
+      label: "Because plan mode automatically proves that the final code is secure.",
+      correct: false,
+      explanation: "Plan mode is not a security proof. You still need review, tests, and permission boundaries."
+    }
+  ]}
+/>
+
+<Quiz
+  question="A Claude Code session made a change and the build fails. What is the best next prompt?"
+  options={[
+    {
+      label: "Undo everything and start over.",
+      correct: false,
+      explanation: "Sometimes that is right, but first ask for root-cause diagnosis. The failure may be a small mismatch."
+    },
+    {
+      label: "Paste the exact command and relevant output, ask for root-cause diagnosis, then ask for the smallest fix and the same command rerun.",
+      correct: true,
+      explanation: "Correct. That creates a tight repair loop with a stable feedback signal."
+    },
+    {
+      label: "Ask Claude to try a different build command until one passes.",
+      correct: false,
+      explanation: "Changing the signal to get a pass hides the problem. Keep the chosen verification command unless you can explain why it was wrong."
+    }
+  ]}
+/>
+
+[Previous: Lesson 1](/modules/module-14-claude-code/lesson-01) - [Lesson 3 ->](/modules/module-14-claude-code/lesson-03)

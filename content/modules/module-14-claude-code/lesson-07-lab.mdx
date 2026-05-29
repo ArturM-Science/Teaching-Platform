@@ -1,0 +1,329 @@
+---
+title: "Lab: Configure a Safe Claude Code Workflow"
+module: "module-14-claude-code"
+lesson: 7
+slug: "lesson-07-lab"
+---
+
+# Lab - Configure a Safe Claude Code Workflow
+
+<LabBrief title="Safe Claude Code Workflow" time="2-3 hours">
+
+#### Objective
+
+Configure Claude Code for one real repository, complete a small verified change, and design how the same workflow would look as a Claude Managed Agents deployment.
+
+#### Setup
+
+Choose a repository you are allowed to edit. Start from a clean branch:
+
+```bash
+git status --short
+git switch -c claude-code-safe-workflow
+```
+
+Use Claude Code in `plan` or `default` mode first. Do not start this lab in `bypassPermissions`.
+
+#### Deliverables
+
+- A small final diff that can be reviewed in under 10 minutes
+- A `CLAUDE.md` or `.claude/rules/` update, or a note explaining why none was appropriate
+- One permission rule or hook configuration proposal
+- Verification output from a real command
+- A Claude Code review pass
+- `claude-code-lab-notes.md` with prompts, decisions, and Managed Agents design notes
+
+#### Hard constraints
+
+- Do not read secrets, private keys, or production data
+- Do not add dependencies without stopping for human approval
+- Do not use `bypassPermissions`
+- Do not run deployment, migration, or external write commands
+- Final diff must be small and reviewable
+
+</LabBrief>
+
+## Step 1: Explore in plan mode
+
+Ask Claude Code to identify three candidate tasks:
+
+```text
+/plan
+
+Inspect this repository and propose three small improvements.
+
+Each candidate must:
+- be reviewable in under 10 minutes
+- have a clear verification command
+- avoid auth, billing, production data, secrets, and deployment
+- require no new dependency
+
+Do not edit files.
+
+Return:
+1. Task
+2. Files likely involved
+3. Verification command
+4. Risk level
+5. Why this is small enough
+```
+
+Pick one. If every task is too broad, ask for smaller candidates.
+
+## Step 2: Create lab notes
+
+Create `claude-code-lab-notes.md`:
+
+```md
+# Claude Code lab notes
+
+## Chosen task
+
+## Files in scope
+
+## Non-goals
+
+## Permission mode
+
+## Verification command
+
+## Prompts used
+
+## Review findings
+
+## CLAUDE.md / rules / hook decision
+
+## Managed Agents design
+
+## Reflection
+```
+
+## Step 3: Add durable context
+
+Ask Claude Code whether the repo has a useful `CLAUDE.md`:
+
+```text
+Inspect existing project guidance.
+
+Tell me:
+1. Whether CLAUDE.md exists.
+2. Whether AGENTS.md exists and should be imported.
+3. One specific instruction that would help future Claude Code sessions.
+
+Do not edit until I approve.
+```
+
+Good updates:
+
+```md
+@AGENTS.md
+
+## Claude Code
+
+- Use plan mode before touching `app/auth/` or Supabase policies.
+- Run `npm run build` after MDX rendering changes.
+- Do not add dependencies without asking first.
+```
+
+If no durable rule emerged, record that in the notes.
+
+## Step 4: Implement the small change
+
+Give Claude Code a bounded implementation prompt:
+
+```text
+Implement the chosen task.
+
+Scope:
+- [files or directory]
+
+Non-goals:
+- Do not refactor unrelated code.
+- Do not change auth, billing, database policies, deployment, or secrets.
+- Do not add dependencies.
+
+Verification:
+- Run [command].
+- If it fails, diagnose root cause before editing again.
+- Rerun the same command after the fix.
+
+Report:
+- Files changed
+- Verification result
+- Remaining test gap
+```
+
+## Step 5: Add a permission rule or hook proposal
+
+You do not need to install a hook during the lab, but you must propose one useful rule or hook.
+
+Examples:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(git status)",
+      "Bash(git diff *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Bash(git push *)"
+    ]
+  }
+}
+```
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npm run lint -- --fix"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+If a hook would be too risky or slow, explain why a permission rule is better.
+
+## Step 6: Review the diff
+
+Ask for a blocking review:
+
+```text
+Review the current diff as if blocking a pull request.
+
+Findings first, ordered by severity.
+Prioritize bugs, security, data exposure, missing tests, and wrong framework assumptions.
+If there are no blocking findings, say that clearly and name residual risk.
+Do not edit files during review.
+```
+
+If Claude finds a real issue:
+
+```text
+Fix only finding #1. Do not change unrelated files. Rerun the verification command.
+```
+
+## Step 7: Design the Managed Agents version
+
+In `claude-code-lab-notes.md`, sketch how this workflow would become a Managed Agents deployment.
+
+Use this template:
+
+```md
+## Managed Agents design
+
+### Agent
+- Model:
+- System prompt:
+- Skills:
+- MCP servers:
+- Built-in tools enabled:
+- Custom tools:
+
+### Environment
+- Cloud sandbox or self-hosted sandbox:
+- Network policy:
+- Secrets policy:
+
+### Session
+- User event:
+- Success criteria:
+- Stop conditions:
+- Human approval points:
+
+### Permission policy
+- always_allow:
+- always_ask:
+
+### Data handling
+- What data is stored server-side:
+- What must not enter the session:
+- Deletion/retention consideration:
+```
+
+The goal is not to deploy Managed Agents in this lab. The goal is to prove you understand the architectural translation.
+
+## What to submit
+
+Submit:
+
+- Final diff
+- `claude-code-lab-notes.md`
+- verification output
+- review output
+- `CLAUDE.md` or rule change, if any
+- permission rule or hook proposal
+- Managed Agents design sketch
+
+<Rubric
+  threshold="All criteria must score 3 (Meets) or above to pass."
+  criteria={[
+    {
+      name: "Task scope",
+      exceeds: "The task is narrowly scoped, explicitly bounded, and the final diff is reviewable in under 10 minutes.",
+      meets: "The task is small and avoids unrelated refactor.",
+      approaching: "The task is mostly small but includes one unclear or unrelated change.",
+      below: "The task is broad, unbounded, or hard to review."
+    },
+    {
+      name: "Claude Code operation",
+      exceeds: "The learner uses plan/default mode appropriately, steers drift, keeps Git state visible, and records prompts clearly.",
+      meets: "The learner uses a safe permission posture and records prompts and decisions.",
+      approaching: "The learner uses Claude Code but does not clearly record permission or steering decisions.",
+      below: "The learner grants unsafe autonomy or cannot explain the session flow."
+    },
+    {
+      name: "Durable context",
+      exceeds: "The CLAUDE.md/rules decision is specific, concise, and clearly assigned to the right mechanism.",
+      meets: "The learner adds or evaluates one durable instruction.",
+      approaching: "The instruction is present but vague or too broad.",
+      below: "No durable context decision is made."
+    },
+    {
+      name: "Safety controls",
+      exceeds: "Permission rules or hooks are well-scoped, enforce real boundaries, and avoid broad risky automation.",
+      meets: "A reasonable permission rule or hook proposal is included.",
+      approaching: "A proposal exists but is too broad or not clearly tied to a risk.",
+      below: "No safety-control proposal is included."
+    },
+    {
+      name: "Verification and review",
+      exceeds: "A relevant command is run, failures are handled through a repair loop, and a separate blocking review is recorded.",
+      meets: "Verification and review are both performed and recorded.",
+      approaching: "Verification or review is incomplete but the gap is explained.",
+      below: "No meaningful verification or review is performed."
+    },
+    {
+      name: "Managed Agents design",
+      exceeds: "The design maps agent, environment, session, events, tools, permissions, and data handling with clear tradeoffs.",
+      meets: "The design includes the major Managed Agents objects and a reasonable permission policy.",
+      approaching: "The design mentions Managed Agents but misses important runtime or data considerations.",
+      below: "No Managed Agents translation is submitted."
+    }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can explain Claude Code as an agent harness, not just a chat interface",
+    "I can choose between plan, default, acceptEdits, auto, dontAsk, and bypassPermissions based on risk",
+    "I can decide whether guidance belongs in CLAUDE.md, rules, auto memory, a skill, MCP, a hook, or a permission rule",
+    "I can use subagents, agent view, worktrees, and dynamic workflows without losing reviewability",
+    "I can describe Managed Agents using agents, environments, sessions, events, tools, and permission policies",
+    "I can complete a Claude Code task with a small diff, real verification, and a recorded review"
+  ]}
+  next="Module 14 complete - you can now operate Claude Code locally and reason about Claude Managed Agents as a production runtime."
+/>
+
+[Previous: Lesson 6](/modules/module-14-claude-code/lesson-06)

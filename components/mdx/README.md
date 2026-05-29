@@ -184,16 +184,21 @@ Notes:
 
 ### `<Checkpoint>`
 
-Interactive self-assessment checklist. Currently hardcoded to Module 0 items.
-
-> **Known limitation:** `Checkpoint` has hardcoded items for Module 0. It needs a `items` prop before it can be reused across modules. Do not use it on other modules without updating the component first.
+Interactive self-assessment checklist. Accepts `items` and `next` props.
 
 | Prop | Type | Required | Description |
 |---|---|---|---|
-| *(none)* | — | — | Items are currently hardcoded in the component |
+| `items` | `string[]` | Yes | List of self-assessment statements shown as checkboxes |
+| `next` | `string` | Yes | Message shown when all items are checked (e.g. "Module N complete — move on to Module N+1 →") |
 
 ```mdx
-<Checkpoint />
+<Checkpoint
+  items={[
+    "I can explain X without notes",
+    "I can build Y from scratch",
+  ]}
+  next="Module N complete — move on to Module N+1 →"
+/>
 ```
 
 ---
@@ -226,4 +231,70 @@ No maximum iteration guard. The model kept reasoning "I still don't know, I shou
 Always set a hard `max_iterations` limit. Log when the limit is hit — don't silently stop.
 
 </FailureMuseum>
+```
+
+---
+
+## Module 04 — Evaluation Components
+
+These five components are used exclusively in Module 4 lessons.
+
+---
+
+### `<EvalChallengeViz>`
+
+Shows the same research agent prompt run three times producing different outputs. Learner picks the "best" response, then sees two domain experts disagree — making the "no ground truth" problem concrete.
+
+No props. Self-contained with hardcoded scenarios.
+
+```mdx
+<EvalChallengeViz />
+```
+
+---
+
+### `<EvalSetBuilder>`
+
+Eight test case descriptions. Learner clicks to classify each as Happy Path / Adversarial / Edge Case / Regression. After submitting, shows correct answers, explanations for wrong classifications, and a coverage breakdown by category.
+
+No props. Self-contained.
+
+```mdx
+<EvalSetBuilder />
+```
+
+---
+
+### `<ScoringPlayground>`
+
+A single agent response (with tool call trace) scored by three different metrics: Exact Match, Rubric Score, and Trajectory Analysis. Learner toggles between metrics to see different verdicts for the same output.
+
+No props. Self-contained.
+
+```mdx
+<ScoringPlayground />
+```
+
+---
+
+### `<JudgeBiasDemo>`
+
+Demonstrates LLM-as-judge bias interactively. Two modes: **Position bias** (swap response order, watch judge flip verdict) and **Length bias** (longer response scores higher despite lower quality). Learner runs the judge, swaps the order, sees the score change.
+
+No props. Self-contained.
+
+```mdx
+<JudgeBiasDemo />
+```
+
+---
+
+### `<RegressionRunnerViz>`
+
+CI-style test runner simulation. Eight test cases shown with pass/fail badges. "Introduce Bug" toggle causes three regression cases to fail while happy-path tests continue passing. "Fix Bug" restores all to passing.
+
+No props. Self-contained.
+
+```mdx
+<RegressionRunnerViz />
 ```
