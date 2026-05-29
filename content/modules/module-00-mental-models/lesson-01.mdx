@@ -9,7 +9,7 @@ slug: "lesson-01"
 
 You don't need to understand how a language model is trained to build agents with one. But you do need to understand what it's doing at inference time — because that shapes every design decision you'll make.
 
-<Video src="https://www.youtube.com/watch?v=F28_DkMWgeI" title="How LLMs Learn" />
+<LLMPipelineViz />
 
 ## Text is tokens, not characters
 
@@ -20,6 +20,28 @@ This matters because the model never sees your text as characters. It sees a seq
 <Callout type="key">
 The model's input and output are both sequences of tokens. When you "send a message," you're really sending a list of integers. When it "responds," it's producing integers one at a time.
 </Callout>
+
+## From tokens to meaning: embeddings
+
+After tokenization, each integer token ID is mapped to a high-dimensional vector called an **embedding**. Think of it as the model's compressed representation of that word — a list of hundreds of floating-point numbers that encodes what the model knows about how that token tends to be used.
+
+These vectors encode semantic relationships geometrically. "cat" and "kitten" end up near each other in this space. "king" minus "man" plus "woman" lands near "queen." The geometry of the embedding space is meaning, in a narrow but useful sense.
+
+<Callout type="key">
+The model doesn't understand language the way you do. It has learned that certain vectors appear in similar contexts, and it uses that geometric structure to predict what token should come next.
+</Callout>
+
+## Self-attention: how tokens look at each other
+
+Embeddings give each token a representation, but that representation is context-free — "bank" gets the same initial vector whether it means a riverbank or a financial institution. Transformers solve this by running each token through layers of **self-attention**, where every token gets to look at all other tokens and decide how much to weight them when building its final representation.
+
+Token `i` computes how relevant every other token `j` is to understanding its own meaning in this context. A pronoun "it" might attend strongly back to the noun it refers to. The verb "are" in "the keys to the cabinet are..." must reach past "cabinet" to agree with "keys." Self-attention makes these long-range connections explicit.
+
+<AttentionVisualizer />
+
+Try the pronoun resolution example: click "it" and watch it reach back to "animal." That's the model doing coreference resolution through attention. In the long-range dependency example, "are" correctly skips the closer "cabinet" to link with "keys" — the model has learned subject–verb agreement as an attention pattern.
+
+This mechanism is also why context window length matters so much for agents. More context means more tokens the model can attend to. But every token must attend to every other token — attention scales quadratically with sequence length, which is why long contexts are expensive.
 
 ## The prediction loop
 

@@ -1,0 +1,211 @@
+---
+title: "Where RAG Fails and Agentic RAG"
+module: "module-03-memory-knowledge"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Where RAG Fails and Agentic RAG
+
+Naive RAG retrieves and trusts what it finds. If the retrieved chunks are wrong, the answer is wrong — and the pipeline has no way to detect this. Agentic RAG breaks that assumption: the agent retrieves, reflects on whether what came back is actually useful, and retries with a better query if not. This lesson covers the four ways naive RAG breaks and how to build the loop that fixes them.
+
+## The four failure modes
+
+**1. Bad chunking.** Chunks that are too large retrieve for many unrelated queries. Chunks that are too small lack enough context to interpret. The failure looks like: the right document is in the index but the answer is wrong because the relevant sentence is buried in a noisy 2000-token chunk, or isolated from the surrounding sentences that give it meaning.
+
+```
+Query: "What is the recommended retry delay for the payments API?"
+
+Retrieved chunk (too large — entire API docs section):
+"The payments API supports multiple authentication methods including OAuth 2.0,
+API keys, and JWT tokens. Rate limits apply per endpoint. The retry policy
+recommends exponential backoff starting at 1 second with a maximum of 5 retries.
+Error codes are documented in Appendix B. Webhooks require HTTPS endpoints..."
+
+Problem: The correct answer (1 second exponential backoff) is in the chunk but
+the model's attention is diluted across 400 tokens of irrelevant content.
+```
+
+**2. Irrelevant retrieval.** The query doesn't match the chunks semantically, even though the knowledge base contains the answer. Often caused by terminology mismatch: the query uses plain language, the documents use jargon, or vice versa.
+
+```
+Query: "How do I fix the thing where the app crashes on startup?"
+Chunk that has the answer: "NullPointerException on ApplicationContext initialisation
+occurs when the database connection pool is exhausted at boot time."
+
+Problem: "crashes on startup" and "NullPointerException on ApplicationContext
+initialisation" have low cosine similarity despite being about the same issue.
+```
+
+**3. Lost in the middle.** Models attend more strongly to content at the beginning and end of a context window. If the relevant chunk is at position 3 of 5 retrieved results, the model may effectively ignore it. Retrieval precision matters less than you'd expect if you're not controlling chunk ordering.
+
+**4. Stale data.** The index was built at a point in time. If the underlying documents change, the index doesn't update automatically. A query retrieving outdated information will produce a confidently wrong answer with no signal that anything is stale.
+
+<Callout type="warning">
+All four failure modes produce the same symptom: a wrong answer with no error raised. The pipeline runs to completion, returns a response, and nothing in the logs indicates a problem. Catching these failures requires evaluation — inspecting retrieved chunks and checking answers against ground truth, not just checking that the pipeline ran.
+</Callout>
+
+## Query reformulation
+
+The simplest fix for irrelevant retrieval is to rewrite the query before embedding it. Instead of embedding the user's raw question, use a model call to generate a version of the query that better matches the vocabulary and style of the indexed documents.
+
+```python
+def reformulate_query(original_query: str, domain_context: str = "") -> str:
+    prompt = f"""Rewrite this query to improve retrieval from a technical knowledge base.
+Use precise technical vocabulary. Remove conversational filler.
+Expand abbreviations. Make implicit concepts explicit.
+{f"Domain context: {domain_context}" if domain_context else ""}
+
+Original query: {original_query}
+Rewritten query:"""
+
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=128,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text.strip()
+
+# Example
+original  = "how do I fix crashes on startup"
+rewritten = reformulate_query(original, domain_context="Python web application")
+# → "ApplicationContext initialisation failure Python NullPointerException startup crash"
+```
+
+Use a fast, cheap model for reformulation — you're not generating content, just rewriting a short string. `claude-haiku-4-5` is appropriate here.
+
+<AgenticRAGLoop />
+
+## The agentic RAG loop
+
+Query reformulation is a single shot. Agentic RAG turns it into a loop: retrieve, evaluate the quality of what came back, and if it's insufficient, reformulate and try again.
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class RetrievalResult:
+    chunks: list[str]
+    query_used: str
+    attempt: int
+    sufficient: bool
+
+def evaluate_retrieval(query: str, chunks: list[str]) -> bool:
+    """Ask the model whether the retrieved chunks are sufficient to answer the query."""
+    context = "\n\n".join(chunks)
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=16,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Query: {query}\n\n"
+                f"Retrieved context:\n{context}\n\n"
+                "Does this context contain enough information to answer the query? "
+                "Reply with only YES or NO."
+            )
+        }],
+    )
+    return response.content[0].text.strip().upper().startswith("YES")
+
+def agentic_retrieve(
+    collection,
+    query: str,
+    max_attempts: int = 3,
+) -> RetrievalResult:
+    current_query = query
+
+    for attempt in range(1, max_attempts + 1):
+        chunks = retrieve(collection, current_query, k=4)
+
+        if evaluate_retrieval(query, chunks):
+            return RetrievalResult(
+                chunks=chunks,
+                query_used=current_query,
+                attempt=attempt,
+                sufficient=True,
+            )
+
+        if attempt < max_attempts:
+            # Reformulate using the original query and what failed
+            current_query = reformulate_query(
+                query,
+                domain_context=f"Previous retrieval attempt returned insufficient results."
+            )
+
+    # Return best effort after max attempts
+    return RetrievalResult(
+        chunks=chunks,
+        query_used=current_query,
+        attempt=max_attempts,
+        sufficient=False,
+    )
+```
+
+The key structural decision: `evaluate_retrieval` is called with the **original query**, not the reformulated one. The question "does this answer the user's question?" should always be anchored to what the user actually asked.
+
+<Callout type="key">
+Agentic RAG vs. naive RAG: naive RAG retrieves and trusts. Agentic RAG retrieves, reflects on quality, and either proceeds or reformulates. The reflection step is cheap — a single yes/no call to a fast model. The improvement in retrieval quality for ambiguous or jargon-heavy queries is significant.
+</Callout>
+
+## Multi-hop retrieval
+
+Some questions can't be answered from a single retrieved chunk because the answer requires chaining information across multiple documents. "What are the security implications of the approach described in the architecture decision from last March?" requires finding the March ADR first, then finding security documents relevant to that approach.
+
+```python
+def multi_hop_retrieve(
+    collection,
+    query: str,
+    hops: int = 2,
+) -> list[str]:
+    all_chunks = []
+    current_query = query
+
+    for hop in range(hops):
+        chunks = retrieve(collection, current_query, k=3)
+        all_chunks.extend(chunks)
+
+        if hop < hops - 1:
+            # Generate a follow-up query based on what was found
+            bridge_prompt = (
+                f"Original question: {query}\n\n"
+                f"Retrieved so far:\n{''.join(chunks[:2])}\n\n"
+                "What additional information is needed to fully answer the original question? "
+                "State it as a search query in one sentence."
+            )
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=64,
+                messages=[{"role": "user", "content": bridge_prompt}],
+            )
+            current_query = response.content[0].text.strip()
+
+    # Deduplicate
+    seen = set()
+    return [c for c in all_chunks if not (c in seen or seen.add(c))]
+```
+
+Multi-hop retrieval adds latency and cost proportional to the number of hops. Use it only when you know the knowledge base is structured such that answers span multiple documents. For most knowledge bases, a well-reformulated single-hop query is sufficient.
+
+<Quiz
+  question="After implementing agentic RAG, you notice the evaluate_retrieval step returns YES on the first attempt for almost every query — but answer quality is still poor. What's the most likely problem?"
+  options={[
+    {
+      label: "The evaluation model is too lenient — it's saying YES even when chunks don't actually answer the query. The evaluation prompt needs to be more demanding.",
+      correct: true,
+      explanation: "Exactly. A weak evaluation prompt ('does this context contain enough information?') gets YES answers even for loosely related chunks, because the model reasons that any context could theoretically be relevant. Make the prompt stricter: 'Does this context contain a direct, specific answer to the query? Reply YES only if you could quote the answer from the context.' Calibrate on known examples."
+    },
+    {
+      label: "The reformulation step is running too many times, causing the query to drift away from the original intent.",
+      correct: false,
+      explanation: "The premise says evaluate_retrieval returns YES on the first attempt — so reformulation never runs. The problem is with the evaluation step, not the reformulation loop."
+    },
+    {
+      label: "The ChromaDB collection is returning chunks in random order, causing the model to miss relevant content.",
+      correct: false,
+      explanation: "ChromaDB returns chunks ordered by similarity score, not randomly. And the evaluation step is the issue here, not the retrieval ordering."
+    }
+  ]}
+/>
+
+[← Lesson 3](/modules/module-03-memory-knowledge/lesson-03) · [Lesson 5: Long-term memory →](/modules/module-03-memory-knowledge/lesson-05)

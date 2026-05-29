@@ -1,0 +1,181 @@
+---
+title: "ReAct: Interleaving Reasoning and Action"
+module: "module-01-prompting-reasoning"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · ReAct: Interleaving Reasoning and Action
+
+Chain-of-Thought helps the model reason. But reasoning in isolation hits a wall: the model can only work with what's already in the context. When a task requires looking something up, running a calculation, or verifying a fact — thinking alone isn't enough.
+
+ReAct (Reason + Act) interleaves thinking with action. The model doesn't just reason about the world — it acts in it, reads the result, and reasons about that. This is the prompting pattern that makes agents possible.
+
+## What ReAct looks like
+
+The pattern was formalized by Yao et al. (2022). In its original form, the model generates a trace with three labeled steps:
+
+- **Thought** — the model's internal reasoning about what to do next
+- **Action** — a call to a tool or external resource
+- **Observation** — the result of that action, appended to the context
+
+The model then reads the observation and generates another Thought, continuing until it has enough information to give a final answer.
+
+<ReActTrace />
+
+Step through the traces. Notice what the "Error and recovery" example shows: the model reads an error observation, reasons about it ("this is retryable"), and tries again with a different approach. The error became part of the context, and the model responded to it. No special error-handling code needed — just a structured trace.
+
+<Callout type="key">
+ReAct is a prompting pattern, not a framework. You implement it by asking the model to format its output as Thought/Action/Observation blocks, then parsing the Action, running it, and appending the result as an Observation. Your code is the runtime; the model writes the script.
+</Callout>
+
+## Implementing ReAct with a system prompt
+
+The simplest implementation gives the model a format and lets it drive:
+
+```python
+system_prompt = """
+You are a research assistant with access to tools.
+Work through tasks using the following format:
+
+Thought: [reason about what to do next]
+Action: [tool_name(argument)]
+Observation: [result will be filled in by the system]
+... (repeat Thought/Action/Observation as needed)
+Thought: [final reasoning]
+Answer: [your response to the user]
+
+Available tools:
+- search_web(query: str) — search the web and return top results
+- calculate(expression: str) — evaluate a mathematical expression
+- read_file(path: str) — read a file from the workspace
+
+Rules:
+- Always reason before acting
+- Use exactly one tool per Action step
+- Stop when you have enough information to answer
+- If a tool returns an error, reason about whether to retry
+"""
+```
+
+Your orchestration code parses the model's output, extracts the `Action:` line, runs the tool, and appends the result as an `Observation:` block — then feeds everything back to the model:
+
+```python
+import re
+
+def parse_action(text: str) -> tuple[str, str] | None:
+    match = re.search(r'Action:\s*(\w+)\((.+?)\)', text, re.DOTALL)
+    if not match:
+        return None
+    return match.group(1), match.group(2)  # (tool_name, argument)
+
+def run_react_loop(goal: str, tools: dict, max_steps: int = 10) -> str:
+    messages = [{"role": "user", "content": goal}]
+
+    for step in range(max_steps):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            stop=["Observation:"],  # stop before the observation line
+        )
+        text = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": text})
+
+        # Check if we're done
+        if "Answer:" in text:
+            return text.split("Answer:")[-1].strip()
+
+        # Parse and execute the action
+        action = parse_action(text)
+        if not action:
+            break  # model didn't produce a valid action
+
+        tool_name, arg = action
+        result = tools.get(tool_name, lambda x: "Tool not found")(arg)
+
+        # Append the observation and loop
+        observation = f"\nObservation: {result}\n"
+        messages.append({"role": "user", "content": observation})
+
+    return "Agent reached maximum steps without completing the task."
+```
+
+The `stop=["Observation:"]` parameter is optional but useful — it prevents the model from hallucinating the observation. You always fill it in from real tool execution.
+
+## Task decomposition
+
+Complex tasks fail when the model tries to do everything in one reasoning step. ReAct naturally encourages decomposition — the model acts once, reads the result, then decides what to do next.
+
+You can make decomposition explicit in the prompt:
+
+```python
+system_prompt = """
+...
+
+When given a complex task:
+1. Break it into the smallest steps that each require one piece of information
+2. Gather information one step at a time
+3. Don't jump to conclusions before all pieces are in place
+4. Verify your intermediate results before proceeding
+
+Example of correct decomposition:
+Task: "What is the total market cap of the three largest US banks?"
+- Step 1: Find the three largest US banks by total assets
+- Step 2: Look up market cap for bank 1
+- Step 3: Look up market cap for bank 2
+- Step 4: Look up market cap for bank 3
+- Step 5: Sum the three figures
+"""
+```
+
+Without decomposition guidance, the model will often attempt to do multiple things in a single Action step, producing malformed tool calls or skipping verification steps.
+
+## When ReAct is overkill
+
+ReAct adds multiple round-trips to the model and increases latency proportional to the number of steps. Don't use it for tasks that can be solved in a single pass:
+
+```python
+# ReAct is overkill for:
+# — Direct questions with known answers
+# — Simple transformations (summarize this text, translate this)
+# — Tasks where you can provide all information upfront
+
+# ReAct is appropriate for:
+# — Tasks requiring real-time information lookup
+# — Multi-step problems where each step depends on the previous result
+# — Tasks that may require error recovery
+# — Research or synthesis across multiple sources
+```
+
+<Callout type="tip">
+A useful heuristic: if you can write the complete answer in a single system prompt without knowing the user's specific query, use a direct prompt. If you can't — because the answer depends on information you don't have at prompt-writing time — use ReAct.
+</Callout>
+
+## The connection to Module 2
+
+What you've just learned as a prompting pattern becomes the function-calling API in Module 2. The model's `Action:` line maps to a `tool_calls` array in the API response. Your observation becomes a `tool` role message. The stop token becomes an implicit API behavior.
+
+Understanding ReAct at the prompting level means you'll understand what the function-calling API is doing mechanically — not just how to use it.
+
+<Quiz
+  question="You implement ReAct with a stop token at 'Observation:'. The model generates a Thought and an Action, but then generates the Observation itself before stopping. What does this indicate and how do you fix it?"
+  options={[
+    {
+      label: "The model is hallucinating the tool result. Fix by using a stronger model — smaller models don't follow stop tokens reliably.",
+      correct: false,
+      explanation: "Stop token compliance is consistent across capable models. The more likely explanation is that the model was shown examples (in the prompt or few-shot) where the Observation was included in the assistant turn, teaching it to generate the observation itself."
+    },
+    {
+      label: "The model learned from its own examples or prior conversation that Observations appear in the assistant turn. Fix by reviewing the prompt/history for examples where observation was included, and ensure the stop token is correctly specified in the API call.",
+      correct: true,
+      explanation: "Exactly. If the model was shown (in few-shot examples or prior conversation) that Observations appear after Actions in the assistant turn, it learns to continue. Remove those examples, verify the stop parameter is set, and optionally add an instruction: 'Stop immediately after writing Action: — do not write the Observation.'"
+    },
+    {
+      label: "Stop tokens don't work with chat models — you need to use a text completion endpoint instead.",
+      correct: false,
+      explanation: "Chat completion endpoints support stop sequences. The issue is almost always in the prompt or conversation history, not the API itself."
+    }
+  ]}
+/>
+
+[← Lesson 2](/modules/module-01-prompting-reasoning/lesson-02) · [Lesson 4: Structured outputs →](/modules/module-01-prompting-reasoning/lesson-04)

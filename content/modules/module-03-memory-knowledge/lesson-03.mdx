@@ -1,0 +1,191 @@
+---
+title: "RAG End to End"
+module: "module-03-memory-knowledge"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · RAG End to End
+
+Retrieval-Augmented Generation is four steps: split the knowledge base into chunks, embed the chunks, retrieve the most relevant ones for a query, and hand them to the model as context. Each step has a failure mode. This lesson builds the pipeline end to end so you understand the full chain before the next lesson breaks it apart.
+
+## The pipeline
+
+```
+Knowledge base (documents, notes, web pages)
+          ↓
+    [1. Chunk]  — split into retrievable pieces
+          ↓
+    [2. Embed]  — convert each chunk to a vector
+          ↓
+    [3. Store]  — write vectors + text to ChromaDB
+          ↓  ← index is built once, queried many times
+    [4. Query]  — embed the user's question
+          ↓
+  [5. Retrieve] — find the k most similar chunks
+          ↓
+  [6. Augment]  — insert retrieved chunks into the prompt
+          ↓
+  [7. Generate] — model answers from retrieved context only
+```
+
+The split between indexing (steps 1–3) and retrieval (steps 4–7) matters. Indexing is a one-time or periodic job. Retrieval happens on every query. Keep them separate in code.
+
+<RAGPipelineViz />
+
+## Full implementation
+
+```python
+import chromadb
+import anthropic
+import re
+from pathlib import Path
+
+embed_client = anthropic.Anthropic()
+gen_client   = anthropic.Anthropic()
+
+# ── Indexing ──────────────────────────────────────────────────────────────────
+
+def chunk_text(text: str, max_sentences: int = 5) -> list[str]:
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [
+        " ".join(sentences[i:i + max_sentences])
+        for i in range(0, len(sentences), max_sentences)
+        if sentences[i:i + max_sentences]
+    ]
+
+def embed_texts(texts: list[str]) -> list[list[float]]:
+    response = embed_client.embeddings.create(
+        model="voyage-3",
+        input=texts,
+    )
+    return [e.embedding for e in response.embeddings]
+
+def build_index(documents: list[dict], collection_name: str = "knowledge") -> chromadb.Collection:
+    """
+    documents: list of {"text": str, "source": str, "date": str}
+    """
+    db = chromadb.PersistentClient(path="./rag_db")
+    collection = db.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
+
+    for doc in documents:
+        chunks = chunk_text(doc["text"])
+        if not chunks:
+            continue
+        embeddings = embed_texts(chunks)
+        collection.add(
+            documents=chunks,
+            embeddings=embeddings,
+            ids=[f"{doc['source']}-chunk-{i}" for i in range(len(chunks))],
+            metadatas=[
+                {"source": doc["source"], "date": doc["date"], "embedding_model": "voyage-3"}
+                for _ in chunks
+            ],
+        )
+
+    return collection
+
+# ── Retrieval + generation ────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = """You are a helpful assistant. Answer questions using ONLY the provided context.
+If the context does not contain enough information to answer, say so clearly.
+Do not use knowledge from outside the provided context."""
+
+def retrieve(collection: chromadb.Collection, query: str, k: int = 4) -> list[str]:
+    query_embedding = embed_texts([query])[0]
+    results = collection.query(
+        query_embeddings=[query_embedding],
+        n_results=k,
+    )
+    return results["documents"][0]  # list of chunk texts
+
+def generate(query: str, context_chunks: list[str]) -> str:
+    context = "\n\n---\n\n".join(context_chunks)
+    response = gen_client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": f"Context:\n{context}\n\nQuestion: {query}"
+        }],
+    )
+    return response.content[0].text
+
+def rag(collection: chromadb.Collection, query: str) -> str:
+    chunks = retrieve(collection, query)
+    return generate(query, chunks)
+```
+
+## Grounding discipline
+
+The phrase "answer using ONLY the provided context" in the system prompt is not decoration. Without it, the model will blend retrieved context with its training data — and you lose the property that makes RAG useful: answers that are traceable to a specific source.
+
+**Grounded** means: if the answer isn't in the retrieved chunks, the model should say so. An ungrounded RAG system will confidently answer from training data when retrieval fails, giving you no signal that the knowledge base had a gap.
+
+```python
+# Test grounding: ask something not in the knowledge base
+answer = rag(collection, "What is the population of Mars?")
+# Grounded answer: "The provided context does not contain information about the population of Mars."
+# Ungrounded answer: "Mars has no permanent human population, though NASA plans..." ← trained knowledge leaking in
+```
+
+<Callout type="key">
+Grounding is a discipline, not a guarantee. The model will occasionally blend in trained knowledge even with explicit instructions. To verify grounding in production, add a citation requirement: "Quote the specific passage that supports your answer." If the model can't quote it, it fabricated the answer.
+</Callout>
+
+## Evaluating retrieval quality
+
+Before tuning prompts or switching models, evaluate whether retrieval is working. The most common RAG failure is a bad answer caused by bad retrieval — and prompt engineering can't fix that.
+
+**Precision@k** — of the k chunks retrieved, how many are actually relevant to the query? Inspect manually on a sample of 20–30 queries.
+
+**Recall** — for queries where you know the answer is in the knowledge base, does the right chunk appear in the top k results? If not, the index has a coverage problem.
+
+**Quick sanity check:**
+
+```python
+def inspect_retrieval(collection, queries: list[str], k: int = 4):
+    for query in queries:
+        chunks = retrieve(collection, query, k=k)
+        print(f"\nQuery: {query}")
+        print(f"Retrieved {len(chunks)} chunks:")
+        for i, chunk in enumerate(chunks):
+            print(f"  [{i+1}] {chunk[:120]}...")
+        print()
+
+# Run this before building the generation layer
+# If the retrieved chunks aren't relevant, fix chunking or the index first
+inspect_retrieval(collection, [
+    "What are the main causes of climate change?",
+    "How does photosynthesis work?",
+])
+```
+
+If the retrieved chunks look wrong, the problem is almost always one of: (1) chunk size too large or too small, (2) the query is phrased very differently from the document text, or (3) the knowledge base doesn't actually contain the information.
+
+<Quiz
+  question="Your RAG system retrieves the correct chunk for a question but still returns a wrong answer. The retrieved chunk clearly states the right answer. What's the most likely cause?"
+  options={[
+    {
+      label: "The embedding model produced a low-quality vector for the chunk — the model needs to be retrained.",
+      correct: false,
+      explanation: "If the correct chunk is being retrieved, the embedding quality is fine. The retrieval step worked. The problem is in what happens after retrieval — the generation step."
+    },
+    {
+      label: "The system prompt is allowing the model to override retrieved context with its training data, or the context formatting is burying the relevant chunk.",
+      correct: true,
+      explanation: "When retrieval succeeds but generation fails, the culprit is usually the generation step: the grounding instruction is weak, the retrieved chunks are ordered with the relevant one at position 3 or 4 (lost-in-the-middle), or the model is ignoring the context. Check the prompt and chunk ordering first."
+    },
+    {
+      label: "The ChromaDB similarity threshold is too low, causing irrelevant results to contaminate the context.",
+      correct: false,
+      explanation: "The premise says the correct chunk was retrieved. A threshold issue would affect which chunks are returned, not whether the model uses the right information from chunks it already has."
+    }
+  ]}
+/>
+
+[← Lesson 2](/modules/module-03-memory-knowledge/lesson-02) · [Lesson 4: Where RAG fails and agentic RAG →](/modules/module-03-memory-knowledge/lesson-04)

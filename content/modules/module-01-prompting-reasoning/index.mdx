@@ -1,0 +1,40 @@
+---
+title: "Prompting & Reasoning"
+module: "module-01-prompting-reasoning"
+part: 1
+slug: "module-01-prompting-reasoning"
+---
+
+# Module 1 · Prompting & Reasoning
+
+**Part 1 — Foundations** · 5 lessons · ~5 hours total
+
+<LearningObjectives>
+- Design system prompts with explicit role, task, constraints, and output format sections
+- Apply Chain-of-Thought to reduce reasoning errors and understand why it works
+- Implement the ReAct pattern — interleaved thinking and action — as a prompt-level design
+- Enforce structured JSON output with Pydantic and recover gracefully when validation fails
+- Chain prompts across multiple steps with typed state passing between each hand-off
+- Build a self-correcting feedback loop that retries on its own failures
+</LearningObjectives>
+
+## What you'll build
+
+A reasoning agent that takes a multi-step research problem, works through it using Chain-of-Thought internally, returns a validated Pydantic output, and self-corrects when the output fails validation — passing its own error back as context and retrying. No frameworks. Every step is visible in the message log.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [Prompt anatomy: role, task, context, format](/modules/module-01-prompting-reasoning/lesson-01) | ~45 min |
+| 2 | [Chain-of-Thought and why "think step by step" changes behavior](/modules/module-01-prompting-reasoning/lesson-02) | ~45 min |
+| 3 | [ReAct: interleaving reasoning and action](/modules/module-01-prompting-reasoning/lesson-03) | ~45 min |
+| 4 | [Structured outputs with Pydantic](/modules/module-01-prompting-reasoning/lesson-04) | ~45 min |
+| 5 | [Prompt chaining, feedback loops, and self-correction](/modules/module-01-prompting-reasoning/lesson-05) | ~45 min |
+| 6 | [Lab: self-correcting code agent](/modules/module-01-prompting-reasoning/lesson-06-lab) | ~2–3 hrs |
+
+<Callout type="tip">
+Lesson 4 (Pydantic) is the most practically important lesson in this module. If your agent returns validated, typed output, you can build reliable pipelines on top of it. If it returns raw prose, you're parsing strings forever.
+</Callout>
+
+[**Start Lesson 1 →**](/modules/module-01-prompting-reasoning/lesson-01)

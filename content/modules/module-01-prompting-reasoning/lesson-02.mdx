@@ -1,0 +1,197 @@
+---
+title: "Chain-of-Thought and Why 'Think Step by Step' Changes Behavior"
+module: "module-01-prompting-reasoning"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Chain-of-Thought and Why "Think Step by Step" Changes Behavior
+
+A model asked "What is 17 × 24?" can compute it correctly sometimes and incorrectly other times. The same model asked to "think step by step" and work it out produces correct answers far more reliably. This isn't a trick. It's a structural property of how autoregressive generation works.
+
+## Why CoT works: the mechanical explanation
+
+When a model generates a response token by token, each token it produces becomes part of its context for generating the next one. If you ask a question and the model generates the answer directly, it has to compress all the reasoning into a very small number of tokens — and often fails.
+
+When you ask the model to "think step by step," the intermediate reasoning steps themselves become tokens in the context. Each reasoning step informs the next. The model is effectively building a scratchpad in the output that it can read back as it continues.
+
+```
+# Direct (no CoT)
+Q: A store is having a 30% off sale. An item originally costs $85.
+   After the discount, there's an additional 8% sales tax.
+   What is the final price?
+
+A: $64.60  ← sometimes wrong
+
+# Chain-of-Thought
+Q: [same question]
+Think through this step by step.
+
+A: Step 1: Calculate the discount amount.
+   30% of $85 = 0.30 × $85 = $25.50
+
+   Step 2: Apply the discount.
+   $85 - $25.50 = $59.50
+
+   Step 3: Calculate the tax.
+   8% of $59.50 = 0.08 × $59.50 = $4.76
+
+   Step 4: Final price.
+   $59.50 + $4.76 = $64.26  ← correct
+```
+
+<Callout type="key">
+Chain-of-Thought works because the intermediate steps become part of the context the model reads before generating the next token. It's not a reasoning enhancement — it's a memory architecture. You're giving the model space to work out loud before committing to an answer.
+</Callout>
+
+<CoTScratchpad />
+
+## When CoT helps and when it doesn't
+
+CoT improves performance most on tasks that require:
+- Multi-step arithmetic or logic
+- Tasks with intermediate states that must be tracked
+- Reasoning that depends on a chain of inferences
+- Error checking ("does this make sense before I continue?")
+
+CoT adds noise or no value on tasks that require:
+- Simple factual recall ("What year was the Eiffel Tower built?")
+- Direct classification ("Is this spam? Yes or no.")
+- Tasks where the intermediate steps aren't meaningful ("Write a greeting card")
+- Very fast, high-volume tasks where latency matters
+
+```python
+# When NOT to use CoT
+prompt = """
+You are a sentiment classifier.
+Return ONLY the word "positive", "negative", or "neutral".
+Do not explain your reasoning.
+
+Text: "{text}"
+"""
+# Adding "think step by step" here would slow down a 1M-call/day pipeline
+# and produce lower-quality classifications because it shifts the model
+# from direct classification to verbose justification.
+```
+
+<Callout type="warning">
+CoT is not free. It generates more output tokens, which costs more money and adds latency. For high-volume, simple tasks, direct prompting is faster and cheaper. Reserve CoT for genuinely complex reasoning tasks.
+</Callout>
+
+## Eliciting CoT: the options
+
+There are several ways to trigger CoT behavior, from explicit to implicit:
+
+**Explicit instruction:**
+```python
+"Think through this step by step before giving your final answer."
+"Work through each part of the problem before answering."
+"Show your reasoning, then give your conclusion."
+```
+
+**Structured scratch-pad format:**
+```python
+"""
+Before answering, reason through the problem in a <thinking> tag.
+Then give your final answer in an <answer> tag.
+
+<thinking>
+[your reasoning here]
+</thinking>
+<answer>
+[final answer here]
+</answer>
+"""
+```
+
+**Few-shot CoT (most reliable):**
+```python
+"""
+Example:
+Q: A restaurant has 24 tables. Each table seats 4 people. If 60% of tables
+   are occupied and each occupied table has 3 guests, how many guests are there?
+
+A: Step 1: Tables occupied = 60% × 24 = 14.4 → round to 14
+   Step 2: Guests = 14 × 3 = 42 guests
+
+Q: {your_question}
+A:
+"""
+```
+
+Few-shot CoT is the most reliable form because you're showing the model exactly what good reasoning looks like for your specific domain. The model mimics the structure.
+
+## Zero-shot CoT in practice
+
+The phrase "think step by step" was formalized in Kojima et al. (2022) and consistently improves performance on reasoning benchmarks. In practice, the exact phrasing matters less than making the intent clear: you want intermediate steps before the final answer.
+
+```python
+# All of these elicit CoT
+"Work through this carefully."
+"Think out loud before answering."
+"Reason step by step."
+"Let's think through this systematically."
+"Break this down before giving your answer."
+```
+
+Pick one and be consistent. Inconsistent CoT instructions across prompts make it harder to debug failures — you can't tell if the reasoning format or the reasoning itself was the problem.
+
+## Using the reasoning in your pipeline
+
+CoT reasoning in the output gives you something valuable beyond a correct answer: an auditable trace. You can inspect it to understand why the model reached its conclusion.
+
+For agent systems, this matters. When an agent makes a wrong decision, "I got the wrong answer" is hard to debug. "The model reasoned that X implied Y, which is incorrect given Z" is actionable.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+response = client.messages.create(
+    model="claude-opus-4-7",
+    max_tokens=1024,
+    system="You are a financial analysis assistant.",
+    messages=[{
+        "role": "user",
+        "content": (
+            f"Question: {question}\n\n"
+            "Think through this step by step, then give your final answer. "
+            "Format: <reasoning>...</reasoning><answer>...</answer>"
+        )
+    }]
+)
+
+# Parse reasoning and answer separately
+text = response.content[0].text
+reasoning = text.split("<reasoning>")[1].split("</reasoning>")[0]
+answer = text.split("<answer>")[1].split("</answer>")[0]
+
+# Log reasoning for debugging, return answer to user
+log_reasoning(reasoning)
+return answer
+```
+
+Separating reasoning from the answer lets you log the trace for debugging without returning verbose internal reasoning to the user.
+
+<Quiz
+  question="You're building a classification system that processes 500,000 inputs per day. Each input is a product review, and you need to classify it as positive, negative, or neutral. Should you use Chain-of-Thought?"
+  options={[
+    {
+      label: "Yes — CoT produces more accurate classifications, and accuracy is worth the cost.",
+      correct: false,
+      explanation: "For direct classification, CoT often adds noise rather than improving accuracy — the model shifts from classifying to justifying. At 500K/day, the extra output tokens would also be extremely expensive. CoT is best reserved for tasks requiring multi-step reasoning."
+    },
+    {
+      label: "No — simple classification tasks don't benefit from CoT, and at this scale the added token cost and latency would be significant without a meaningful accuracy gain.",
+      correct: true,
+      explanation: "Correct. CoT helps when intermediate reasoning steps are meaningful. For binary/ternary classification, the correct answer doesn't require visible steps — the model either knows the sentiment or doesn't. Use a direct classification prompt with few-shot examples instead."
+    },
+    {
+      label: "It depends on the model — use CoT for GPT-4o but not for smaller models.",
+      correct: false,
+      explanation: "Model choice is a factor, but it doesn't change the fundamental issue: classification tasks don't require visible reasoning steps. CoT would make smaller models slower and larger models more verbose — neither helps a classification pipeline."
+    }
+  ]}
+/>
+
+[← Lesson 1](/modules/module-01-prompting-reasoning/lesson-01) · [Lesson 3: ReAct →](/modules/module-01-prompting-reasoning/lesson-03)

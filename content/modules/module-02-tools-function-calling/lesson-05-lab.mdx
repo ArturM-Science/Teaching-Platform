@@ -1,0 +1,230 @@
+---
+title: "Lab: Multi-Tool Agent with Sandboxed Code Runner"
+module: "module-02-tools-function-calling"
+lesson: 5
+slug: "lesson-05-lab"
+---
+
+# Lab · Multi-Tool Agent with Sandboxed Code Runner
+
+<LabBrief title="Multi-Tool Agent" time="2–3 hours">
+
+#### Objective
+
+Build a working agent with three tools: web search, scoped file access, and a sandboxed code runner. Every tool must handle errors gracefully and have a JSON schema that rejects at least one class of invalid input.
+
+#### Setup
+
+```bash
+pip install openai httpx jsonschema
+export OPENAI_API_KEY="sk-..."
+```
+
+Create a workspace directory the file tool will be scoped to:
+
+```bash
+mkdir -p ./workspace
+```
+
+#### Deliverables
+
+- `tools.py` — all three tools with schemas and validation
+- `agent.py` — the calling loop with MAX_STEPS and error handling
+- `test_tools.py` — at least one test per tool showing it rejects an invalid input
+- One paragraph in a `README.md` explaining the blast radius of each tool and how you bounded it
+
+#### Hard constraints
+
+- The file tool must reject any path that resolves outside `./workspace/`
+- The code runner must time out after 10 seconds maximum
+- No tool may raise an unhandled Python exception — all errors must return a structured error dict
+- MAX_STEPS must be set and must be no more than 15
+
+</LabBrief>
+
+## Starter code
+
+```python
+# tools.py
+import os
+import subprocess
+import httpx
+import jsonschema
+
+WORKSPACE = os.path.realpath("./workspace")
+
+# ── Tool schemas ──────────────────────────────────────────────────────────────
+
+SEARCH_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_web",
+        "description": (
+            "Search the web and return the top results as title + URL + snippet. "
+            "Use for current information not in training data. "
+            "Do NOT use for questions answerable from general knowledge."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Specific search query"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 5
+                }
+            },
+            "required": ["query"]
+        }
+    }
+}
+
+READ_FILE_SCHEMA = {
+    # TODO: fill in the schema
+}
+
+RUN_CODE_SCHEMA = {
+    # TODO: fill in the schema
+}
+
+# ── Tool implementations ──────────────────────────────────────────────────────
+
+def search_web(query: str, max_results: int = 5) -> dict:
+    # TODO: implement — use httpx, handle TimeoutException and HTTPStatusError
+    # Return {"results": [...]} on success, {"error": ..., "retryable": ...} on failure
+    raise NotImplementedError
+
+def read_file(path: str) -> dict:
+    # TODO: implement with path traversal protection
+    # Resolve with os.path.realpath, check it starts with WORKSPACE
+    raise NotImplementedError
+
+def run_code(code: str, timeout: int = 10) -> dict:
+    # TODO: implement with subprocess, timeout, cwd=WORKSPACE
+    # Return {"stdout": ..., "stderr": ..., "returncode": ...}
+    # Handle TimeoutExpired
+    raise NotImplementedError
+
+TOOLS    = [SEARCH_SCHEMA, READ_FILE_SCHEMA, RUN_CODE_SCHEMA]
+TOOL_MAP = {"search_web": search_web, "read_file": read_file, "run_code": run_code}
+```
+
+```python
+# agent.py
+import json
+import openai
+from tools import TOOLS, TOOL_MAP
+
+client = openai.OpenAI()
+MAX_STEPS = 10
+
+def run_agent(user_message: str) -> str:
+    messages = [{"role": "user", "content": user_message}]
+
+    for step in range(MAX_STEPS):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=TOOLS,
+        )
+        msg = response.choices[0].message
+        messages.append(msg)
+
+        if not msg.tool_calls:
+            return msg.content
+
+        for call in msg.tool_calls:
+            args = json.loads(call.function.arguments)
+            # TODO: add argument validation before executing
+            result = TOOL_MAP[call.function.name](**args)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(result)
+            })
+
+    return "Agent reached maximum steps without completing."
+
+if __name__ == "__main__":
+    print(run_agent("Search for the latest Python release and save a summary to workspace/python_news.txt"))
+```
+
+## What to verify before submitting
+
+Run these manually (or add them to `test_tools.py`):
+
+```python
+# 1. Path traversal is blocked
+result = read_file("../../etc/passwd")
+assert "error" in result, "Path traversal must be blocked"
+
+# 2. Code runner times out
+result = run_code("while True: pass", timeout=2)
+assert result.get("error") == "TimeoutError"
+
+# 3. Search rejects missing query (schema validation)
+# The schema requires "query" — your loop should catch this
+# before the tool function is called
+
+# 4. Full agent run — doesn't crash, returns a string
+output = run_agent("What is 7 * 8? Save the answer to workspace/math.txt")
+assert isinstance(output, str)
+```
+
+<Rubric
+  threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
+  criteria={[
+    {
+      name: "Schema quality",
+      exceeds: "All three schemas have descriptions on every parameter, use enum or min/max bounds where appropriate, and the 'when NOT to use' clause is in the tool description.",
+      meets: "All three schemas have parameter descriptions and required fields marked correctly.",
+      approaching: "Schemas are present and syntactically valid; some parameter descriptions missing.",
+      below: "One or more schemas are missing or cause the API to reject the tool definition."
+    },
+    {
+      name: "Error handling",
+      exceeds: "All error returns include a retryable flag; orchestration code uses it to decide whether to retry.",
+      meets: "All tools return structured error dicts with error and message fields; no unhandled exceptions.",
+      approaching: "Most tools return structured errors; one may raise an exception on an edge case.",
+      below: "Tools raise unhandled exceptions or return plain strings for errors."
+    },
+    {
+      name: "Path safety",
+      exceeds: "File tool validates with os.path.realpath and the guard is tested with a path traversal attempt in test_tools.py.",
+      meets: "File tool uses os.path.realpath and rejects paths outside WORKSPACE.",
+      approaching: "File tool checks the path string but does not use realpath — can be bypassed with ../ sequences.",
+      below: "File tool has no path validation."
+    },
+    {
+      name: "Code runner safety",
+      exceeds: "Code runner uses subprocess with timeout and cwd set to WORKSPACE; tested with an infinite loop that times out correctly.",
+      meets: "Code runner uses subprocess with a timeout parameter set to 10 seconds or less.",
+      approaching: "Code runner has a timeout but it is set higher than 30 seconds or is not tested.",
+      below: "Code runner has no timeout."
+    },
+    {
+      name: "Blast radius README",
+      exceeds: "README identifies the blast radius of each tool by name, describes the specific validation that bounds it, and gives one example of an adversarial input that would be blocked.",
+      meets: "README describes the blast radius of each tool and how it is bounded.",
+      approaching: "README mentions safety briefly but doesn't connect each tool to a specific bound.",
+      below: "No README or no mention of blast radius."
+    }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can write a JSON schema for a tool with correct types, descriptions, enums, and required fields — without looking at documentation",
+    "I can trace the full function-calling protocol: from schema definition through tool_calls, execution, and result appended as tool role",
+    "I can explain what MCP buys you and name a scenario where it's not worth adopting",
+    "I can implement timeout, retry cap, and path validation on a file tool from memory",
+    "Judgment gate: I can name a capability I would refuse to give an agent in this module's project, and explain the blast-radius reasoning"
+  ]}
+  next="Module 2 complete — move on to Module 3: Memory & Knowledge →"
+/>
+
+[← Lesson 4](/modules/module-02-tools-function-calling/lesson-04)

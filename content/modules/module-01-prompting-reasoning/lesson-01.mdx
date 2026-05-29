@@ -1,0 +1,179 @@
+---
+title: "Prompt Anatomy: Role, Task, Context, Format"
+module: "module-01-prompting-reasoning"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · Prompt Anatomy: Role, Task, Context, Format
+
+Two engineers write prompts for the same task. One gets reliable, well-structured output. The other gets inconsistent prose that breaks the pipeline downstream. The difference isn't magic — it's structure. A prompt is an interface specification, and like all interfaces, vague ones produce unreliable behavior.
+
+## The four components of a prompt
+
+Every effective system prompt has four parts. You don't need to label them explicitly — but you need to think through all four before sending a single token.
+
+**1. Role** — who the model is in this interaction
+
+The role tells the model which subset of its capabilities and tone to activate. A model instructed to act as a "senior data analyst" produces different output than one told to act as a "friendly customer service representative" — even on identical tasks.
+
+```
+You are a senior data analyst specializing in e-commerce metrics.
+You have deep knowledge of cohort analysis, funnel optimization, and
+retention modeling. You communicate findings clearly to both technical
+and non-technical stakeholders.
+```
+
+A useful role prompt has three elements:
+- **Domain**: what the model knows a lot about
+- **Perspective**: who it is speaking as (not "AI assistant")
+- **Communication style**: how it should present information
+
+**2. Task** — what you want done, precisely
+
+Vague tasks produce vague outputs. The task section should state the specific action, the inputs, and the expected outputs — not just the general topic.
+
+```
+# Weak
+Analyze the CSV data.
+
+# Precise
+Given the CSV data in <data>, calculate the month-over-month
+retention rate for each user cohort. Return one row per cohort
+with columns: cohort_month, users_at_start, users_at_month_3,
+retention_rate_pct.
+```
+
+<Callout type="key">
+A task description should be specific enough that two different engineers reading it would produce the same output. If there's ambiguity about format, scope, or edge cases, the model will resolve that ambiguity in unpredictable ways.
+</Callout>
+
+**3. Context** — what the model needs to know to do the task well
+
+Context is everything the model doesn't have by default: your data, the user's situation, constraints, prior conversation history, background on the system it's operating in.
+
+```
+Context:
+- The user is a non-technical founder, not an engineer
+- They are looking at their product for the first time after 6 months away
+- They have 30 minutes before an investor meeting
+- Priority is quick wins, not comprehensive analysis
+```
+
+Without context, the model generates a response for an imaginary average user. With context, it generates a response for this specific situation.
+
+**4. Format** — what the output should look like
+
+This is the most commonly omitted component, and the most commonly regretted. If you don't specify format, you get whatever the model finds natural — usually long prose with sections and markdown headers that don't fit your UI.
+
+```
+Output format:
+- Return a JSON object with the schema below
+- Do not include explanatory text before or after the JSON
+- If you cannot complete the analysis, return {"error": "reason"}
+
+Schema:
+{
+  "summary": string,           // 1-2 sentence executive summary
+  "top_issues": string[],      // up to 3 specific issues, each < 20 words
+  "recommended_action": string // one concrete next step
+}
+```
+
+<Callout type="warning">
+"Return JSON" is not a format specification. The model will return something that looks like JSON but may have leading prose, trailing explanation, nested objects where you expect arrays, or string values where you expect numbers. Specify the exact schema.
+</Callout>
+
+## Putting it together: before and after
+
+```python
+# Before — implicit, ambiguous
+system_prompt = "You are a helpful assistant. Help the user with their question."
+
+# After — explicit structure
+system_prompt = """
+You are a senior customer support specialist for a B2B SaaS product.
+You handle technical questions from engineering teams and product managers.
+You are concise and direct — you do not pad answers with pleasantries.
+
+Task:
+Diagnose the user's reported issue and either resolve it directly or
+identify exactly what information is needed to resolve it.
+
+Output format:
+- If you can resolve it: explain the fix in 2-3 sentences, then give the
+  exact code or config change needed.
+- If you need more info: list the 1-3 specific things you need, as a
+  bulleted list. Do not ask for everything at once.
+- Do not say "Great question!" or similar.
+"""
+```
+
+The second prompt is longer. It's also dramatically more reliable. The extra tokens cost fractions of a cent and save hours of downstream debugging.
+
+## Constraints: what not to do
+
+A constraint section prevents the most common failure modes:
+
+```python
+system_prompt = """
+...
+
+Constraints:
+- Do not make up data or statistics — if you don't know, say so
+- Do not recommend third-party tools unless the user asks
+- Do not write code unless the task explicitly requires it
+- If the user asks you to do something outside your role, decline politely
+  and redirect to what you can help with
+"""
+```
+
+Constraints are particularly important in agent systems where the model has access to tools. Without explicit constraints, the model will use tools whenever it thinks it might be helpful — which is almost always. Constraints define the scope.
+
+## Examples: few-shot prompting
+
+The most reliable way to specify output format is to show an example:
+
+```python
+system_prompt = """
+...
+
+Example:
+User: "Our conversion rate dropped 15% last week."
+Assistant:
+{
+  "summary": "Conversion rate fell 15% week-over-week, likely traffic or funnel related.",
+  "top_issues": [
+    "Check if traffic source mix changed (paid vs organic)",
+    "Review checkout funnel for new drop-off points",
+    "Verify no recent UI changes on the purchase flow"
+  ],
+  "recommended_action": "Pull a funnel report for the last 14 days and compare step-by-step completion rates."
+}
+"""
+```
+
+One good example is often worth more than three paragraphs of format instructions.
+
+<Quiz
+  question="You ask a model to 'summarize the document.' It returns a 500-word summary with headers, bullet points, and a conclusion. You needed a 2-sentence executive summary for a dashboard card. What went wrong and how do you fix it?"
+  options={[
+    {
+      label: "The model was too verbose. Use a shorter prompt to get a shorter output.",
+      correct: false,
+      explanation: "Prompt length doesn't control output length. The model filled ambiguity with its default behavior — a thorough summary. The fix is to specify the format explicitly, not to shorten the prompt."
+    },
+    {
+      label: "The format wasn't specified. Add a format section: 'Return exactly 2 sentences. No headers. No bullets. Targeted at a non-technical executive.'",
+      correct: true,
+      explanation: "Exactly. Without a format specification, the model defaulted to what 'summarize' usually means — a structured document summary. Specifying the exact output format (length, structure, audience) produces the output you need."
+    },
+    {
+      label: "The model needs a role. Tell it to act as a summarizer.",
+      correct: false,
+      explanation: "A role doesn't solve a format problem. 'Act as a summarizer' still leaves the output length, structure, and target audience undefined. You need an explicit format section."
+    }
+  ]}
+/>
+
+[← Module overview](/modules/module-01-prompting-reasoning) · [Lesson 2: Chain-of-Thought →](/modules/module-01-prompting-reasoning/lesson-02)

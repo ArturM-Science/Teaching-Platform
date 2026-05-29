@@ -1,0 +1,124 @@
+---
+title: "What Codex Is: A Software Engineering Agent"
+module: "module-13-openai-codex"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 - What Codex Is: A Software Engineering Agent
+
+Codex is not autocomplete with a bigger text box. It is a coding agent that can inspect a repository, edit files, run commands, read the results, and continue until the task is done or blocked. That makes it powerful, but it also means the human's job changes from writing every line to specifying, supervising, and reviewing the work.
+
+## The coding-agent loop
+
+The Codex loop is the same agent loop you learned in Module 0, but the tools are software engineering tools:
+
+```
+understand repo -> plan -> edit files -> run checks -> observe failures -> revise -> report diff
+```
+
+The model reasons about the codebase. The runtime gives it controlled access to files and commands. The tests, type checker, linter, and Git diff become the feedback signals that tell the agent whether the work is actually improving.
+
+```text
+User: Add CSV export to the invoices page. Keep the UI style consistent.
+
+Codex:
+1. Reads the invoice page and nearby components
+2. Finds existing export patterns
+3. Proposes a plan
+4. Edits the component and API helper
+5. Runs lint/tests
+6. Fixes errors
+7. Summarizes the changed files and verification
+```
+
+<Callout type="key">
+Codex is strongest when it can verify its own work. A task with tests, reproduction steps, or a clear browser check is much safer than a task where "looks good" is the only success condition.
+</Callout>
+
+## The surfaces: app, IDE, CLI, cloud
+
+Codex can be used from several surfaces. The surface changes the workflow, not the underlying discipline.
+
+| Surface | Best for | Human posture |
+|---|---|---|
+| App | Managing multiple tasks, projects, and longer-running work | Delegate bounded tasks, review completed diffs |
+| IDE extension | Editing while you are already in the code | Pair closely, use open files as context |
+| CLI | Terminal-first repo work, scripts, tests, reproducible transcripts | Watch plans, approve commands, keep a shell-native workflow |
+| Cloud threads | Parallel tasks on pushed GitHub branches | Give complete task specs and review the result like a PR |
+
+Local threads work on your machine. Cloud threads work in isolated environments that clone a repository and branch. Local is good for close pairing. Cloud is good for parallel delegation, but it needs a pushed branch and a stronger task spec because the agent cannot read the unpushed state in your head.
+
+## What Codex sees
+
+Codex is not psychic. It can only work from:
+
+- Your prompt
+- Files it reads
+- Files you attach or mention
+- Project instructions such as `AGENTS.md`
+- Tool outputs from commands it runs
+- Optional external context through MCP or other configured tools
+
+This is why vague prompts produce vague work. If the real requirement is "match the existing admin table pattern and do not touch auth," put that in the prompt. If the repo has one correct test command and five misleading old scripts, put the correct command in `AGENTS.md`.
+
+```text
+Weak prompt:
+Fix the dashboard.
+
+Strong prompt:
+In app/dashboard/page.tsx, fix the module status display so modules with content are clickable and modules without index.mdx stay locked. Do not change auth behavior. Verify with npm run lint. Summarize the diff and any test gaps.
+```
+
+## The human role
+
+A good Codex workflow has four human jobs:
+
+1. Define the task boundary.
+2. Choose safe permissions.
+3. Provide verification.
+4. Review the diff before merge.
+
+The agent can do the typing, searching, and first pass of debugging. It cannot own product intent, security risk, or merge responsibility.
+
+<FailureMuseum
+  exhibit="The Vague Delegation"
+  symptom="Codex edited six unrelated files and the reviewer could not tell which change mattered"
+>
+
+#### What happened
+
+The user asked Codex to "clean up the settings page." Codex saw unused imports, inconsistent component names, missing tests, and a confusing settings save flow. It tried to fix all of them in one pass.
+
+#### Root cause
+
+The task had no boundary and no definition of done. "Clean up" is not an engineering task; it is a mood.
+
+#### How to avoid
+
+Name the files, state the behavior change, list non-goals, and say how to verify success. If you want exploration first, ask for a plan before edits.
+
+</FailureMuseum>
+
+<Quiz
+  question="Which task is the best fit for a first Codex run in an unfamiliar repo?"
+  options={[
+    {
+      label: "Improve the whole onboarding flow and make the UI feel more polished.",
+      correct: false,
+      explanation: "This is too broad. It mixes product judgment, visual design, and potentially many files. Start with a bounded change or ask Codex to produce an exploration plan first."
+    },
+    {
+      label: "Read app/dashboard/page.tsx and lib/content.ts. Explain how module content is discovered, then propose one minimal fix for locked modules showing as clickable. Do not edit yet.",
+      correct: true,
+      explanation: "This is bounded, read-first, and explicitly asks for understanding before edits. It gives Codex a concrete area to inspect and leaves the human in control of the first decision."
+    },
+    {
+      label: "Run full access and let Codex figure out what the app needs.",
+      correct: false,
+      explanation: "That removes the two things a coding agent needs most: a task boundary and a trust boundary. Full access is for rare cases, not discovery."
+    }
+  ]}
+/>
+
+[Module overview](/modules/module-13-openai-codex) - [Lesson 2 ->](/modules/module-13-openai-codex/lesson-02)

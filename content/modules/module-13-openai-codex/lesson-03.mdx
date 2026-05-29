@@ -1,0 +1,149 @@
+---
+title: "Sandboxing, Permissions, and Git Checkpoints"
+module: "module-13-openai-codex"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 - Sandboxing, Permissions, and Git Checkpoints
+
+The moment a coding agent can edit files and run commands, safety stops being theoretical. Sandboxing, permissions, and Git checkpoints are the controls that let Codex work without giving it unlimited reach.
+
+## Sandbox vs approval
+
+Sandboxing and approvals are related, but they are not the same thing.
+
+**The sandbox** is the technical boundary. It defines what files and commands can be touched without leaving the approved workspace.
+
+**The approval policy** is the human workflow. It defines when Codex must stop and ask before crossing a boundary.
+
+```text
+Sandbox:
+Can commands write inside this repo?
+Can commands use the network?
+Can commands read outside the workspace?
+
+Approval:
+Should Codex ask before editing?
+Should Codex ask before running tests?
+Should Codex ask before installing packages?
+```
+
+<Callout type="key">
+Do not think of sandboxing as a lack of trust in Codex. Think of it as the same engineering practice as least privilege for production services: give the agent enough capability to do the task, and no more.
+</Callout>
+
+## Permission modes
+
+The names can change over time, so always check the current docs. The underlying choices are stable:
+
+| Mode | What it is for | Good first use |
+|---|---|---|
+| Read-only | Codex can inspect and explain, but not change files or run commands without approval | Onboarding, architecture questions, code review |
+| Auto/default | Codex can read, edit, and run routine commands inside the workspace, but asks before going outside scope or using network | Normal implementation work |
+| Full access | Codex can work broadly, including network access, with fewer interruptions | Rare, trusted repos and tasks with clear rollback |
+
+Start lower than you think. You can always loosen permissions when the task demands it. It is harder to recover from a broad agent run that touched the wrong files.
+
+## Git checkpoints
+
+Git is your undo system and your review surface. Before giving a coding agent write access, know what state you are in.
+
+```bash
+git status --short
+git switch -c codex/dashboard-timestamp
+git status --short
+```
+
+During the task, use the diff as the source of truth:
+
+```bash
+git diff --stat
+git diff
+```
+
+After the task, keep the human review discipline:
+
+```bash
+npm run lint
+npm test
+git diff --check
+```
+
+Codex can run these commands for you, but you should know which commands matter. If the repo has a project-specific build step, put it in the prompt or in `AGENTS.md`.
+
+## Dangerous commands
+
+Some commands deserve extra friction:
+
+- Dependency installation
+- Network access
+- Database migrations
+- File deletion
+- Bulk formatting
+- Generated file rewrites
+- Commands that touch parent directories
+- Commands that read secrets
+
+The safe pattern is to make Codex explain why the command is needed before it runs it.
+
+```text
+If the fix requires installing a package, stop first and explain:
+1. Why the dependency is needed.
+2. Why an existing dependency cannot do it.
+3. Which files will change.
+4. How to verify the install did not cause unrelated churn.
+```
+
+## Secrets and private data
+
+Coding agents should not read secrets just because they can read files. A prompt should name this explicitly when a repo has `.env`, keys, customer data, or internal logs.
+
+```text
+Do not open or quote .env files, private keys, customer exports, or production logs.
+If you need an environment variable name, infer it from .env.example or ask me.
+```
+
+This is not only about privacy. Secrets in context can leak into logs, summaries, or generated documentation.
+
+<FailureMuseum
+  exhibit="The Helpful Package Install"
+  symptom="A small UI fix changed package-lock.json, broke CI, and hid the actual feature diff"
+>
+
+#### What happened
+
+Codex needed an icon for a button. Instead of using the existing icon library, it installed a new package. The lockfile changed by thousands of lines. CI then failed because the package manager version differed from production.
+
+#### Root cause
+
+The prompt said "make it polished" but did not forbid new dependencies or instruct Codex to inspect existing UI patterns first.
+
+#### How to avoid
+
+For normal app work, include: "Do not add dependencies unless you stop and ask first." Also ask Codex to inspect nearby components before inventing a new pattern.
+
+</FailureMuseum>
+
+<Quiz
+  question="You are asking Codex to fix a failing test in a repository you barely know. Which permission posture is best?"
+  options={[
+    {
+      label: "Start in read-only: ask Codex to inspect the failure and propose a plan. Move to edit mode only after the target files are clear.",
+      correct: true,
+      explanation: "Correct. Unknown repo plus failing test is a good case for read-first work. Once the likely files and verification command are known, you can let Codex edit within a narrow scope."
+    },
+    {
+      label: "Start in full access so Codex can install anything it needs and search the web freely.",
+      correct: false,
+      explanation: "That gives the agent more reach than the task requires. Most failing tests can be diagnosed locally first."
+    },
+    {
+      label: "Skip Git because Codex will summarize what it changed.",
+      correct: false,
+      explanation: "The summary is useful, but Git diff is the review surface. Always keep a checkpoint."
+    }
+  ]}
+/>
+
+[Previous: Lesson 2](/modules/module-13-openai-codex/lesson-02) - [Lesson 4 ->](/modules/module-13-openai-codex/lesson-04)

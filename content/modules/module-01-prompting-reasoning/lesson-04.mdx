@@ -1,0 +1,257 @@
+---
+title: "Structured Outputs with Pydantic"
+module: "module-01-prompting-reasoning"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Structured Outputs with Pydantic
+
+An agent that returns prose is a prototype. An agent that returns validated, typed output is a system you can build on.
+
+The problem with prose output isn't that it's wrong — it's that it's unparseable in a predictable way. Sometimes the model returns a JSON object. Sometimes it wraps it in a code block. Sometimes it adds a preamble sentence. Sometimes the keys are different from what you expected. Each of these requires a different parsing strategy, and none of them fail gracefully.
+
+Pydantic, combined with structured output prompting, eliminates this entire problem class.
+
+## What Pydantic gives you
+
+Pydantic is a Python library for data validation using type annotations. You define a model class that describes the expected structure, then parse the model's output against it. If the output doesn't match, you get a clear validation error — not a KeyError three functions deep.
+
+```python
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class SentimentResult(BaseModel):
+    sentiment: Literal["positive", "negative", "neutral"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    key_phrases: list[str] = Field(max_length=5)
+    summary: str = Field(max_length=200)
+```
+
+This model says:
+- `sentiment` must be exactly one of three strings
+- `confidence` must be a float between 0 and 1
+- `key_phrases` is a list of strings with at most 5 items
+- `summary` is a string under 200 characters
+
+A raw string from a model cannot accidentally pass these constraints. Either it parses correctly or it raises a clear error.
+
+## Getting structured output from the model
+
+### Option 1: JSON mode (OpenAI)
+
+OpenAI's API supports a `response_format` parameter that forces JSON output:
+
+```python
+import json
+from pydantic import BaseModel, ValidationError
+
+class AnalysisResult(BaseModel):
+    summary: str
+    risks: list[str]
+    recommendation: Literal["proceed", "delay", "cancel"]
+    confidence_score: float
+
+def analyze(document: str) -> AnalysisResult:
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a business risk analyst. "
+                    "Return a JSON object with exactly these fields:\n"
+                    "- summary (string): 1-2 sentence overview\n"
+                    "- risks (array of strings): up to 5 specific risks\n"
+                    "- recommendation (string): exactly one of 'proceed', 'delay', 'cancel'\n"
+                    "- confidence_score (number between 0 and 1)"
+                )
+            },
+            {"role": "user", "content": document}
+        ]
+    )
+    raw = json.loads(response.choices[0].message.content)
+    return AnalysisResult(**raw)  # validates and raises ValidationError if wrong
+```
+
+### Option 2: Structured outputs (OpenAI, more reliable)
+
+OpenAI's structured outputs feature takes the Pydantic model directly and enforces it at the API level — the model cannot produce output that doesn't conform to the schema:
+
+```python
+response = client.beta.chat.completions.parse(
+    model="gpt-4o-2024-08-06",
+    messages=[...],
+    response_format=AnalysisResult,
+)
+result = response.choices[0].message.parsed  # already an AnalysisResult instance
+```
+
+This is the most reliable option when available — the API enforces the schema, so validation errors are rare.
+
+### Option 3: Prompt-based JSON (any provider)
+
+For providers without structured output support, instruct the model explicitly and parse the response:
+
+```python
+system_prompt = """
+Return your analysis as a JSON object only — no prose before or after.
+Do not wrap it in a code block.
+
+Required schema:
+{
+  "summary": "<string>",
+  "risks": ["<string>", ...],
+  "recommendation": "proceed" | "delay" | "cancel",
+  "confidence_score": <float 0-1>
+}
+
+If you cannot complete the analysis, return:
+{"error": "<reason>"}
+"""
+```
+
+<Callout type="warning">
+"Return JSON" without a schema is not structured output — it's a gamble. Specify every field name, type, and constraint in the prompt. The model cannot read your Python class definition; it only reads what you put in the messages.
+</Callout>
+
+## Handling validation failures
+
+Validation will fail. Plan for it before it happens.
+
+The right response to a `ValidationError` is to send the error back to the model as context and ask it to fix its output:
+
+```python
+import json
+from pydantic import ValidationError
+
+def get_validated_output(prompt: str, schema: type[BaseModel], max_retries: int = 3) -> BaseModel:
+    messages = [
+        {"role": "system", "content": build_system_prompt(schema)},
+        {"role": "user", "content": prompt}
+    ]
+
+    for attempt in range(max_retries):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+        raw_text = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": raw_text})
+
+        try:
+            data = json.loads(raw_text)
+            return schema(**data)
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            if attempt == max_retries - 1:
+                raise  # re-raise after exhausting retries
+
+            # Send the error back to the model
+            messages.append({
+                "role": "user",
+                "content": (
+                    f"Your output failed validation with this error:\n{e}\n\n"
+                    f"Please return a corrected JSON object that passes validation."
+                )
+            })
+
+    raise RuntimeError("Failed to get valid output after retries")
+```
+
+<Callout type="key">
+Sending the validation error back as a message is not a hack — it's the intended use of the context window. The model sees exactly what went wrong and corrects it. In practice, most validation failures are fixed on the first retry.
+</Callout>
+
+## Designing Pydantic models for agents
+
+A few principles that reduce validation failures:
+
+**Use `Literal` for constrained strings.** A `status` field typed as `str` will accept any string. Typed as `Literal["active", "inactive", "pending"]`, it rejects everything else — including the model's creative variations like `"Active"` or `"is_active"`.
+
+**Use `Field` for bounds.** Numeric ranges and string lengths expressed in the schema communicate constraints to the model (through the prompt that describes the schema) and enforce them in validation.
+
+**Flatten when possible.** Deeply nested schemas are harder for the model to reproduce correctly. If you don't need nesting, use a flat structure.
+
+**Separate the LLM call from business logic.** Your Pydantic model should describe what the model returns, not what your application ultimately needs. Transform after parsing.
+
+```python
+class ModelOutput(BaseModel):
+    # What the model returns
+    priority: Literal["low", "medium", "high", "critical"]
+    affected_systems: list[str]
+    estimated_impact: str
+
+class IncidentReport(BaseModel):
+    # What your application uses (derived from ModelOutput)
+    priority_level: int  # 1-4 mapped from the literal
+    systems: frozenset[str]
+    impact_summary: str
+
+def transform(output: ModelOutput) -> IncidentReport:
+    priority_map = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+    return IncidentReport(
+        priority_level=priority_map[output.priority],
+        systems=frozenset(output.affected_systems),
+        impact_summary=output.estimated_impact,
+    )
+```
+
+The transformation layer means changes to the LLM output format don't require changes to the rest of your codebase.
+
+<FailureMuseum
+  exhibit="Prompt chain breaks silently on type mismatch"
+  symptom="Step 3 fails with KeyError three functions downstream — original error happened in step 1"
+>
+
+#### The broken system
+
+A three-step prompt chain: step 1 extracts entities from a document and returns a list, step 2 enriches each entity, step 3 aggregates. Step 1 is supposed to return `{"entities": ["Apple", "Google", "Meta"]}`, but on some documents it returns `{"entities": "Apple, Google, Meta"}` — a comma-separated string instead of a list.
+
+Step 2 iterates over `result["entities"]`, which works on the string — it just iterates over characters. Step 3 tries to access `entity["name"]` on character strings, raises a `KeyError`, and the error points nowhere near step 1.
+
+#### What's wrong
+
+No type validation between chain steps. The contract between step 1 and step 2 is implicit — a string instead of a list passes silently until the failure manifests three steps later.
+
+#### The fix
+
+Add a Pydantic model at every chain boundary:
+
+```python
+class Step1Output(BaseModel):
+    entities: list[str] = Field(min_length=1)
+
+# After step 1:
+step1_result = Step1Output(**json.loads(step1_response))
+# Now guaranteed to be a list before step 2 runs
+```
+
+The validation error now happens immediately at step 1, with a clear message: `"entities: value is not a valid list"`. The chain fails fast instead of silently wrong.
+
+</FailureMuseum>
+
+<Quiz
+  question="You define a Pydantic model with a field typed as str. The model returns the number 42 as a JSON number. What happens when you parse it?"
+  options={[
+    {
+      label: "It raises a ValidationError — 42 is an integer, not a string.",
+      correct: false,
+      explanation: "Pydantic v2 coerces numbers to strings by default. 42 becomes '42'. This is actually a footgun — you might expect strict validation but get silent coercion instead. Use strict=True on the field or model if you need exact type matching."
+    },
+    {
+      label: "Pydantic coerces the number 42 to the string '42' silently — no error is raised. Use strict=True if you need to reject type mismatches.",
+      correct: true,
+      explanation: "Correct. Pydantic v2's default mode coerces compatible types. For agent outputs, this can mask bugs where the model is returning the wrong type. Add model_config = ConfigDict(strict=True) or Field(strict=True) to enforce exact types."
+    },
+    {
+      label: "It depends on the Pydantic version — v1 coerces, v2 raises an error.",
+      correct: false,
+      explanation: "Both Pydantic v1 and v2 coerce in their default mode. v2 introduced a strict mode, but it's not the default. Always check which mode you're running and whether coercion is safe for your use case."
+    }
+  ]}
+/>
+
+[← Lesson 3](/modules/module-01-prompting-reasoning/lesson-03) · [Lesson 5: Prompt chaining and feedback loops →](/modules/module-01-prompting-reasoning/lesson-05)

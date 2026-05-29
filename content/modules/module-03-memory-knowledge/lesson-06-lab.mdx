@@ -1,0 +1,319 @@
+---
+title: "Lab: Research Agent with Persistent Memory"
+module: "module-03-memory-knowledge"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab · Research Agent with Persistent Memory
+
+<LabBrief title="Research Agent with Persistent Memory" time="2–3 hours">
+
+#### Objective
+
+Build a research agent with long-term memory backed by an Obsidian vault. The agent checks its memory before hitting the web, writes new knowledge as linked markdown notes, maintains a ChromaDB index over the vault for semantic retrieval, and runs a consolidation pass that merges near-duplicate notes and archives stale ones. After multiple sessions, the vault grows as a human-readable record of everything the agent has learned.
+
+#### Setup
+
+```bash
+pip install anthropic chromadb pyyaml
+export ANTHROPIC_API_KEY="sk-ant-..."
+mkdir -p vault/notes vault/archive
+git init vault
+```
+
+#### Deliverables
+
+- `memory.py` — vault read/write and ChromaDB sync
+- `agent.py` — main research loop
+- `consolidator.py` — importance scoring and consolidation
+- `prompts.py` — all prompt templates
+- `README.md` — one paragraph explaining your vault vs. vector DB design decision
+
+#### Hard constraints
+
+- Agent must check vault memory before any web retrieval
+- Every note written must include at least one `[[backlink]]` to a related note
+- Consolidation must reduce note count (archive low-importance notes)
+- Every memory operation (read, write, archive) must be logged with the note title and action
+- No unhandled exceptions — all failures return structured errors
+
+</LabBrief>
+
+## Vault structure
+
+```
+vault/
+  notes/          ← agent writes here, one note per research topic
+  archive/        ← consolidator moves stale/low-importance notes here
+  index.md        ← agent-maintained topic map (updated each session)
+.git/             ← version history of every memory write
+```
+
+## Starter code
+
+```python
+# memory.py
+from pathlib import Path
+from datetime import date
+from dataclasses import dataclass
+import yaml, re, chromadb, logging
+
+log = logging.getLogger(__name__)
+
+VAULT     = Path("vault/notes")
+ARCHIVE   = Path("vault/archive")
+DB_PATH   = "./vault_index"
+EMB_MODEL = "voyage-3"
+
+@dataclass
+class Note:
+    title: str
+    body:  str
+    tags:  list[str]
+    links: list[str]
+    importance: float
+    access_count: int
+    date: str
+
+def _slug(title: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "-", title.lower()).strip("-")
+
+def write_note(title: str, body: str, tags: list[str], links: list[str]) -> Path:
+    # TODO: build frontmatter dict with date, tags, importance=0.5, access_count=0
+    # TODO: format body with ## Related section containing [[backlinks]]
+    # TODO: write to VAULT / f"{_slug(title)}.md"
+    # TODO: log the write action
+    raise NotImplementedError
+
+def read_note(title: str) -> Note | None:
+    # TODO: read VAULT / f"{_slug(title)}.md"
+    # TODO: parse frontmatter and body
+    # TODO: increment access_count and write back
+    # TODO: return Note dataclass or None if not found
+    raise NotImplementedError
+
+def list_notes() -> list[Note]:
+    # TODO: iterate VAULT.glob("*.md"), parse each, return list[Note]
+    raise NotImplementedError
+
+def get_collection() -> chromadb.Collection:
+    client = chromadb.PersistentClient(path=DB_PATH)
+    return client.get_or_create_collection(
+        name="vault",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+def sync_embeddings():
+    # TODO: for each note in VAULT, check if hash in ChromaDB metadata matches current file hash
+    # TODO: upsert if changed or new, using EMB_MODEL for embeddings
+    # TODO: delete from collection if note no longer exists in vault
+    raise NotImplementedError
+
+def search_similar(query: str, k: int = 4) -> list[Note]:
+    # TODO: embed query with EMB_MODEL
+    # TODO: query collection, return matching Notes by looking up titles from ids
+    raise NotImplementedError
+```
+
+```python
+# consolidator.py
+from pathlib import Path
+from datetime import date
+from memory import list_notes, Note, VAULT, ARCHIVE
+import yaml, logging
+
+log = logging.getLogger(__name__)
+
+def score_importance(note: Note) -> float:
+    # TODO: compute recency score (days since note.date, decay over 180 days)
+    # TODO: compute access score (access_count normalised to 0–1)
+    # TODO: return weighted combination (0.4 recency + 0.6 access)
+    raise NotImplementedError
+
+def consolidate(importance_threshold: float = 0.2) -> dict:
+    """
+    Returns {"archived": int, "total": int}
+    """
+    # TODO: score all notes
+    # TODO: move notes below threshold to ARCHIVE
+    # TODO: log each archived note
+    # TODO: call sync_embeddings() to update the ChromaDB index
+    raise NotImplementedError
+```
+
+```python
+# agent.py
+import logging
+from memory import search_similar, write_note, sync_embeddings, read_note
+from prompts import SYSTEM_PROMPT, build_research_prompt, build_note_prompt
+import anthropic
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+client = anthropic.Anthropic()
+MAX_MEMORY_RESULTS = 4
+
+def run_research(topic: str) -> str:
+    log.info(f"Researching: {topic}")
+
+    # Step 1: Check memory first
+    memory_hits = search_similar(topic, k=MAX_MEMORY_RESULTS)
+    if memory_hits:
+        log.info(f"Memory hit: found {len(memory_hits)} relevant notes")
+        memory_context = "\n\n".join(n.body for n in memory_hits)
+    else:
+        log.info("No memory hit — proceeding to research")
+        memory_context = ""
+
+    # Step 2: Generate research synthesis
+    response = client.messages.create(
+        model="claude-opus-4-7",
+        max_tokens=2048,
+        system=SYSTEM_PROMPT,
+        messages=[{
+            "role": "user",
+            "content": build_research_prompt(topic, memory_context),
+        }],
+    )
+    synthesis = response.content[0].text
+
+    # Step 3: Write note back to vault
+    # TODO: extract tags and related topics from synthesis
+    # TODO: call write_note with title=topic, body=synthesis, tags, links
+    # TODO: call sync_embeddings() to update ChromaDB index
+    # TODO: return synthesis
+
+    raise NotImplementedError
+```
+
+```python
+# prompts.py
+
+SYSTEM_PROMPT = """You are a research assistant that builds a persistent knowledge base.
+When given a topic:
+1. Synthesise what is known into clear, well-structured markdown
+2. Identify 2-4 related concepts that should be cross-linked
+3. Return your response as JSON:
+   {"synthesis": "...", "tags": ["tag1", "tag2"], "related": ["concept1", "concept2"]}
+"""
+
+def build_research_prompt(topic: str, memory_context: str) -> str:
+    memory_section = (
+        f"Existing memory on this topic:\n{memory_context}\n\n"
+        if memory_context
+        else "No existing memory on this topic.\n\n"
+    )
+    return f"{memory_section}Research topic: {topic}\n\nSynthesise and structure your knowledge."
+
+def build_note_prompt(topic: str, sources: list[str]) -> str:
+    sources_text = "\n\n---\n\n".join(sources)
+    return f"Topic: {topic}\n\nSources:\n{sources_text}\n\nWrite a comprehensive note."
+```
+
+## Test tasks
+
+```python
+# Run these to verify your agent works across sessions
+
+# Session 1
+from agent import run_research
+run_research("transformer attention mechanism")
+run_research("positional encoding in transformers")
+
+# Session 2 — agent should find memory from session 1
+result = run_research("how does the transformer architecture work?")
+# The agent should retrieve the notes written in session 1
+# and surface them in the response rather than re-researching from scratch
+
+# Consolidation test
+from consolidator import consolidate
+stats = consolidate(importance_threshold=0.3)
+assert stats["archived"] >= 0
+assert stats["total"] > 0
+
+# Memory inspection — open vault/notes/ in Obsidian and verify:
+# - Notes have frontmatter with date, tags, importance, access_count
+# - Notes have ## Related sections with [[backlinks]]
+# - vault/index.md lists known topics
+```
+
+## What to verify before submitting
+
+```python
+from memory import list_notes, search_similar
+from consolidator import consolidate
+
+# Memory persists across sessions
+notes_before = len(list_notes())
+# Re-run the agent and verify note count grows
+assert len(list_notes()) >= notes_before
+
+# Backlinks are present
+for note in list_notes():
+    assert "[[" in note.body, f"Note '{note.title}' has no backlinks"
+
+# Search returns relevant results
+results = search_similar("transformer architecture", k=3)
+assert len(results) > 0
+
+# Consolidation terminates and reduces count (with a seeded low-importance note)
+stats = consolidate()
+assert "archived" in stats
+assert "total" in stats
+```
+
+<Rubric
+  threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
+  criteria={[
+    {
+      name: "Memory retrieval",
+      exceeds: "Agent checks vault before any web retrieval on every call. Memory hits are logged with note title and relevance. If memory is sufficient, no synthesis call is made.",
+      meets: "Agent checks vault before retrieval on every call. Memory hits are logged.",
+      approaching: "Agent checks vault but sometimes proceeds to synthesis even when memory is sufficient.",
+      below: "Agent does not check vault before retrieval, or vault check is commented out."
+    },
+    {
+      name: "Note structure",
+      exceeds: "Every note has complete frontmatter (date, tags, importance, access_count), a clear body, and at least two backlinks in a ## Related section. access_count increments on each retrieval.",
+      meets: "Every note has frontmatter with date and tags, and at least one backlink.",
+      approaching: "Notes have some frontmatter and backlinks but fields are inconsistent or missing.",
+      below: "Notes are plain text with no frontmatter or backlinks."
+    },
+    {
+      name: "Consolidation",
+      exceeds: "Consolidation scores all notes, archives below-threshold notes, logs each archive action, and re-syncs ChromaDB. importance_threshold is configurable.",
+      meets: "Consolidation archives below-threshold notes and re-syncs ChromaDB.",
+      approaching: "Consolidation runs but does not re-sync ChromaDB, or archiving is incomplete.",
+      below: "Consolidation is not implemented or does not reduce note count."
+    },
+    {
+      name: "ChromaDB sync",
+      exceeds: "sync_embeddings() detects changed notes via hash comparison and upserts only what changed. Deleted notes are removed from the collection. sync is called after every write.",
+      meets: "sync_embeddings() upserts all vault notes and is called after writes.",
+      approaching: "sync_embeddings() runs but does not detect changes — re-embeds everything on every call.",
+      below: "ChromaDB is not synced with vault contents, or search_similar always returns empty."
+    },
+    {
+      name: "Design judgment",
+      exceeds: "README explains the vault vs. vector DB tradeoff with reference to this specific agent: what each provides, what would be lost if one were removed, and whether the hybrid is justified for the use case.",
+      meets: "README explains vault as source of truth and ChromaDB as retrieval index.",
+      approaching: "README mentions both systems but doesn't explain the tradeoff or justify the hybrid.",
+      below: "No README or no mention of the memory architecture."
+    }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can explain the difference between semantic, episodic, and procedural memory and name a concrete storage mechanism for each",
+    "I can set up a ChromaDB collection, add documents with metadata, and query by similarity — without looking at the docs",
+    "I can trace a RAG pipeline call from user query through chunk retrieval to grounded generation and identify where each failure mode can enter",
+    "I can implement the agentic RAG loop: retrieve → evaluate → reformulate → retry, with a bounded attempt cap",
+    "Memory inspection gate: I can open the vault, read the agent's notes, follow the backlinks, and explain what the agent knows and why two notes are linked — without running the agent"
+  ]}
+  next="Module 3 complete — move on to Module 4: Evaluation →"
+/>
+
+[← Lesson 5](/modules/module-03-memory-knowledge/lesson-05)

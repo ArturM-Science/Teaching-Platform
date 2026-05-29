@@ -1,0 +1,278 @@
+---
+title: "Lab: Self-Correcting Code Agent"
+module: "module-01-prompting-reasoning"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab · Self-Correcting Code Agent
+
+<LabBrief title="Self-Correcting Code Agent" time="2–3 hours">
+
+#### Objective
+
+Build an agent that takes a coding task and a test suite, generates Python code, runs the tests, reads the failure output, and retries until the tests pass or the retry limit is reached. The agent's reasoning trace must be visible and loggable.
+
+#### Setup
+
+```bash
+pip install openai anthropic pydantic pytest
+export OPENAI_API_KEY="sk-..."  # or use Anthropic
+```
+
+#### Deliverables
+
+- `agent.py` — the main agent loop with generate → test → retry cycle
+- `validator.py` — subprocess test runner that returns structured pass/fail output
+- `prompts.py` — system and user prompt templates (separated from logic)
+- `models.py` — Pydantic models for all structured outputs
+- `README.md` — one paragraph explaining where the loop can get stuck and how you bounded it
+
+#### Hard constraints
+
+- Maximum 3 retry attempts — not negotiable
+- The loop must stop if the same error appears on consecutive attempts (convergence check)
+- Every retry must include the full error output from the failed tests
+- The agent's reasoning trace (attempt number, error, retry message) must be logged
+- No unhandled exceptions — all failures must return a structured error
+
+</LabBrief>
+
+## Starter code
+
+```python
+# models.py
+from pydantic import BaseModel, Field
+from typing import Literal
+
+class CodeOutput(BaseModel):
+    code: str = Field(description="The complete Python code, no markdown fences")
+    explanation: str = Field(max_length=300, description="One-paragraph explanation of the approach")
+
+class ValidationResult(BaseModel):
+    passed: bool
+    error_output: str | None = None  # None if passed
+    test_count: int
+    failed_count: int
+
+class AgentTrace(BaseModel):
+    attempt: int
+    code: str
+    validation: ValidationResult
+    status: Literal["success", "retry", "failed"]
+```
+
+```python
+# validator.py
+import subprocess
+import tempfile
+import os
+from models import ValidationResult
+
+def run_tests(code: str, test_suite: str, timeout: int = 30) -> ValidationResult:
+    with tempfile.TemporaryDirectory() as tmp:
+        # TODO: write code to solution.py, test_suite to tests.py
+        # TODO: run pytest with --tb=short -q
+        # TODO: parse returncode and output into ValidationResult
+        # Hint: result.returncode == 0 means all tests passed
+        raise NotImplementedError
+```
+
+```python
+# agent.py
+import json
+import logging
+from models import CodeOutput, ValidationResult, AgentTrace
+from validator import run_tests
+from prompts import SYSTEM_PROMPT, build_user_prompt, build_retry_prompt
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+MAX_RETRIES = 3
+
+def generate_code(messages: list) -> CodeOutput:
+    # TODO: call your LLM with response_format=CodeOutput (or prompt + parse)
+    raise NotImplementedError
+
+def run_agent(task: str, test_suite: str) -> list[AgentTrace]:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": build_user_prompt(task, test_suite)}
+    ]
+    traces = []
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        log.info(f"Attempt {attempt}/{MAX_RETRIES}")
+
+        code_output = generate_code(messages)
+        messages.append({"role": "assistant", "content": code_output.model_dump_json()})
+
+        result = run_tests(code_output.code, test_suite)
+
+        status = "success" if result.passed else (
+            "failed" if attempt == MAX_RETRIES or result.error_output == last_error
+            else "retry"
+        )
+        traces.append(AgentTrace(attempt=attempt, code=code_output.code,
+                                  validation=result, status=status))
+
+        if status == "success":
+            log.info("All tests passed!")
+            return traces
+
+        if status == "failed":
+            log.warning(f"Agent failed after {attempt} attempts")
+            return traces
+
+        # Convergence check
+        last_error = result.error_output
+
+        # Feed failure back to the model
+        messages.append({
+            "role": "user",
+            "content": build_retry_prompt(attempt, result)
+        })
+
+    return traces
+```
+
+````python
+# prompts.py
+
+SYSTEM_PROMPT = """
+You are an expert Python developer.
+Write clean, correct Python code that passes the provided test suite.
+Return a JSON object with:
+  - "code": the complete Python implementation (no markdown fences)
+  - "explanation": a brief explanation of your approach (1 paragraph)
+"""
+
+def build_user_prompt(task: str, test_suite: str) -> str:
+    return f"""Task:
+{task}
+
+Test suite that your code must pass:
+```python
+{test_suite}
+```
+
+Write the implementation now."""
+
+def build_retry_prompt(attempt: int, result) -> str:
+    return f"""Your code failed the test suite (attempt {attempt}).
+
+Test failures:
+{result.error_output}
+
+Fix the bugs and return corrected code. Return the full implementation, not just the changed parts."""
+````
+
+## Test tasks to run your agent against
+
+```python
+# task_1.py — test with this first
+TASK_1 = "Write a function fibonacci(n) that returns the nth Fibonacci number (0-indexed)."
+TEST_1 = """
+from solution import fibonacci
+
+def test_base_cases():
+    assert fibonacci(0) == 0
+    assert fibonacci(1) == 1
+
+def test_sequence():
+    assert fibonacci(5) == 5
+    assert fibonacci(10) == 55
+
+def test_larger():
+    assert fibonacci(20) == 6765
+"""
+
+# task_2.py — test with this second (has an edge case the model often misses)
+TASK_2 = "Write a function is_palindrome(s) that returns True if s is a palindrome, ignoring case and non-alphanumeric characters."
+TEST_2 = """
+from solution import is_palindrome
+
+def test_basic():
+    assert is_palindrome("racecar") == True
+    assert is_palindrome("hello") == False
+
+def test_case_insensitive():
+    assert is_palindrome("RaceCar") == True
+
+def test_with_punctuation():
+    assert is_palindrome("A man, a plan, a canal: Panama") == True
+
+def test_empty():
+    assert is_palindrome("") == True
+"""
+```
+
+## What to verify before submitting
+
+```python
+# Run these as integration tests
+traces = run_agent(TASK_1, TEST_1)
+assert traces[-1].status in ("success", "failed")  # always terminates
+assert len(traces) <= MAX_RETRIES                   # never exceeds cap
+assert all(isinstance(t.validation.passed, bool) for t in traces)
+
+# Convergence: same error twice should halt
+# To test this, temporarily make TASK_1 unsolvable and verify
+# the agent stops after 2 retries with the same error
+```
+
+<Rubric
+  threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
+  criteria={[
+    {
+      name: "Prompt structure",
+      exceeds: "System prompt has all four components (role, task, context, format). Retry prompt includes attempt number and full error output. Prompts are in a separate prompts.py file.",
+      meets: "System prompt has role and format sections. Retry prompt includes the error output.",
+      approaching: "Prompts are functional but missing some components (e.g., no format spec, no retry context).",
+      below: "Prompts are a single string with no structure, or retry doesn't include the failure output."
+    },
+    {
+      name: "Structured output",
+      exceeds: "CodeOutput is a Pydantic model; parsing uses model.model_validate() or equivalent; a ValidationError is caught and handled as a retry condition.",
+      meets: "CodeOutput is a Pydantic model and parsing raises a clear error on invalid output.",
+      approaching: "JSON is parsed manually with json.loads(); no Pydantic validation.",
+      below: "Output is treated as raw string; no structured parsing."
+    },
+    {
+      name: "Retry logic",
+      exceeds: "MAX_RETRIES enforced; convergence check stops loop on duplicate errors; same-error condition is tested with a deliberately broken task.",
+      meets: "MAX_RETRIES enforced; loop always terminates; error is passed back to the model on each retry.",
+      approaching: "Loop terminates but convergence check is missing; same error causes unlimited retries up to MAX_RETRIES.",
+      below: "Loop can run past MAX_RETRIES or does not pass error back to the model."
+    },
+    {
+      name: "Tracing",
+      exceeds: "AgentTrace is logged with attempt number, code length, validation result, and status. Traces are returned as a list from run_agent().",
+      meets: "Each attempt is logged with attempt number and pass/fail status.",
+      approaching: "Basic print statements only; no structured trace.",
+      below: "No logging; failures are silent."
+    },
+    {
+      name: "Judgment note",
+      exceeds: "README identifies at least two specific conditions where the loop gets stuck and explains exactly how each is bounded (retry cap, convergence check, or escalation).",
+      meets: "README explains the retry cap and why it's set to 3.",
+      approaching: "README mentions the loop but doesn't connect it to specific failure conditions.",
+      below: "No README or no mention of how the loop is bounded."
+    }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can write a system prompt with all four components — role, task, constraints, and output format — without looking anything up",
+    "I can explain why Chain-of-Thought improves reliability in mechanical terms, not just 'it helps the model think'",
+    "I can implement a generate → validate → retry loop that stops on duplicate errors and never exceeds MAX_RETRIES",
+    "I can trace through my agent's message list and explain exactly what context the model had at each retry",
+    "Judgment gate: I can name a task where self-correction would make things worse, and explain why"
+  ]}
+  next="Module 1 complete — move on to Module 2: Tools & Function Calling →"
+/>
+
+[← Lesson 5](/modules/module-01-prompting-reasoning/lesson-05)

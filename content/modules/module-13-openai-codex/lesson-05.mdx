@@ -1,0 +1,167 @@
+---
+title: "Subagents, Reviews, Repair Loops, and Automation"
+module: "module-13-openai-codex"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 - Subagents, Reviews, Repair Loops, and Automation
+
+Once you can use Codex for a single scoped task, the next step is orchestration. That does not mean letting agents loose. It means choosing which work can run in parallel, which work needs a second opinion, and which loops can be automated because they have objective feedback.
+
+## Subagents: parallel work without context noise
+
+Subagents let Codex delegate bounded work to specialized agents and return summaries instead of flooding the main thread with every intermediate log.
+
+Use subagents for read-heavy work:
+
+- Codebase exploration
+- Security review
+- Test gap analysis
+- Log analysis
+- Documentation comparison
+- Migration impact mapping
+
+Be careful with write-heavy work. Two agents editing the same files at once can create conflicts and make review harder.
+
+```text
+Use parallel subagents to review this branch.
+
+Spawn:
+1. A security reviewer focused on auth, secrets, and file access.
+2. A test reviewer focused on missing coverage and brittle tests.
+3. A maintainability reviewer focused only on complexity introduced by this diff.
+
+Wait for all three. Return findings by severity with file references. Do not edit files.
+```
+
+<Callout type="key">
+Parallelism is safest when agents are reading, testing, or summarizing. Parallel writing should be rare and carefully partitioned by file or feature boundary.
+</Callout>
+
+## Code review as a separate agent pass
+
+After Codex implements a change, ask for a fresh review. The review prompt should not flatter the implementation. It should look for blockers.
+
+```text
+Review the current diff as a separate reviewer.
+
+Findings first, ordered by severity.
+Prioritize:
+- Behavioral regressions
+- Security issues
+- Data loss
+- Missing tests
+- Wrong assumptions about framework APIs
+
+For each finding, include:
+- File reference
+- Why it is a real risk
+- Minimal suggested fix
+
+If there are no findings, say "No blocking findings" and list residual test gaps.
+```
+
+The second pass catches a different class of mistakes because the agent is no longer in "make it work" mode. It is in "try to block this PR" mode.
+
+## Repair loops
+
+Code is unusually friendly to agents because it has objective feedback. A test failure is not a vibe; it is a concrete observation.
+
+The repair loop:
+
+```
+run check -> observe failure -> diagnose root cause -> patch -> rerun same check
+```
+
+```text
+The command failed:
+
+npm run lint
+
+Output:
+[paste the relevant error]
+
+Do not rewrite broadly. Diagnose the root cause, patch the smallest area, then rerun npm run lint. If the same error appears twice, stop and explain why you are stuck.
+```
+
+This mirrors the self-correction pattern from Module 1. The difference is that the validator is a real command: test suite, type checker, linter, or build.
+
+## Automation
+
+Codex can also be used in scripted or CI-like workflows. The safe automation candidates are repetitive tasks with clear inputs and reviewable outputs:
+
+- Summarize CI failures
+- Triage issues
+- Draft release notes
+- Propose test additions for uncovered files
+- Review pull requests
+- Run dependency update analysis
+
+The unsafe automation candidates are tasks that require product judgment, broad write access, or irreversible changes.
+
+```text
+Good automation:
+Every morning, inspect failed CI runs from the last 24 hours and draft a summary grouped by root cause. Do not push code.
+
+Risky automation:
+Every morning, fix all failed CI runs and merge if tests pass.
+```
+
+The first creates a review artifact. The second grants code-writing and merge authority to a loop that may not understand priority, user impact, or release timing.
+
+## Choosing the right workflow
+
+| Work | Best workflow |
+|---|---|
+| Understand a new repo | Read-only exploration prompt |
+| Fix a small bug | Local CLI/IDE edit with tests |
+| Update docs from known facts | Local or cloud task with file scope |
+| Review a PR | Separate review pass, no edits |
+| Investigate several independent areas | Subagents |
+| Repair failing tests | Repair loop with exact command output |
+| Recurring report | Automation that drafts, not merges |
+
+<Quiz
+  question="When are subagents most appropriate?"
+  options={[
+    {
+      label: "When three agents can edit the same component at the same time and merge their own changes.",
+      correct: false,
+      explanation: "That is where subagents become risky. Parallel writes to the same area create conflicts and review confusion."
+    },
+    {
+      label: "When independent read-heavy tasks can run in parallel and return compact summaries to the main thread.",
+      correct: true,
+      explanation: "Correct. Subagents reduce context noise and save time when the work can be partitioned cleanly."
+    },
+    {
+      label: "Whenever the main agent is uncertain.",
+      correct: false,
+      explanation: "Uncertainty may call for a plan, a question, or a narrow exploration prompt. Subagents are for parallelizable work, not generic doubt."
+    }
+  ]}
+/>
+
+<Quiz
+  question="What makes a Codex automation safe enough to run regularly?"
+  options={[
+    {
+      label: "It has bounded permissions, clear inputs, objective checks where possible, and produces a reviewable artifact instead of taking irreversible action.",
+      correct: true,
+      explanation: "Correct. Automation should reduce toil without bypassing ownership."
+    },
+    {
+      label: "It uses the strongest available model.",
+      correct: false,
+      explanation: "Model strength helps, but safety comes from scope, permissions, verification, and review."
+    },
+    {
+      label: "It runs at night when fewer people are using the system.",
+      correct: false,
+      explanation: "Time of day does not make a broad write-capable automation safe."
+    }
+  ]}
+/>
+
+[Previous: Lesson 4](/modules/module-13-openai-codex/lesson-04) - [Lab: Ship a Codex-assisted change ->](/modules/module-13-openai-codex/lesson-06-lab)

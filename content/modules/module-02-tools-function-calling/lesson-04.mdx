@@ -1,0 +1,256 @@
+---
+title: "Tool Errors, Timeouts, and the Security Mindset"
+module: "module-02-tools-function-calling"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Tool Errors, Timeouts, and the Security Mindset
+
+A tool that worked in testing hung the production server at 3am. No timeout. No retry cap. An agent prompt that included user input called a file tool and traversed outside its allowed directory. No path validation.
+
+Both of these failures had the same root cause: the engineer treated tool reliability and security as problems to solve later. In agent systems, later never comes — by the time the agent is running in production, the blast radius is live.
+
+## Tools fail in production, always
+
+Network calls time out. APIs return 500s. Databases go momentarily unreachable. A well-designed tool handles failure as a first-class path, not an afterthought.
+
+The rule for what to return when a tool fails: **return an error object, not an exception**. The model can reason about a structured error object and decide whether to retry, ask for clarification, or report failure to the user. It cannot reason about a Python stack trace.
+
+```python
+def search_web(query: str, max_results: int = 5) -> dict:
+    try:
+        response = httpx.get(
+            "https://api.search.example.com/search",
+            params={"q": query, "n": max_results},
+            timeout=10.0  # always set a timeout
+        )
+        response.raise_for_status()
+        return {"results": response.json()["items"]}
+
+    except httpx.TimeoutException:
+        return {
+            "error": "TimeoutError",
+            "message": "Search request timed out after 10 seconds.",
+            "retryable": True,
+        }
+    except httpx.HTTPStatusError as e:
+        retryable = e.response.status_code in (429, 500, 502, 503, 504)
+        return {
+            "error": "HTTPError",
+            "message": f"Search API returned {e.response.status_code}.",
+            "retryable": retryable,
+        }
+```
+
+The `retryable` field is important: it tells the model (and your orchestration code) whether another attempt makes sense. A 429 (rate limit) is retryable with a wait. A 400 (bad request) is not — retrying won't fix a malformed query.
+
+## Retry logic: the correct pattern
+
+A retry without a cap is an infinite loop waiting to happen. The correct pattern is exponential backoff with a maximum attempt count:
+
+```python
+import time
+
+def with_retry(fn, max_attempts: int = 3, base_delay: float = 1.0):
+    for attempt in range(max_attempts):
+        result = fn()
+
+        if "error" not in result:
+            return result  # success
+
+        if not result.get("retryable", False):
+            return result  # not retryable — stop now
+
+        if attempt < max_attempts - 1:
+            delay = base_delay * (2 ** attempt)  # 1s, 2s, 4s
+            time.sleep(delay)
+
+    return result  # return the last error after exhausting retries
+```
+
+<Callout type="warning">
+Never retry without a cap. A model stuck in a retry loop on a persistently-failing tool will exhaust your API budget, fill the context window, and eventually hit the MAX_STEPS limit — but not before burning tokens and time. Three retries with exponential backoff is almost always sufficient.
+</Callout>
+
+## Sandboxed code execution
+
+The moment your agent can run code, the failure mode changes. A buggy file operation corrupts a file. A bad network call wastes money. A buggy code execution can OOM a server, fill a disk, or — if you're not careful about process isolation — damage the host system.
+
+<FailureMuseum
+  exhibit="Code Runner Without Limits"
+  symptom="Agent prompt causes server OOM and crash within 30 seconds"
+>
+
+#### The broken system
+
+An agent has a `run_code` tool that executes arbitrary Python. The implementation:
+
+```python
+def run_code(code: str) -> str:
+    import subprocess
+    result = subprocess.run(
+        ["python", "-c", code],
+        capture_output=True,
+        text=True
+    )
+    return result.stdout or result.stderr
+```
+
+No timeout. No memory limit. No restriction on what the code can do.
+
+#### How it fails
+
+A user asks the agent to "write a program that finds all prime numbers." The agent writes this:
+
+```python
+primes = []
+n = 2
+while True:
+    primes.append(n)
+    n += 1
+```
+
+The subprocess runs indefinitely. The agent, getting no response, retries — spawning another subprocess. Three retries later, the server has four Python processes filling memory. The OS OOMs the application server.
+
+#### What's wrong
+
+1. No `timeout` in `subprocess.run` — process runs forever
+2. No memory limit — process can consume all available RAM
+3. No `max_attempts` on retry — agent compounds the problem by retrying
+
+#### The fix
+
+```python
+import subprocess
+import resource
+
+def run_code(code: str, timeout: int = 10) -> dict:
+    try:
+        result = subprocess.run(
+            ["python", "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=timeout,           # kill after N seconds
+            cwd="/tmp/agent_sandbox",  # lock working directory
+        )
+        return {
+            "stdout": result.stdout[:4096],  # cap output size
+            "stderr": result.stderr[:1024],
+            "returncode": result.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "error": "TimeoutError",
+            "message": f"Code execution timed out after {timeout}s.",
+            "retryable": False,
+        }
+```
+
+For stronger isolation, run the subprocess inside Docker with `--memory`, `--cpus`, and `--network none` flags.
+
+</FailureMuseum>
+
+## The security mindset: blast radius
+
+The moment you give an agent a tool that does something in the world, you've created a blast radius. The blast radius is the answer to: *if this tool is called with the worst plausible arguments, what's the maximum damage?*
+
+<Callout type="key">
+Blast radius analysis is not about distrusting the model. It's about not trusting every prompt the model will ever receive. Users (and attackers) will craft inputs designed to manipulate the model's tool use. Your defenses live in the tool, not in the prompt.
+</Callout>
+
+For every tool you build, answer these questions before shipping:
+
+1. **What is the write surface?** Can this tool modify or delete data? What data?
+2. **What is the scope?** Is it bounded to a specific directory, database, or resource namespace?
+3. **What is the maximum resource consumption?** Can it loop, spawn processes, or make unbounded network calls?
+4. **What happens if the argument is adversarial?** What if `path` is `../../etc/passwd`? What if `query` is a SQL injection string?
+
+## Principle of least privilege
+
+Give the agent the minimum capability it needs to complete its task. Not because you don't trust the model — but because you don't trust every prompt the model will ever receive.
+
+A customer service agent that needs to look up order status should have a `get_order_status(order_id)` tool — not a `query_database(sql)` tool. The narrow tool can't be abused to extract customer data or modify records. The wide tool can.
+
+```python
+# Too wide — blast radius: entire database
+def query_database(sql: str) -> list:
+    return db.execute(sql).fetchall()
+
+# Appropriately scoped — blast radius: one order record
+def get_order_status(order_id: str) -> dict:
+    # Validates order_id format, queries only the orders table
+    if not re.match(r'^ORD-[0-9]{8}$', order_id):
+        return {"error": "Invalid order_id format"}
+    return db.execute(
+        "SELECT status, updated_at FROM orders WHERE order_id = ?",
+        [order_id]
+    ).fetchone()
+```
+
+The scoped version is also a better tool by every other metric: clearer description, simpler schema, easier to test.
+
+## Path traversal: a concrete example
+
+File tools are a common blast radius vector. If your tool takes a file path and doesn't validate it:
+
+```python
+# Vulnerable — path traversal possible
+def read_file(path: str) -> str:
+    with open(path, "r") as f:
+        return f.read()
+# Agent could be manipulated into calling:
+# read_file("../../etc/passwd")
+# read_file("../../.env")
+```
+
+The fix is path normalization and a root-directory guard:
+
+```python
+import os
+
+WORKSPACE = "/home/agent/workspace"
+
+def read_file(path: str) -> dict:
+    # Resolve the full path (resolves ../ sequences)
+    full_path = os.path.realpath(os.path.join(WORKSPACE, path))
+
+    # Verify it's still within the workspace
+    if not full_path.startswith(WORKSPACE + os.sep):
+        return {
+            "error": "AccessDenied",
+            "message": "Path is outside the allowed workspace directory.",
+            "retryable": False,
+        }
+
+    try:
+        with open(full_path, "r") as f:
+            return {"content": f.read()}
+    except FileNotFoundError:
+        return {"error": "FileNotFound", "message": f"No file at {path}"}
+```
+
+`os.path.realpath` resolves all `../` sequences before the guard check runs. The guard is then reliable.
+
+<Quiz
+  question="You're building a customer support agent. It needs to look up order details and issue refunds. You give it two tools: get_order(order_id) and process_refund(order_id, amount). A security researcher reports that user messages can be crafted to make the model call process_refund with very large amounts. What's the right fix?"
+  options={[
+    {
+      label: "Add a better system prompt telling the model not to process large refunds without explicit user confirmation.",
+      correct: false,
+      explanation: "Prompt-based guardrails are the weakest defense. A sufficiently crafted user message can override system prompt instructions. The fix must live in the tool — not in the prompt."
+    },
+    {
+      label: "Add validation inside process_refund: cap the amount at a maximum value, verify the order exists and is refund-eligible, and require the amount to match the original order total.",
+      correct: true,
+      explanation: "Tools are your last line of defense. Validate arguments at the tool boundary: cap the amount, verify the business logic is satisfied, and reject anything that looks wrong. The model will never see arguments the tool validates away."
+    },
+    {
+      label: "Switch to a model that is known to be more resistant to prompt injection attacks.",
+      correct: false,
+      explanation: "No model is fully resistant to adversarial inputs. Defense-in-depth means the tool must be safe regardless of what the model is instructed to do. Model choice is a factor, but it's not a substitute for tool-level validation."
+    }
+  ]}
+/>
+
+[← Lesson 3](/modules/module-02-tools-function-calling/lesson-03) · [Lab: Build the multi-tool agent →](/modules/module-02-tools-function-calling/lesson-05-lab)

@@ -1,0 +1,212 @@
+---
+title: "Embeddings and Vector Search"
+module: "module-03-memory-knowledge"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Embeddings and Vector Search
+
+A 1536-dimensional address for a piece of text. Similar texts have similar addresses. Finding related content means finding nearby addresses. That's the entire intuition. Everything else — ChromaDB, cosine similarity, chunking strategies — is implementation detail on top of this one idea.
+
+<EmbeddingExplorer />
+
+## What an embedding is
+
+An embedding model converts text into a fixed-length vector of floating-point numbers. Each dimension captures some learned aspect of meaning. The model has no human-interpretable labels for these dimensions — they emerge from training on billions of text pairs — but the geometry that results is consistent: texts with similar meaning cluster nearby in the space.
+
+The practical consequence is that you can measure semantic similarity without writing any rules. You don't need a keyword list or a synonym dictionary. You just compare vectors.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+def embed(text: str) -> list[float]:
+    response = client.embeddings.create(
+        model="voyage-3",
+        input=text,
+    )
+    return response.embeddings[0].embedding
+
+v1 = embed("The capital of France")
+v2 = embed("Paris is France's largest city")
+v3 = embed("How to bake sourdough bread")
+
+# v1 and v2 will have high cosine similarity (~0.9+)
+# v1 and v3 will have low cosine similarity (~0.2-0.3)
+```
+
+**Cosine similarity** measures the angle between two vectors, normalised to the range [-1, 1]. A score of 1.0 means identical direction (highly similar); 0 means orthogonal (unrelated); -1 means opposite. In practice, text embeddings rarely go below 0.
+
+```python
+import numpy as np
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    a, b = np.array(a), np.array(b)
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+```
+
+<Callout type="key">
+You don't need to implement cosine similarity yourself — vector databases do it for you. But understanding that similarity is a geometric distance, not a keyword match, is what lets you predict when retrieval will and won't work. Paraphrases retrieve well. Jargon-heavy technical text paired with plain-English queries retrieves poorly. The geometry explains both.
+</Callout>
+
+## ChromaDB end to end
+
+ChromaDB is an open-source vector database that runs locally, no server required. It stores documents alongside their embeddings and lets you query by similarity. Here's the full setup:
+
+```python
+import chromadb
+
+# PersistentClient writes to disk — survives process restarts
+# Use chromadb.Client() for an in-memory instance (testing only)
+client = chromadb.PersistentClient(path="./memory_db")
+
+# get_or_create_collection is idempotent — safe to call on every startup
+collection = client.get_or_create_collection(
+    name="knowledge",
+    metadata={"hnsw:space": "cosine"},  # use cosine similarity
+)
+
+# Add documents — ChromaDB embeds them automatically using its default model
+# or you can pass pre-computed embeddings
+collection.add(
+    documents=["Paris is the capital of France", "Berlin is the capital of Germany"],
+    ids=["doc-1", "doc-2"],
+    metadatas=[
+        {"source": "wikipedia", "date": "2024-01-01", "topic": "geography"},
+        {"source": "wikipedia", "date": "2024-01-01", "topic": "geography"},
+    ],
+)
+
+# Query by similarity — returns the n most similar documents
+results = collection.query(
+    query_texts=["What is the capital of France?"],
+    n_results=2,
+)
+
+print(results["documents"])   # [['Paris is the capital of France', ...]]
+print(results["distances"])   # [[0.02, 0.41]] — lower = more similar (cosine distance)
+print(results["metadatas"])   # [[{'source': 'wikipedia', ...}, ...]]
+```
+
+**Metadata filtering** with `where` lets you restrict retrieval to a subset of the collection — essential when you're storing multiple document types or time-sensitive information:
+
+```python
+# Only retrieve from web sources
+results = collection.query(
+    query_texts=["machine learning fundamentals"],
+    n_results=5,
+    where={"source": "web"},
+)
+
+# Only retrieve recent documents
+results = collection.query(
+    query_texts=["latest model releases"],
+    n_results=5,
+    where={"date": {"$gte": "2024-06-01"}},
+)
+
+# Combine conditions
+results = collection.query(
+    query_texts=["Python asyncio"],
+    n_results=3,
+    where={"$and": [{"source": "docs"}, {"topic": "programming"}]},
+)
+```
+
+## Chunking strategies
+
+Long documents don't fit in a single embedding. You need to split them into chunks — and the chunk size is a major retrieval quality dial. Too large and a chunk retrieves for many unrelated queries (noise). Too small and a chunk lacks enough context to be useful on its own.
+
+**Fixed-size chunking** — split by character or token count with overlap:
+
+```python
+def chunk_fixed(text: str, size: int = 512, overlap: int = 64) -> list[str]:
+    chunks = []
+    start = 0
+    while start < len(text):
+        end = start + size
+        chunks.append(text[start:end])
+        start += size - overlap
+    return chunks
+```
+
+**Sentence-boundary chunking** — split at sentence ends, group into chunks:
+
+```python
+import re
+
+def chunk_sentences(text: str, max_sentences: int = 5) -> list[str]:
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [
+        " ".join(sentences[i:i + max_sentences])
+        for i in range(0, len(sentences), max_sentences)
+    ]
+```
+
+**Semantic chunking** — split when topic shifts significantly (requires embedding pairs of sentences and comparing). More expensive, but produces the highest-quality retrieval.
+
+The practical rule: start with sentence-boundary chunks of 3–6 sentences with 1-sentence overlap. Only move to semantic chunking if retrieval quality is poor after tuning.
+
+<Callout type="warning">
+Chunking strategy is underappreciated. Developers spend hours tuning prompts and ignore chunking entirely, then wonder why RAG retrieves the wrong content. A too-large chunk (entire page) will retrieve for almost any query — but it buries the relevant sentence in noise that the model then has to ignore. A too-small chunk (single sentence) loses the surrounding context the model needs to interpret it.
+</Callout>
+
+## The embedding model consistency trap
+
+<FailureMuseum title="Mismatched embedding models corrupt the index silently">
+
+An agent indexed its knowledge base at deployment using `text-embedding-ada-002`. Six months later, the team switched to `text-embedding-3-small` as the query model because it was cheaper. Retrieval quality dropped dramatically but no errors were raised.
+
+**Root cause:** Embeddings from different models live in different vector spaces. Cosine similarity between a `text-embedding-ada-002` document vector and a `text-embedding-3-small` query vector is geometrically meaningless — the coordinates refer to entirely different learned dimensions. The retrieved chunks were technically "nearby" in a meaningless mixed space.
+
+**How to find it:** Inspect retrieved chunks. They look plausible but are semantically unrelated to the query. The distance scores appear normal (~0.1–0.3) which masks the problem entirely.
+
+**Fix:** Store the embedding model name alongside every document in metadata. Validate at query time that the query model matches the index model. Re-embed the entire collection when switching models.
+
+```python
+collection.add(
+    documents=[chunk],
+    ids=[chunk_id],
+    metadatas=[{"embedding_model": "text-embedding-3-small", ...}],
+)
+
+# At query time
+def safe_query(collection, query_text: str, query_model: str):
+    # Check a sample to validate model consistency
+    sample = collection.get(limit=1, include=["metadatas"])
+    if sample["metadatas"]:
+        stored_model = sample["metadatas"][0].get("embedding_model")
+        if stored_model and stored_model != query_model:
+            raise ValueError(
+                f"Model mismatch: index uses '{stored_model}', "
+                f"query uses '{query_model}'. Re-embed the collection first."
+            )
+    return collection.query(query_texts=[query_text], n_results=5)
+```
+
+</FailureMuseum>
+
+<Quiz
+  question="You add 10,000 documents to a ChromaDB collection using embedding model A. Later you query the collection using embedding model B. No errors are raised and distance scores look normal. What's happening?"
+  options={[
+    {
+      label: "ChromaDB automatically re-embeds queries to match the stored model, so retrieval is fine.",
+      correct: false,
+      explanation: "ChromaDB does not cross-model embedding conversion. It stores vectors as floats with no knowledge of which model produced them. If you pass a different model's query vector, it computes cosine similarity against the stored vectors directly — in a meaningless mixed space."
+    },
+    {
+      label: "The similarity scores are computed between vectors from different spaces, making them geometrically meaningless. Retrieval is silently broken.",
+      correct: true,
+      explanation: "Exactly. Different embedding models produce vectors in different learned spaces. Cosine similarity between them has no semantic meaning. The 'nearest' results are random from a semantic standpoint, but the distance values look plausible — which is why this failure is hard to spot without inspecting the retrieved content."
+    },
+    {
+      label: "The results will be slightly less accurate but still mostly correct, since both models encode similar semantic information.",
+      correct: false,
+      explanation: "This is the intuitive guess but it's wrong. Embedding spaces are not standardised across models. The coordinates don't correspond to any shared concept — they're learned representations that differ fundamentally between models. Mixing them produces retrieval that is no better than random."
+    }
+  ]}
+/>
+
+[← Lesson 1](/modules/module-03-memory-knowledge/lesson-01) · [Lesson 3: RAG end to end →](/modules/module-03-memory-knowledge/lesson-03)

@@ -1,0 +1,52 @@
+---
+title: "OpenAI Codex: Agentic Software Engineering"
+module: "module-13-openai-codex"
+part: 6
+slug: "module-13-openai-codex"
+---
+
+# Module 13 - OpenAI Codex: Agentic Software Engineering
+
+**Part 6 - Practitioner Tools** - 6 lessons - ~5 hours total
+
+<LearningObjectives>
+- Explain Codex as a coding agent: repo context, tool use, editing, shell commands, verification, and human review
+- Write task prompts that include scope, context, constraints, and a concrete definition of done
+- Choose safe permissions for local and cloud coding-agent work
+- Use `AGENTS.md`, skills, and MCP to make a coding agent follow project-specific rules
+- Apply subagents, code review, and repair loops without creating conflicting edits or noisy context
+- Complete a real repo change with Codex while preserving a reviewable Git trail
+</LearningObjectives>
+
+## What you'll build
+
+You will use Codex as a supervised software engineering agent on a real repository. The final lab is not "ask the model to write code and hope." You will create a branch, ask Codex to understand the codebase, write a precise task spec, let it make a small change, run verification, ask for a review, fix one issue, and capture the durable project rule in `AGENTS.md`.
+
+The point of this module is not that Codex is magic. The point is that a coding agent becomes useful when the engineer knows how to bound it, steer it, and verify it.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [What Codex is: a software engineering agent](/modules/module-13-openai-codex/lesson-01) | ~35 min |
+| 2 | [Prompting Codex: specs, context, and definition of done](/modules/module-13-openai-codex/lesson-02) | ~45 min |
+| 3 | [Sandboxing, permissions, and Git checkpoints](/modules/module-13-openai-codex/lesson-03) | ~45 min |
+| 4 | [AGENTS.md, skills, and MCP](/modules/module-13-openai-codex/lesson-04) | ~45 min |
+| 5 | [Subagents, reviews, repair loops, and automation](/modules/module-13-openai-codex/lesson-05) | ~45 min |
+| 6 | [Lab: ship a Codex-assisted repo improvement](/modules/module-13-openai-codex/lesson-06-lab) | ~2-3 hrs |
+
+<Callout type="key">
+Treat Codex like a capable junior teammate with fast hands, broad context, and no ownership of the final decision. You are still responsible for the spec, the permissions, the tests, the diff, and the merge.
+</Callout>
+
+## Official docs
+
+The details of Codex change quickly. When teaching this module, check the current OpenAI docs before giving platform-specific instructions:
+
+- [Codex overview](https://developers.openai.com/codex)
+- [Codex quickstart](https://developers.openai.com/codex/quickstart)
+- [Prompting Codex](https://developers.openai.com/codex/prompting)
+- [Codex workflows](https://developers.openai.com/codex/workflows)
+- [Sandboxing](https://developers.openai.com/codex/concepts/sandboxing)
+
+[**Start Lesson 1 ->**](/modules/module-13-openai-codex/lesson-01)

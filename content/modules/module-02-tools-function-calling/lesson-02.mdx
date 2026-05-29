@@ -1,0 +1,197 @@
+---
+title: "Function Calling End to End"
+module: "module-02-tools-function-calling"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Function Calling End to End
+
+Most explanations of function calling skip the most important part: the model never executes anything. It produces a structured description of a tool call. Your code reads that description, runs the tool, and appends the result back to the conversation. The model then sees the result as part of its context and continues.
+
+Understanding this sequence precisely is what separates engineers who can debug agent failures from engineers who just retry and hope.
+
+## The conversation the model sees
+
+A function-calling interaction is a multi-turn conversation with a specific message structure. The model doesn't see a special "tool call" interface — it sees messages with particular roles and content shapes.
+
+<FunctionCallFlow />
+
+Step through the simple call scenario. Notice:
+1. The model's tool call is a regular `assistant` message — the content just has a `tool_calls` array instead of prose
+2. The tool result is a `tool` role message appended after your code runs
+3. The model sees the result and produces a final `assistant` message answering the user
+
+This four-message sequence is the atomic unit of tool use. Everything more complex — retries, parallel calls, chained calls — is just this pattern composed.
+
+<Callout type="key">
+The model never executes tools. It produces a structured description of a call. Your orchestration code executes it and appends the result. The model then generates a continuation from the updated context. Understanding this boundary is what lets you debug failures precisely.
+</Callout>
+
+## The protocol in code
+
+Here's the full calling loop, stripped to essentials:
+
+```python
+import json
+import openai
+
+client = openai.OpenAI()
+
+def run_agent(user_message: str, tools: list, tool_map: dict) -> str:
+    messages = [{"role": "user", "content": user_message}]
+
+    while True:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=tools,
+        )
+
+        msg = response.choices[0].message
+        messages.append(msg)  # always append assistant's response
+
+        # If no tool calls, we're done
+        if not msg.tool_calls:
+            return msg.content
+
+        # Execute each tool call and append results
+        for call in msg.tool_calls:
+            name = call.function.name
+            args = json.loads(call.function.arguments)
+
+            result = tool_map[name](**args)  # your function runs here
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,  # must match the call that triggered it
+                "content": json.dumps(result)
+            })
+        # Loop — model sees the tool results and continues
+```
+
+Two things in this code deserve attention:
+
+**`messages.append(msg)` happens before tool execution.** The assistant's response — including its tool_calls — goes into the conversation first. This is required by the API: you can't append tool results without the preceding assistant message.
+
+**`tool_call_id` must match.** Each tool call has a unique ID. The result message you append must reference that ID. If you have parallel calls, you append one `tool` message per call, each with its own ID.
+
+## Parallel tool calls
+
+When the model needs multiple independent pieces of information, it can return several tool calls in one response. Step through the "Parallel calls" scenario in the visualizer above.
+
+The model returns one `assistant` message containing a `tool_calls` array with two entries. Your code runs both, appends both results (each as its own `tool` message), then the model continues. One extra round-trip saved.
+
+```python
+# Handling parallel calls — same loop, handles naturally
+for call in msg.tool_calls:  # iterate over all calls in the response
+    name = call.function.name
+    args = json.loads(call.function.arguments)
+    result = tool_map[name](**args)
+    messages.append({
+        "role": "tool",
+        "tool_call_id": call.id,
+        "content": json.dumps(result)
+    })
+# All results appended before next model call
+```
+
+The loop handles both single and parallel calls identically — you don't need special-case logic.
+
+## Validate arguments before executing
+
+The model produces tool call arguments as a JSON string. That JSON is generated, not looked up — meaning it can be wrong. Always validate before running:
+
+```python
+import jsonschema
+
+def safe_execute(call, tool_schemas, tool_map):
+    name = call.function.name
+    args = json.loads(call.function.arguments)
+
+    # Validate against the schema you provided to the model
+    schema = tool_schemas[name]["parameters"]
+    try:
+        jsonschema.validate(args, schema)
+    except jsonschema.ValidationError as e:
+        return {"error": f"Invalid arguments: {e.message}"}
+
+    return tool_map[name](**args)
+```
+
+<Callout type="warning">
+Never pass model-generated arguments directly to a function without validation, especially if that function touches the filesystem, network, or a database. The model will occasionally produce arguments that look plausible but are malformed, out of range, or missing required fields.
+</Callout>
+
+## Chaining: when one tool call depends on another
+
+Some tasks require sequential tool use: fetch an ID, then use that ID in the next call. The model handles this naturally through the loop — it just makes another tool call after receiving the first result.
+
+```python
+# What the model sees (conceptually):
+# Turn 1: user asks for a user's recent orders
+# Turn 2: model calls get_user_id(email="alice@example.com")
+# Turn 3: tool returns {"user_id": "usr_4829"}
+# Turn 4: model calls get_orders(user_id="usr_4829", limit=5)
+# Turn 5: tool returns the orders
+# Turn 6: model answers the user
+
+# Your code doesn't need to know about the dependency — the loop handles it
+```
+
+The model knows it needs the user ID before it can fetch orders, so it chains the calls. Your loop just keeps running until there are no more tool calls.
+
+## MAX_STEPS is not optional
+
+Every tool-calling loop needs an exit condition beyond "no tool calls." Models can loop indefinitely — retrying a failing tool, getting stuck in a reasoning loop, or just miscounting steps.
+
+```python
+MAX_STEPS = 10
+
+def run_agent(user_message, tools, tool_map):
+    messages = [{"role": "user", "content": user_message}]
+
+    for step in range(MAX_STEPS):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            tools=tools,
+        )
+        msg = response.choices[0].message
+        messages.append(msg)
+
+        if not msg.tool_calls:
+            return msg.content
+
+        for call in msg.tool_calls:
+            args = json.loads(call.function.arguments)
+            result = tool_map[call.function.name](**args)
+            messages.append({"role": "tool", "tool_call_id": call.id, "content": json.dumps(result)})
+
+    return "Agent reached maximum steps without completing the task."
+```
+
+Set `MAX_STEPS` to something that represents a realistic upper bound for your task. For a simple lookup: 3–5. For a research task: 10–15. Never omit it.
+
+<Quiz
+  question="You send a message to the API with a tools list. The model responds with a tool_calls array containing two calls. What is the correct next step before calling the API again?"
+  options={[
+    {
+      label: "Append the assistant's response to messages, execute both tool calls, then append one tool result message per call — each with the matching tool_call_id.",
+      correct: true,
+      explanation: "This is the exact required sequence. The assistant message goes in first (required by the API), then both tool result messages — one per call_id. Only after all results are appended do you call the API again."
+    },
+    {
+      label: "Execute both tool calls first, then append the assistant message and both results together in a single batch.",
+      correct: false,
+      explanation: "The assistant message must be appended before the tool results. The API enforces this ordering — tool messages must follow the assistant message that contains the corresponding tool_calls."
+    },
+    {
+      label: "Append one result message covering both tool calls, with both results as a JSON array in the content.",
+      correct: false,
+      explanation: "Each tool call needs its own tool message with a matching tool_call_id. Combining results in one message breaks the ID linkage the model uses to associate results with the calls that produced them."
+    }
+  ]}
+/>
+
+[← Lesson 1](/modules/module-02-tools-function-calling/lesson-01) · [Lesson 3: The Model Context Protocol →](/modules/module-02-tools-function-calling/lesson-03)

@@ -1,0 +1,171 @@
+---
+title: "Prompting Codex: Specs, Context, and Definition of Done"
+module: "module-13-openai-codex"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 - Prompting Codex: Specs, Context, and Definition of Done
+
+Prompting Codex is closer to writing a task ticket than chatting with a model. The best prompts tell the agent what to change, where to look, what not to touch, and how to prove the work is complete.
+
+## The four-part Codex prompt
+
+A reliable Codex prompt has four parts:
+
+1. **Task** - the behavior change or question.
+2. **Context** - files, architecture notes, bug reports, screenshots, logs, or design constraints.
+3. **Constraints** - non-goals, safety limits, style requirements, permissions.
+4. **Definition of done** - tests, manual checks, output format, review expectations.
+
+```text
+Task:
+Add a "last updated" timestamp to the learner dashboard module rows.
+
+Context:
+- Start in app/dashboard/page.tsx.
+- Module metadata comes from content/modules/*/index.mdx.
+- Keep the existing zinc-based visual style.
+
+Constraints:
+- Do not change auth, routing, or Supabase schema.
+- Do not add a new dependency.
+- Keep the change minimal.
+
+Definition of done:
+- Dashboard still renders all modules.
+- npm run lint passes.
+- Summarize changed files and any remaining test gap.
+```
+
+<Callout type="tip">
+If you cannot write the definition of done, you are not ready to delegate the task. Ask Codex to help you turn the idea into a testable task spec first.
+</Callout>
+
+## Exploration prompts
+
+When you do not understand the code yet, do not start with "fix." Start with "explain" or "map."
+
+```text
+Read app/(learner)/modules/[module]/page.tsx, app/(learner)/modules/[module]/[lesson]/page.tsx, and lib/content.ts.
+
+Explain:
+1. How raw MDX is loaded.
+2. How lesson pages differ from module index pages.
+3. Which assumptions would break if a module folder contained extra .md files.
+
+Do not edit files.
+```
+
+Exploration prompts should ask for file references, failure modes, and a short recommendation. That keeps the output useful instead of turning into a tour of the whole repository.
+
+## Implementation prompts
+
+An implementation prompt should be narrower than an exploration prompt. Give Codex permission to edit only after the target and constraints are clear.
+
+```text
+Implement the minimal change you recommended.
+
+Scope:
+- app/dashboard/page.tsx only, unless you find a necessary type error elsewhere.
+
+Rules:
+- Preserve the current layout and styling.
+- Do not refactor unrelated module data.
+- If you need to touch another file, stop and explain why first.
+
+Verification:
+- Run npm run lint.
+- Report the result and summarize the diff.
+```
+
+This does two useful things. It gives the agent room to act, and it tells the agent where the boundary is. If it needs to cross that boundary, it should stop and ask.
+
+## Debugging prompts
+
+For bugs, the fastest path is reproduction first. Give the error, the expected behavior, and a command that proves failure.
+
+```text
+Bug:
+The lesson page crashes when an MDX component receives an array prop.
+
+Observed:
+Quiz options are undefined at runtime.
+
+Expected:
+MDX JSX props such as options={[{ label: "A", correct: true }]} should survive parsing.
+
+Context:
+- Rendering uses next-mdx-remote/rsc.
+- Check AGENTS.md before editing.
+
+Definition of done:
+- Identify the root cause.
+- Make the minimal fix.
+- Add a note if the bug could recur in another page.
+- Run npm run lint.
+```
+
+Notice the phrase "root cause." Without it, Codex may patch the symptom. With it, the agent is more likely to inspect the MDX rendering options and find the actual configuration issue.
+
+## Review prompts
+
+Codex is useful after it writes code too. Ask for a review from a fresh angle:
+
+```text
+Review the current diff as if you are blocking a PR.
+
+Prioritize:
+1. Bugs or behavioral regressions.
+2. Security or data exposure.
+3. Missing tests.
+4. Maintainability issues only if they affect this change.
+
+Return findings first with file references. If there are no issues, say that clearly and name the remaining test gap.
+```
+
+The important phrase is "current diff." Review the change that exists, not the whole universe.
+
+<Quiz
+  question="Why should a Codex implementation prompt include non-goals?"
+  options={[
+    {
+      label: "Because non-goals reduce the model's temperature and make output deterministic.",
+      correct: false,
+      explanation: "Non-goals do not change sampling mechanics. They shape the agent's plan by making boundaries explicit."
+    },
+    {
+      label: "Because they prevent useful opportunistic fixes, and opportunistic fixes are always bad.",
+      correct: false,
+      explanation: "Opportunistic fixes can be useful, but they should be deliberate. A small task should stay reviewable."
+    },
+    {
+      label: "Because Codex may notice adjacent issues and try to fix them unless you define the task boundary.",
+      correct: true,
+      explanation: "Correct. Coding agents are good at finding nearby work. Non-goals keep the diff scoped so the human can review it safely."
+    }
+  ]}
+/>
+
+<Quiz
+  question="A Codex task fails tests. What is the best follow-up prompt?"
+  options={[
+    {
+      label: "The tests failed. Try harder.",
+      correct: false,
+      explanation: "This adds no information. The agent needs the failing command, output, and desired behavior."
+    },
+    {
+      label: "Here is the exact failing command and output. Diagnose the root cause before editing, then make the smallest fix and rerun the same command.",
+      correct: true,
+      explanation: "This creates a repair loop: observe failure, diagnose, patch, verify with the same signal."
+    },
+    {
+      label: "Ignore tests for now and finish the implementation.",
+      correct: false,
+      explanation: "Tests are the feedback signal that makes coding-agent work safer. Ignoring them removes the agent's best verification tool."
+    }
+  ]}
+/>
+
+[Previous: Lesson 1](/modules/module-13-openai-codex/lesson-01) - [Lesson 3 ->](/modules/module-13-openai-codex/lesson-03)

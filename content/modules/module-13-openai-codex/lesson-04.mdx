@@ -1,0 +1,151 @@
+---
+title: "AGENTS.md, Skills, and MCP"
+module: "module-13-openai-codex"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 - AGENTS.md, Skills, and MCP
+
+One prompt steers one task. Project guidance steers every task. Codex becomes much more useful when the repo itself teaches the agent how work should be done.
+
+## AGENTS.md: repo instructions that travel
+
+`AGENTS.md` is durable project guidance. It belongs in the repository and tells Codex what should be true every time it works there.
+
+Use it for rules like:
+
+- How to run lint, tests, and build
+- Which directories contain authored content
+- Which files are generated
+- Which framework conventions are unusual
+- What not to touch without asking
+- Code review expectations
+
+```md
+# AGENTS.md
+
+## Build and verify
+
+- Run `npm run lint` after TypeScript or React changes.
+- Run `npm run build` before changing routing, MDX rendering, or server components.
+
+## MDX content
+
+- Lesson files live in `content/modules/[moduleSlug]/`.
+- Do not put `'use client'` in MDX.
+- Use only components exported from `components/mdx/index.ts`.
+- `MDXRemote` must keep `blockJS: false`.
+
+## Change discipline
+
+- Keep edits scoped to the requested module.
+- Do not add dependencies unless you stop and ask first.
+```
+
+<Callout type="tip">
+Do not put your entire architecture manual in `AGENTS.md`. Put the small set of instructions that prevent repeated mistakes.
+</Callout>
+
+## When to update AGENTS.md
+
+Update project guidance when feedback repeats.
+
+| Signal | Good AGENTS.md update |
+|---|---|
+| Codex keeps using the wrong test command | Add the correct command and when to run it |
+| Codex edits generated files | Mark the generated directory as off-limits |
+| Codex misses a local convention | Name the convention and link to an example file |
+| PR reviewers repeat the same comment | Turn the comment into a durable rule |
+
+Bad `AGENTS.md` files are vague:
+
+```md
+- Write clean code.
+- Be careful.
+- Make good decisions.
+```
+
+Good `AGENTS.md` files are operational:
+
+```md
+- For dashboard work, inspect `app/dashboard/page.tsx` before adding new module metadata.
+- Do not create new MDX components from inside lesson files. Add them under `components/mdx/` and export them in `components/mdx/index.ts`.
+- If a change touches `MDXRemote`, preserve `options={{ parseFrontmatter: true, blockJS: false }}`.
+```
+
+## Skills: reusable workflows
+
+Skills package repeatable knowledge and workflows. Where `AGENTS.md` is project guidance, a skill is a portable capability.
+
+Use a skill when:
+
+- A task has a repeatable multi-step process
+- The agent needs domain-specific rules
+- The workflow has templates, scripts, or assets
+- The same pattern should work across projects
+
+Examples:
+
+| Skill | What it teaches Codex |
+|---|---|
+| `openai-docs` | Use current official OpenAI docs before answering product/API questions |
+| `imagegen` | Generate bitmap assets instead of inventing SVGs |
+| `release-notes` | Turn merged PRs into a changelog with the team's format |
+| `db-migration-review` | Check migration safety, rollback, and data backfill concerns |
+
+The mistake is turning everything into a skill. If the rule is only true for one repo, prefer `AGENTS.md`. If the workflow travels across repos, a skill is a better fit.
+
+## MCP: external tools and context
+
+MCP connects Codex to tools and context outside the local repo. Think of it as a standardized way to give the coding agent more tools without hardcoding every integration.
+
+Good MCP use cases:
+
+- Current developer documentation
+- Browser or design tool context
+- Issue trackers
+- Internal API catalogs
+- Database schema browsers with safe read-only access
+
+Bad MCP use cases:
+
+- Giving broad write access when a narrow tool would do
+- Connecting production systems without strong permissions
+- Replacing repo instructions with a remote source of truth
+
+```text
+Task:
+Use the docs MCP server to check the current API for this library before changing code.
+
+Constraints:
+- Do not use random blog posts as sources.
+- If the official docs conflict with this repo's existing code, stop and report the conflict.
+```
+
+<Callout type="warning">
+Every new tool increases capability and blast radius. MCP is not automatically safe because it is standardized. Treat each server like any other tool: scope it, document it, and decide what it may read or write.
+</Callout>
+
+<Quiz
+  question="Where should you put the rule: 'This repo's MDX renderer must always pass blockJS: false to MDXRemote'?"
+  options={[
+    {
+      label: "In a one-off prompt only.",
+      correct: false,
+      explanation: "A one-off prompt helps once. This is a repo-specific invariant that future sessions should inherit."
+    },
+    {
+      label: "In AGENTS.md, because it is a durable project-specific rule that prevents a recurring runtime bug.",
+      correct: true,
+      explanation: "Correct. This is exactly the kind of instruction AGENTS.md is for: small, specific, and important every time the agent touches MDX rendering."
+    },
+    {
+      label: "Only in a skill, because all instructions should be portable.",
+      correct: false,
+      explanation: "This rule is specific to this repo's MDX stack. A skill could teach general MDX review, but the exact renderer rule belongs in the repo."
+    }
+  ]}
+/>
+
+[Previous: Lesson 3](/modules/module-13-openai-codex/lesson-03) - [Lesson 5 ->](/modules/module-13-openai-codex/lesson-05)

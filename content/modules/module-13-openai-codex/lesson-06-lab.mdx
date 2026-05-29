@@ -1,0 +1,260 @@
+---
+title: "Lab: Ship a Codex-Assisted Repo Improvement"
+module: "module-13-openai-codex"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab - Ship a Codex-Assisted Repo Improvement
+
+<LabBrief title="Codex-Assisted Repo Improvement" time="2-3 hours">
+
+#### Objective
+
+Use Codex to make one small, reviewable improvement to a real repository while preserving human control of scope, permissions, verification, and final review.
+
+#### Setup
+
+Install and authenticate Codex using the current official setup path for your machine. Then choose a repository you are allowed to edit.
+
+Before starting:
+
+```bash
+git status --short
+git switch -c codex-small-improvement
+```
+
+#### Deliverables
+
+- A Git diff containing one small code or documentation improvement
+- `codex-lab-notes.md` with prompts used, decisions made, verification results, and one reflection
+- One Codex review pass on the final diff
+- One durable repo instruction added to `AGENTS.md` or a short note explaining why no new instruction was appropriate
+
+#### Hard constraints
+
+- Do not use Full Access for this lab
+- Do not let Codex read secrets or private production data
+- Do not add dependencies unless Codex stops and explains why first
+- Do not merge without human review
+- The final diff must be small enough to review in under 10 minutes
+
+</LabBrief>
+
+## Step 1: Read-only exploration
+
+Start by asking Codex to understand a narrow area. Do not edit yet.
+
+```text
+I want to make one small, reviewable improvement in this repo.
+
+First, inspect the project structure and identify three candidate improvements that:
+- are small enough to review in under 10 minutes
+- can be verified with an existing command
+- do not require new dependencies
+- do not touch secrets, auth policy, billing, or production data
+
+Do not edit files yet. Return:
+1. Candidate task
+2. Files likely involved
+3. Verification command
+4. Risk level
+```
+
+Choose one candidate. If Codex proposes something broad, push back.
+
+```text
+Make the task smaller. I want one behavior or documentation improvement, not a refactor.
+```
+
+## Step 2: Write the task spec
+
+Create `codex-lab-notes.md` and record your chosen task:
+
+```md
+# Codex lab notes
+
+## Chosen task
+
+## Why this is small enough
+
+## Files in scope
+
+## Non-goals
+
+## Verification command
+
+## Prompts used
+
+## Final review notes
+
+## Reflection
+```
+
+Then give Codex the implementation prompt:
+
+```text
+Implement the chosen task.
+
+Scope:
+- [name the files or directory]
+
+Non-goals:
+- Do not refactor unrelated code.
+- Do not add dependencies.
+- Do not change public behavior outside this task.
+
+Definition of done:
+- Run [verification command].
+- Summarize changed files.
+- Name any remaining test gap.
+```
+
+## Step 3: Verify with a real command
+
+Codex should run the command if permissions allow. If not, you run it and paste the output back.
+
+Good verification commands:
+
+```bash
+npm run lint
+npm run build
+pytest
+python -m pytest
+pnpm test
+```
+
+If the command fails, use a repair loop:
+
+```text
+The verification command failed.
+
+Command:
+[paste command]
+
+Output:
+[paste relevant output]
+
+Diagnose the root cause before editing. Make the smallest fix and rerun the same command. If the same error appears twice, stop and explain the blocker.
+```
+
+<Callout type="warning">
+Do not switch verification commands just to get a pass. If the chosen command is the right signal, keep using it until it passes or you can explain why the repo is already broken.
+</Callout>
+
+## Step 4: Ask for a review
+
+After implementation and verification, ask Codex for a separate review:
+
+```text
+Review the current diff as if you are blocking a PR.
+
+Findings first, ordered by severity.
+Prioritize bugs, regressions, security, and missing tests.
+If there are no blocking findings, say that clearly and list residual risk.
+Do not edit files during the review.
+```
+
+If the review finds a real issue, ask Codex to fix only that issue.
+
+```text
+Fix only finding #1. Do not change unrelated files. Rerun the verification command after the fix.
+```
+
+## Step 5: Capture durable learning
+
+Look back at the session. Did Codex need a correction that future sessions should inherit?
+
+Good `AGENTS.md` updates:
+
+```md
+- For content changes, edit files under `content/modules/` only. Do not change app routing unless explicitly asked.
+- Run `npm run lint` after touching `.tsx` files.
+- Do not add dependencies for icon, formatting, or utility functions without asking first.
+```
+
+Bad `AGENTS.md` updates:
+
+```md
+- Be smarter.
+- Write better code.
+- Always do the right thing.
+```
+
+If no durable rule emerged, write this in `codex-lab-notes.md`:
+
+```md
+No AGENTS.md update: the correction was task-specific and not likely to recur.
+```
+
+## What to submit
+
+Submit the branch or patch with:
+
+- Final diff
+- Verification output
+- Codex review result
+- `codex-lab-notes.md`
+- Any `AGENTS.md` update
+
+<Rubric
+  threshold="All criteria must score 3 (Meets) or above to pass."
+  criteria={[
+    {
+      name: "Task scope",
+      exceeds: "The task is narrowly scoped, has explicit non-goals, and the final diff is easy to review in under 10 minutes.",
+      meets: "The task is small and reviewable with no unrelated refactor.",
+      approaching: "The task is mostly small but includes one unrelated cleanup or unclear file change.",
+      below: "The task is broad, unbounded, or changes many unrelated files."
+    },
+    {
+      name: "Prompt quality",
+      exceeds: "Prompts include task, context, constraints, definition of done, and explicit stop conditions for risky actions.",
+      meets: "Prompts include scope, non-goals, and verification.",
+      approaching: "Prompts describe the task but leave important boundaries implicit.",
+      below: "Prompts are vague or delegate product judgment without constraints."
+    },
+    {
+      name: "Safety",
+      exceeds: "Permissions are conservative, Git checkpoints are clear, and risky actions are explicitly blocked or escalated.",
+      meets: "The work happens on a branch, avoids Full Access, and does not expose secrets or private data.",
+      approaching: "The work uses a branch but permissions or risky commands are not clearly controlled.",
+      below: "The agent is given broad access, reads secrets, or makes irreversible changes."
+    },
+    {
+      name: "Verification",
+      exceeds: "The final result is verified with the right command, failures are handled through a repair loop, and residual risk is named.",
+      meets: "A relevant verification command is run and the result is recorded.",
+      approaching: "Verification is manual or incomplete but the learner explains the gap.",
+      below: "No meaningful verification is performed."
+    },
+    {
+      name: "Review",
+      exceeds: "A separate Codex review pass finds or explicitly clears blockers, and at least one finding is assessed by the human.",
+      meets: "A Codex review pass is performed and recorded.",
+      approaching: "Review is informal or mixed into the implementation thread.",
+      below: "No review pass is performed."
+    },
+    {
+      name: "Durable learning",
+      exceeds: "The AGENTS.md update captures a specific recurring rule, or the notes convincingly explain why no update belongs in the repo.",
+      meets: "The learner adds or evaluates one durable project instruction.",
+      approaching: "The reflection is present but too vague to improve future agent sessions.",
+      below: "No reflection or durable learning is submitted."
+    }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can explain the difference between using Codex as autocomplete and using it as a supervised coding agent",
+    "I can write a Codex task prompt with scope, context, constraints, and a definition of done",
+    "I can choose a permission mode based on repo trust and task risk",
+    "I can use Git diff and verification commands as the review surface for agent work",
+    "I can decide whether a correction belongs in AGENTS.md, a skill, an MCP server, or a one-off prompt",
+    "I can use a separate Codex review pass without letting it expand the scope of the change"
+  ]}
+  next="Module 13 complete - you can now use Codex as a supervised engineering agent, not just a code generator."
+/>
+
+[Previous: Lesson 5](/modules/module-13-openai-codex/lesson-05)

@@ -1,70 +1,146 @@
 ---
-title: "Understanding Alzheimer's Disease: A Journey into the Mind's Maze"
+title: "Context Is Not Memory"
 module: "module-03-memory-knowledge"
 lesson: 1
 slug: "lesson-01"
 ---
 
-Alzheimer's disease is a progressive brain disorder that affects memory and thinking skills. It is the most common cause of dementia — a general term for memory loss and cognitive decline severe enough to interfere with daily life. In this lesson we explore the scale of the crisis, why early detection matters, and how machine learning on MRI scans can help.
+# Lesson 1 · Context Is Not Memory
 
-<SlideViewer moduleSlug="module-03-memory-knowledge" lessonSlug="lesson-01" />
+An agent that answered your questions perfectly in session 1 has no idea what you discussed in session 2. You didn't change the model. You didn't change the prompt. The context window was just cleared. That's not a bug — it's the architecture. Understanding why is the starting point for building agents that actually remember things.
 
-## The Scale of the Crisis
+## The context window is a whiteboard
 
-Alzheimer's disease is not just a personal tragedy — it is a public health and economic emergency. The disease is progressive and irreversible, gradually destroying memory, thinking skills, and eventually the ability to carry out simple tasks.
+Every LLM call is stateless. When you send a request, you pass the entire conversation history in the `messages` array. The model reads it, generates a response, and discards everything. Nothing persists. The "memory" you see in a chat interface is an illusion maintained by the application layer — it appends each turn to the messages list and resends the whole thing every time.
+
+This creates two hard constraints:
+
+**Capacity.** Context windows are large but finite. GPT-4o has 128k tokens; Claude 3 Opus has 200k. A single book is roughly 100k tokens. Long-running agents accumulate conversation history, tool outputs, and reasoning traces that eventually exceed any context limit.
+
+**Cost.** Every token in the context window is processed on every call. A 100k-token context costs roughly 100× more per call than a 1k-token context. Naively appending everything to context is expensive even before you hit the limit.
+
+```python
+# What "memory" looks like without any memory system
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    # Every prior turn is re-sent on every call
+    {"role": "user",    "content": "My name is Artur."},
+    {"role": "assistant","content": "Nice to meet you, Artur."},
+    {"role": "user",    "content": "What's my name?"},
+]
+# This works — until the conversation exceeds the context limit
+# Then you either truncate (losing information) or fail
+```
 
 <Callout type="key">
-One in three seniors dies with Alzheimer's or another dementia. It kills more than breast cancer and prostate cancer combined.
+The context window is not memory. It is a read-once scratchpad that is rebuilt from scratch on every single API call. Treating it as memory works until it doesn't — and when it fails, it fails silently by truncating the history you were relying on.
 </Callout>
 
-The economic toll is staggering. If Alzheimer's were a country, its $1 trillion annual cost would make it the 18th largest economy in the world — on par with Canada and Indonesia.
+<ContextWindowSim />
 
-<Quiz
-  question="What does 'progressive' mean when describing Alzheimer's disease?"
-  options={[
-    { label: "It can be cured with early treatment", correct: false, explanation: "There is currently no cure for Alzheimer's disease." },
-    { label: "It gets worse over time", correct: true, explanation: "Progressive means the disease continues to worsen as time passes, with no reversal." },
-    { label: "It spreads from person to person", correct: false, explanation: "Alzheimer's is not contagious — it is a neurological condition." },
-    { label: "It only affects people over 80", correct: false, explanation: "While age is a major risk factor, Alzheimer's can affect people in their 50s and 60s too." }
-  ]}
-/>
+## Context management strategies
 
-## The Case for Early Detection
+Before reaching for a memory system, there are three lighter techniques for managing context pressure:
 
-Only 1 in 4 people with dementia receives a formal diagnosis. Without a diagnosis, patients cannot access treatment, care planning, or support services. Earlier identification also reduces long-term healthcare costs by enabling management before the disease reaches its most resource-intensive stages.
+**Sliding window.** Keep only the last N turns. Simple, but loses older context entirely. Works for tasks where recent history is sufficient.
+
+```python
+MAX_TURNS = 20
+
+def trim_messages(messages: list[dict], system: str) -> list[dict]:
+    non_system = [m for m in messages if m["role"] != "system"]
+    trimmed = non_system[-MAX_TURNS:]
+    return [{"role": "system", "content": system}] + trimmed
+```
+
+**Summarisation.** When the conversation exceeds a threshold, use an LLM call to compress older turns into a summary, then replace them with it. Retains semantic content at the cost of an extra API call.
+
+```python
+def summarise_and_trim(messages: list[dict], threshold: int = 8000) -> list[dict]:
+    token_count = sum(len(m["content"].split()) for m in messages)
+    if token_count < threshold:
+        return messages
+
+    older = messages[:-10]  # keep the last 10 turns verbatim
+    recent = messages[-10:]
+
+    summary_text = call_llm(
+        f"Summarise this conversation history concisely:\n\n"
+        + "\n".join(f"{m['role']}: {m['content']}" for m in older)
+    )
+    summary_msg = {"role": "user", "content": f"[Earlier conversation summary: {summary_text}]"}
+    return [summary_msg] + recent
+```
+
+**Retrieval.** Don't keep history in context at all — store it externally and retrieve only the relevant parts per turn. This is what a proper memory system does, and it's the subject of the rest of this module.
+
+## Memory taxonomy
+
+Once you accept that context isn't memory, you need to decide what kind of memory to build. There are three distinct types, and choosing the wrong one for a given piece of information is a common design mistake.
+
+**Semantic memory** stores facts about the world — things that are true independent of any particular interaction. Product documentation, user preferences, domain knowledge. This is what a vector database is for.
+
+```python
+class SemanticMemory:
+    """Facts that are true regardless of when or who asked."""
+    def store(self, fact: str, metadata: dict): ...
+    def search(self, query: str, k: int = 5) -> list[str]: ...
+```
+
+**Episodic memory** stores past interactions — what was discussed, what happened, what was decided. The history of sessions with a specific user. This is what session logs and conversation summaries capture.
+
+```python
+class EpisodicMemory:
+    """What happened in past sessions with this user."""
+    def log_session(self, session_id: str, summary: str, date: str): ...
+    def recall(self, user_id: str, n_sessions: int = 3) -> list[str]: ...
+```
+
+**Procedural memory** stores how to do things — patterns, templates, successful reasoning traces that should be reused. Few-shot examples are a form of procedural memory.
+
+```python
+class ProceduralMemory:
+    """How to handle known task types."""
+    def store_pattern(self, task_type: str, successful_trace: str): ...
+    def retrieve_pattern(self, task_type: str) -> str | None: ...
+```
 
 <Callout type="warning">
-The detection gap is not a medical inevitability — it is a systems problem. Most cases go undiagnosed because current screening tools are too slow, too expensive, or unavailable outside specialist centres.
+These types blur in practice. A user's name could be semantic (a fact about the world) or episodic (learned in session 1). The distinction clarifies when you hit an actual failure: "the agent forgot we discussed this" is episodic failure; "the agent doesn't know anything about our product" is semantic failure. Diagnose which type is missing before building the wrong system.
 </Callout>
 
-Machine learning applied to MRI scans offers a path to faster, cheaper, and more accessible screening. Structural differences in the brain — visible in cross-sectional MRI images — correlate strongly with disease stage, making this a tractable computer vision problem.
+## Which type to reach for
+
+The choice depends on what the agent is forgetting:
+
+| What's missing | Memory type | Storage |
+|---|---|---|
+| Facts, domain knowledge, documentation | Semantic | Vector DB (ChromaDB) |
+| Past conversations, user history, session context | Episodic | Database, vault, logs |
+| Reasoning patterns, successful task traces | Procedural | Few-shot examples, prompt library |
+| All three across sessions | Hybrid | Vault (file system) + vector index |
+
+The lab at the end of this module builds a hybrid system: an Obsidian vault as the durable store and ChromaDB as the retrieval index over it. That design comes from understanding all three types and why each one alone is insufficient.
 
 <Quiz
-  question="Why does a lack of diagnosis prevent access to care?"
+  question="A customer support agent handles tickets across sessions. After resolving a ticket, the agent should remember that this user's issue was caused by a misconfigured DNS record. In future sessions, it should surface this fact when the user reports similar symptoms. Which memory type is this?"
   options={[
-    { label: "Diagnosed patients are automatically enrolled in treatment programmes", correct: false, explanation: "Diagnosis opens doors to treatment options and care planning, but enrolment is not automatic." },
-    { label: "Without a formal diagnosis, patients cannot legally receive dementia-specific treatments or support", correct: true, explanation: "Healthcare systems gate dementia-specific interventions behind a formal diagnosis — without it, patients fall through the cracks." },
-    { label: "Undiagnosed patients recover naturally", correct: false, explanation: "Alzheimer's is irreversible. Without a diagnosis, patients simply go unmanaged." },
-    { label: "Diagnosis has no impact on treatment options", correct: false, explanation: "Diagnosis is the prerequisite for accessing both pharmacological and non-pharmacological interventions." }
+    {
+      label: "Procedural — it's a pattern the agent should apply to similar problems.",
+      correct: false,
+      explanation: "Procedural memory stores how to solve a class of problem. This is a specific fact about a specific user's past incident. That's episodic — it belongs to the history of interactions with this user, not to a general resolution pattern."
+    },
+    {
+      label: "Episodic — it's a specific fact from a past interaction with this user that should be recalled in future sessions.",
+      correct: true,
+      explanation: "Correct. Episodic memory stores what happened in past interactions. 'This user had a DNS misconfiguration in ticket #4821' is an event from a session, not a general fact about the world or a reasoning pattern. It should be stored per-user and retrieved when context is relevant."
+    },
+    {
+      label: "Semantic — it's a fact about DNS configuration that the agent should know.",
+      correct: false,
+      explanation: "Semantic memory stores facts true for everyone. General DNS knowledge belongs there. But 'this specific user had this specific misconfiguration' is tied to a particular past interaction — that's episodic."
+    }
   ]}
 />
 
-## The Dataset and Next Steps
-
-The data used in this project comes from the OASIS dataset — MRI scans of both healthy and Alzheimer's patients, covering four classification categories: Non Demented, Very Early Demented, Mild Demented, and Moderately Demented. Images show cross-sections of the brain and capture structural differences across disease stages.
-
-<Callout type="tip">
-The OASIS dataset was created by Dr Randy Buckner at the Howard Hughes Medical Institute (HHMI) at Harvard University, in collaboration with the Washington University Alzheimer's Disease Research Center. Access it at [oasis-brains.org](https://www.oasis-brains.org/#dataAccess).
-</Callout>
-
-The modelling pipeline will follow three steps: preprocessing images (rescaling, normalising pixel values, standardising sizes), extracting features through convolutional layers of a deep learning model, and training and validating the model with standard evaluation metrics.
-
-<Quiz
-  question="What are the four classification categories in the OASIS dataset?"
-  options={[
-    { label: "Healthy, Early, Middle, Late", correct: false, explanation: "The dataset uses more precise clinical staging terminology." },
-    { label: "Non Demented, Very Early Demented, Mild Demented, Moderately Demented", correct: true, explanation: "These four categories reflect the clinical staging used in Alzheimer's research and allow the model to learn progressive structural differences." },
-    { label: "Stage 0, Stage 1, Stage 2, Stage 3", correct: false, explanation: "The OASIS dataset uses descriptive labels rather than numeric stages." },
-    { label: "Negative, Borderline, Positive, Severe", correct: false, explanation: "These are not the categories used in the OASIS dataset." }
-  ]}
-/>
+[← Module overview](/modules/module-03-memory-knowledge) · [Lesson 2: Embeddings and vector search →](/modules/module-03-memory-knowledge/lesson-02)

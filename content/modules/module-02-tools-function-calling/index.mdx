@@ -1,0 +1,40 @@
+---
+title: "Tools & Function Calling"
+module: "module-02-tools-function-calling"
+part: 2
+slug: "module-02-tools-function-calling"
+---
+
+# Module 2 · Tools & Function Calling
+
+**Part 2 — A Single Capable Agent** · 5 lessons · ~5 hours total
+
+<LearningObjectives>
+- Design well-scoped tools with clear JSON schemas and descriptions that guide the model correctly
+- Trace the full multi-turn function-calling protocol — from schema definition through result handling
+- Connect an agent to an MCP server and understand when the protocol is worth adopting
+- Handle tool failures gracefully with proper error objects, retry caps, and exponential backoff
+- Apply the principle of least privilege and blast-radius thinking before giving an agent any real capability
+</LearningObjectives>
+
+## What you'll build
+
+A working agent that can search the web, read and write files in a scoped directory, and execute code in a sandboxed subprocess — with proper error handling on every tool and JSON schemas that reject invalid inputs before the model ever sees a bad result. No frameworks. Plain Python and the OpenAI function-calling API.
+
+This is the module where agents gain real-world capability. That means security is live from lesson 1.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [Tool design: naming, descriptions, and schemas](/modules/module-02-tools-function-calling/lesson-01) | ~45 min |
+| 2 | [Function calling end to end](/modules/module-02-tools-function-calling/lesson-02) | ~45 min |
+| 3 | [The Model Context Protocol](/modules/module-02-tools-function-calling/lesson-03) | ~45 min |
+| 4 | [Tool errors, timeouts, and the security mindset](/modules/module-02-tools-function-calling/lesson-04) | ~45 min |
+| 5 | [Lab: multi-tool agent with sandboxed code runner](/modules/module-02-tools-function-calling/lesson-05-lab) | ~2–3 hrs |
+
+<Callout type="tip">
+Lesson 4 covers security. Don't skip it — giving an agent real tools without understanding blast radius is how production incidents happen. It takes 45 minutes and will change how you design every tool you write from now on.
+</Callout>
+
+[**Start Lesson 1 →**](/modules/module-02-tools-function-calling/lesson-01)

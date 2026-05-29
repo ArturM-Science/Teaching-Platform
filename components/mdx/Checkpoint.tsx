@@ -1,14 +1,7 @@
 'use client'
 import { useState } from 'react'
 
-const items = [
-  'I can draw the agent loop from memory — perceive, reason, act, observe, repeat',
-  'I can explain every line of my 50-line agent without referring to notes',
-  'I can predict what changes when temperature goes from 0.0 to 1.0',
-  'Judgment gate: I can name a problem where a plain LLM call beats an agent loop, and explain the tradeoff',
-]
-
-export function Checkpoint() {
+export function Checkpoint({ items, next }: { items: string[]; next: string }) {
   const [checked, setChecked] = useState<Record<number, boolean>>({})
   const allDone = items.every((_, i) => checked[i])
 
@@ -34,7 +27,7 @@ export function Checkpoint() {
       </div>
       {allDone && (
         <div className="mt-5 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700 font-medium">
-          Module 0 complete — move on to Module 1: Prompting & Reasoning →
+          {next}
         </div>
       )}
     </div>

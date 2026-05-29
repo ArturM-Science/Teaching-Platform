@@ -1,0 +1,246 @@
+---
+title: "Prompt Chaining, Feedback Loops, and Self-Correction"
+module: "module-01-prompting-reasoning"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · Prompt Chaining, Feedback Loops, and Self-Correction
+
+A single LLM call can do a lot. Multiple chained calls, each receiving the output of the previous one, can do more — and do it more reliably. This lesson covers how to architect multi-step pipelines and how to build agents that detect and fix their own failures.
+
+## Prompt chaining: the pattern
+
+Prompt chaining breaks a complex task into sequential LLM calls, where each call produces a typed output that becomes the input for the next.
+
+```
+Input → [Call 1: Extract entities] → entities list
+                                        ↓
+                              [Call 2: Enrich each entity] → enriched list
+                                                              ↓
+                                                    [Call 3: Synthesize report] → Report
+```
+
+Each boundary between calls is a hand-off point. The contract at each hand-off should be explicit — a Pydantic model, not a string.
+
+```python
+from pydantic import BaseModel
+
+class ExtractedEntities(BaseModel):
+    companies: list[str]
+    people: list[str]
+    locations: list[str]
+
+class EnrichedEntity(BaseModel):
+    name: str
+    type: str
+    description: str
+    relevance_score: float
+
+class FinalReport(BaseModel):
+    executive_summary: str
+    key_entities: list[EnrichedEntity]
+    recommendations: list[str]
+
+def run_pipeline(document: str) -> FinalReport:
+    # Step 1
+    entities = call_llm(extract_prompt(document), response_model=ExtractedEntities)
+
+    # Step 2 — runs in parallel (entities are independent)
+    enriched = [
+        call_llm(enrich_prompt(name), response_model=EnrichedEntity)
+        for name in (entities.companies + entities.people)
+    ]
+
+    # Step 3
+    report = call_llm(synthesize_prompt(enriched), response_model=FinalReport)
+    return report
+```
+
+<Callout type="key">
+Every hand-off between prompt chain steps should be typed. An untyped hand-off (passing raw strings) means failures at step 3 may originate from a malformed output at step 1, and you'll have no way to locate the root cause.
+</Callout>
+
+## Gate checks between steps
+
+Not every pipeline should run all the way to completion. Add gate checks that can halt the chain early when something unexpected happens:
+
+```python
+def run_pipeline_with_gates(document: str) -> FinalReport | None:
+    entities = call_llm(extract_prompt(document), response_model=ExtractedEntities)
+
+    # Gate: if no entities found, there's nothing to enrich
+    if not entities.companies and not entities.people:
+        log("No entities found — pipeline halted")
+        return None
+
+    enriched = [enrich(name) for name in entities.companies + entities.people]
+
+    # Gate: if no entity scored high relevance, report may not be useful
+    high_relevance = [e for e in enriched if e.relevance_score >= 0.7]
+    if not high_relevance:
+        log("No high-relevance entities — skipping report generation")
+        return None
+
+    return call_llm(synthesize_prompt(high_relevance), response_model=FinalReport)
+```
+
+Gate checks also prevent wasted API calls. A chain that always runs all steps regardless of intermediate results is expensive and often produces low-quality output when earlier steps fail partially.
+
+## Self-correction: feedback loops
+
+A self-correcting agent runs a generate → evaluate → revise loop. It produces output, checks whether the output is correct, and if not, passes the failure back as context and tries again.
+
+```
+Generate output
+       ↓
+Evaluate output
+  ↙         ↘
+Pass        Fail → Add error to context → Retry
+  ↓
+Return
+```
+
+The evaluation step can be:
+- **Programmatic**: a test suite, a schema validator, a function that checks the output mechanically
+- **LLM-based**: a separate model call that critiques the output
+- **Hybrid**: programmatic checks first, LLM critique if they pass
+
+```python
+def generate_with_self_correction(
+    task: str,
+    validator: callable,
+    max_retries: int = 3
+) -> str:
+    messages = [{"role": "user", "content": task}]
+
+    for attempt in range(max_retries):
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
+        )
+        output = response.choices[0].message.content
+        messages.append({"role": "assistant", "content": output})
+
+        # Run the validator
+        error = validator(output)
+        if error is None:
+            return output  # passes all checks
+
+        # Feed the failure back
+        messages.append({
+            "role": "user",
+            "content": (
+                f"Your output has the following issue:\n{error}\n\n"
+                "Please fix the issue and try again."
+            )
+        })
+
+    raise RuntimeError(f"Failed after {max_retries} attempts")
+```
+
+The key insight: passing the error back as a `user` message means the model sees its own failed output and the specific reason it failed. It can then generate a targeted correction rather than rewriting from scratch.
+
+## Self-correcting code: a concrete example
+
+Code is the ideal domain for self-correction because the evaluation is objective: either the tests pass or they don't.
+
+```python
+import subprocess
+import tempfile
+import os
+
+def validate_python_code(code: str, test_cases: str) -> str | None:
+    """Returns None if code passes, error message if it fails."""
+    with tempfile.TemporaryDirectory() as tmp:
+        code_file = os.path.join(tmp, "solution.py")
+        test_file = os.path.join(tmp, "tests.py")
+
+        with open(code_file, "w") as f:
+            f.write(code)
+        with open(test_file, "w") as f:
+            f.write(test_cases)
+
+        result = subprocess.run(
+            ["python", "-m", "pytest", test_file, "-x", "--tb=short"],
+            capture_output=True, text=True, cwd=tmp, timeout=30
+        )
+
+        if result.returncode == 0:
+            return None  # all tests pass
+        return result.stdout + result.stderr  # return failure output
+
+def generate_code(task: str, test_cases: str) -> str:
+    messages = [
+        {"role": "system", "content": "You are an expert Python developer. Write correct, clean code. Return only the code, no explanation."},
+        {"role": "user", "content": task}
+    ]
+
+    for attempt in range(3):
+        response = client.chat.completions.create(model="gpt-4o", messages=messages)
+        code = extract_code(response.choices[0].message.content)
+        messages.append({"role": "assistant", "content": code})
+
+        error = validate_python_code(code, test_cases)
+        if error is None:
+            return code
+
+        messages.append({
+            "role": "user",
+            "content": f"The code fails the test suite:\n\n{error}\n\nFix the bugs and return the corrected code only."
+        })
+
+    raise RuntimeError("Code generation failed after 3 attempts")
+```
+
+This is the core of the lab at the end of this module. The agent writes code, runs it against tests, reads the failure output, and rewrites until the tests pass.
+
+<SelfCorrectionLoop />
+
+## When to stop looping
+
+A feedback loop without an exit condition is an infinite loop. Three mechanisms to bound it:
+
+**Attempt cap** — most important. Never more than 3–5 retries for most tasks. If it hasn't worked in 3 tries, the prompt or the task specification is probably the problem, not the output.
+
+**Convergence check** — stop if the output isn't improving. If the same error appears on consecutive attempts, retrying won't help:
+
+```python
+errors = []
+for attempt in range(max_retries):
+    output, error = generate_and_validate(...)
+    if error is None:
+        return output
+    if error in errors:  # same error twice — stop
+        break
+    errors.append(error)
+```
+
+**Escalation** — if all retries fail, don't silently fail. Return a structured error, log the trace, and surface it for human review. A silent failure is the most dangerous kind.
+
+<Callout type="warning">
+Don't build self-correction loops around tasks that genuinely can't be validated programmatically. If your "validator" is another LLM call that just says "does this look good?", you're creating a loop that can run indefinitely without converging. Ground truth must be checkable by something more reliable than another model call.
+</Callout>
+
+<Quiz
+  question="Your self-correcting agent runs for 3 attempts. On attempt 1 it produces error A. On attempt 2 it produces error A again. On attempt 3 it produces a new error B. What should happen?"
+  options={[
+    {
+      label: "Continue retrying — attempt 3 showed progress (different error), so more retries might succeed.",
+      correct: false,
+      explanation: "Error A appearing twice indicates the model isn't making progress on that failure mode. Getting a different error on attempt 3 is ambiguous — it might be convergence or might be a new problem. After 3 retries, the right call is to escalate with the full trace, not continue hoping."
+    },
+    {
+      label: "After 3 attempts, raise the error and escalate — log the full attempt trace. The convergence check on attempt 2 (same error) was already a signal to stop; any exit after 3 retries is correct.",
+      correct: true,
+      explanation: "Correct. 3 retries is the cap. The duplicate error on attempt 2 was a signal that the model wasn't making progress on that specific failure. Whether it's 3 of the same error or 3 different errors, escalation is the right outcome."
+    },
+    {
+      label: "Reset and start the loop from the beginning — a fresh start often breaks failure patterns.",
+      correct: false,
+      explanation: "A fresh start without changing the prompt or context produces the same failures. If the model has failed 3 times, the problem is structural — the task description, the validator, or the model's capability on this task. Resetting doesn't address any of these."
+    }
+  ]}
+/>
+
+[← Lesson 4](/modules/module-01-prompting-reasoning/lesson-04) · [Lab: Self-correcting code agent →](/modules/module-01-prompting-reasoning/lesson-06-lab)

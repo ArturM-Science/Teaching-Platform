@@ -1,0 +1,220 @@
+---
+title: "Long-Term Memory: Consolidation, Forgetting, and the Vault"
+module: "module-03-memory-knowledge"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · Long-Term Memory: Consolidation, Forgetting, and the Vault
+
+A vector database of 10,000 low-signal chunks from three months ago is not memory. It's noise. Memory without forgetting is just an ever-growing haystack where everything retrieves equally poorly. This lesson covers how to build memory that persists, stays useful, and degrades gracefully — using an Obsidian vault as the durable store and ChromaDB as the retrieval index over it.
+
+## Obsidian as agent memory
+
+The first insight: you don't need a database to build long-term memory. An Obsidian vault is a folder of `.md` files. The agent reads and writes them with `pathlib`. No API, no server, no schema migrations. Memory is just files.
+
+This is the design choice that makes the lab's memory system inspectable. Open the vault in Obsidian and you can read exactly what the agent remembers, when it wrote each note, and how concepts are linked to each other. You can edit notes by hand, add your own, and delete ones that are wrong. The agent and the human share the same memory store.
+
+```python
+from pathlib import Path
+from datetime import date
+import yaml
+import re
+
+VAULT = Path("vault/notes")
+VAULT.mkdir(parents=True, exist_ok=True)
+
+def slug(title: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "-", title.lower()).strip("-")
+
+def write_note(
+    title: str,
+    body: str,
+    tags: list[str],
+    links: list[str],  # titles of related notes to backlink
+) -> Path:
+    frontmatter = yaml.dump({
+        "date": str(date.today()),
+        "tags": tags,
+        "importance": 0.5,
+        "access_count": 0,
+    }, default_flow_style=False).strip()
+
+    backlinks = "\n".join(f"- [[{link}]]" for link in links)
+    content = f"---\n{frontmatter}\n---\n\n{body}"
+    if links:
+        content += f"\n\n## Related\n{backlinks}"
+
+    path = VAULT / f"{slug(title)}.md"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+def read_note(title: str) -> dict | None:
+    path = VAULT / f"{slug(title)}.md"
+    if not path.exists():
+        return None
+    raw = path.read_text(encoding="utf-8")
+    # Parse frontmatter
+    match = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
+    if not match:
+        return {"title": title, "body": raw, "meta": {}}
+    meta = yaml.safe_load(match.group(1))
+    body = match.group(2).strip()
+    return {"title": title, "body": body, "meta": meta}
+
+def list_notes() -> list[Path]:
+    return sorted(VAULT.glob("*.md"))
+```
+
+**Backlinks** are the key structural feature. When the agent writes a note about "transformer architecture", it includes `[[attention mechanism]]` and `[[positional encoding]]` in the Related section. Those wikilinks appear in Obsidian as clickable connections — and in the graph view, the note's position in the memory network becomes visible. This is associative memory you can inspect visually.
+
+**Git as version control for memory.** After each write, commit the vault:
+
+```python
+import subprocess
+
+def commit_memory(message: str):
+    subprocess.run(["git", "-C", str(VAULT.parent), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(VAULT.parent), "commit", "-m", message], check=True)
+```
+
+Every memory write is now auditable. You can `git log` to see what the agent learned and when, `git diff` to see what changed, and `git revert` to undo a bad consolidation pass.
+
+<Callout type="tip">
+The Obsidian Local REST API MCP plugin (`obsidian-local-rest-api`) exposes the vault over HTTP, giving agents a structured interface instead of raw filesystem access. It's worth adopting for multi-agent setups where several agents share one vault. For a single agent, direct `pathlib` access is simpler and has no dependencies.
+</Callout>
+
+## Memory consolidation
+
+After enough sessions, the vault accumulates redundant notes. Three notes on "attention mechanism" written in three sessions contain overlapping information. Consolidation is the job that merges them.
+
+```python
+def score_importance(note: dict) -> float:
+    meta = note.get("meta", {})
+    access_count = meta.get("access_count", 0)
+    # Recency: notes written in the last 30 days score higher
+    try:
+        days_old = (date.today() - date.fromisoformat(meta.get("date", "2000-01-01"))).days
+    except ValueError:
+        days_old = 365
+    recency = max(0.0, 1.0 - days_old / 180)  # decays to 0 over 6 months
+    return min(1.0, 0.4 * recency + 0.6 * min(1.0, access_count / 10))
+
+def consolidate(vault_path: Path = VAULT, importance_threshold: float = 0.2):
+    """
+    1. Score all notes by importance.
+    2. Archive low-importance notes to vault/archive/.
+    3. Find near-duplicate notes and merge them.
+    """
+    archive_dir = vault_path.parent / "archive"
+    archive_dir.mkdir(exist_ok=True)
+
+    notes = []
+    for path in vault_path.glob("*.md"):
+        raw = path.read_text(encoding="utf-8")
+        match = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
+        meta = yaml.safe_load(match.group(1)) if match else {}
+        notes.append({"path": path, "meta": meta, "body": raw})
+
+    archived = 0
+    for note in notes:
+        score = score_importance(note)
+        if score < importance_threshold:
+            note["path"].rename(archive_dir / note["path"].name)
+            archived += 1
+
+    print(f"Consolidation: archived {archived}/{len(notes)} notes")
+```
+
+Consolidation should run periodically — after a session, nightly, or when the vault exceeds a size threshold. Make it a separate script, not part of the agent loop, so it doesn't slow down queries.
+
+<MemoryConsolidationViz />
+
+## Deliberate forgetting
+
+Forgetting is a feature, not a failure. A memory system that retains everything equally has no way to surface what matters. The forgetting curve — information importance decaying over time — is a design constraint, not a bug.
+
+The importance score above implements a simple version: notes that haven't been accessed recently, and haven't been accessed often, fade toward the archive threshold. You can tune the parameters for your domain:
+
+- **Research agent**: high recency weight — yesterday's findings matter, last year's don't
+- **Customer support agent**: high access-count weight — frequently accessed knowledge stays; one-off resolutions fade
+- **Personal assistant**: balanced — both recency and frequency matter
+
+```python
+# Update access count when a note is retrieved
+def record_access(title: str):
+    path = VAULT / f"{slug(title)}.md"
+    if not path.exists():
+        return
+    raw = path.read_text(encoding="utf-8")
+    match = re.match(r"^---\n(.*?)\n---\n(.*)", raw, re.DOTALL)
+    if not match:
+        return
+    meta = yaml.safe_load(match.group(1))
+    meta["access_count"] = meta.get("access_count", 0) + 1
+    body = match.group(2)
+    updated = f"---\n{yaml.dump(meta).strip()}\n---\n{body}"
+    path.write_text(updated, encoding="utf-8")
+```
+
+## Vault vs. vector DB: the tradeoff
+
+Both the Obsidian vault and ChromaDB are memory stores. They have different strengths and the right answer for production is usually both — vault as the source of truth, ChromaDB as the retrieval index over it.
+
+| | Vector DB (ChromaDB) | Obsidian vault |
+|---|---|---|
+| **Retrieval** | Semantic fuzzy search | Exact filename / frontmatter / backlink traversal |
+| **Inspectability** | Opaque float vectors | Human-readable markdown |
+| **Editability** | Requires re-embedding after change | Edit the file directly |
+| **Auditability** | Query logs only | Git history of every write |
+| **Best for** | Large corpora, fuzzy recall, unstructured text | Structured, auditable, human-in-the-loop memory |
+
+**Hybrid approach:** Keep the vault as source of truth. Sync vault notes into ChromaDB for semantic retrieval. When retrieval succeeds, record the access in the vault. When a note is updated, re-embed it.
+
+```python
+def sync_to_chromadb(collection, vault_path: Path = VAULT):
+    """Keep ChromaDB in sync with vault contents."""
+    for path in vault_path.glob("*.md"):
+        note_id = path.stem
+        content = path.read_text(encoding="utf-8")
+
+        # Check if already indexed (by comparing a hash stored in metadata)
+        existing = collection.get(ids=[note_id], include=["metadatas"])
+        stored_hash = existing["metadatas"][0].get("hash") if existing["ids"] else None
+        current_hash = str(hash(content))
+
+        if stored_hash != current_hash:
+            # Re-embed if content changed
+            collection.upsert(
+                documents=[content],
+                ids=[note_id],
+                metadatas=[{"source": "vault", "hash": current_hash, "path": str(path)}],
+            )
+```
+
+<Callout type="key">
+The vault is the memory you trust. ChromaDB is the index that makes it fast to search. Never delete from the vault because ChromaDB says something is low-relevance — ChromaDB doesn't know what your vault's notes mean to you. The vault is the authoritative store; the vector index is a performance layer over it.
+</Callout>
+
+<Quiz
+  question="Your agent's vault has grown to 800 notes over six months. Retrieval is slow and answer quality has dropped — relevant notes are buried under hundreds of low-signal entries from early testing. What's the right intervention?"
+  options={[
+    {
+      label: "Increase k in ChromaDB queries to retrieve more candidates, giving the model more context to work with.",
+      correct: false,
+      explanation: "More candidates with more noise doesn't help — it amplifies the problem. The model has to filter more irrelevant context, increasing the lost-in-the-middle risk and cost. The fix is to reduce low-signal noise at the source, not retrieve more of it."
+    },
+    {
+      label: "Run a consolidation pass: archive low-importance notes, merge near-duplicates, and re-sync the ChromaDB index.",
+      correct: true,
+      explanation: "Exactly. Consolidation addresses the root cause — the vault has accumulated noise that degrades retrieval. Archive notes with low importance scores (low access count, old, not backlinked), merge duplicates, and rebuild the ChromaDB index over the cleaned vault. Answer quality will recover because relevant notes are no longer buried."
+    },
+    {
+      label: "Delete the ChromaDB index and rebuild it from scratch with a smaller chunk size.",
+      correct: false,
+      explanation: "Rebuilding the index with smaller chunks addresses chunking strategy, not the volume of low-signal content. 800 notes with smaller chunks just means more chunks of the same low-quality content. The source of the problem is the vault contents, not the indexing strategy."
+    }
+  ]}
+/>
+
+[← Lesson 4](/modules/module-03-memory-knowledge/lesson-04) · [Lab: Research agent with persistent memory →](/modules/module-03-memory-knowledge/lesson-06-lab)

@@ -1,18 +1,39 @@
 ---
 title: "Memory & Knowledge"
 module: "module-03-memory-knowledge"
-slug: "index"
+part: 2
+slug: "module-03-memory-knowledge"
 ---
 
-# Memory & Knowledge
+# Module 3 · Memory & Knowledge
+
+**Part 2 — A Single Capable Agent** · 5 lessons · ~5 hours total
 
 <LearningObjectives>
-- Understand how Alzheimer's disease progresses and why early detection matters
-- Explain how machine learning on MRI scans can improve diagnostic accuracy
-- Describe the key preprocessing and modelling steps in a medical imaging pipeline
-- Connect the scale of the dementia crisis to the economic and human case for AI-assisted diagnosis
+- Explain why the context window is not memory and choose the right memory type for a given piece of information
+- Build a vector database with ChromaDB, embed documents, and retrieve by semantic similarity
+- Implement a complete RAG pipeline from chunking through grounded generation
+- Diagnose retrieval failures and implement agentic RAG with query reformulation and reflection
+- Build a long-term memory system using an Obsidian vault that agents read, write, and consolidate across sessions
 </LearningObjectives>
+
+## What you'll build
+
+A research agent with persistent long-term memory backed by an Obsidian vault. The agent searches its memory before hitting the web, writes new knowledge as linked markdown notes, indexes the vault with ChromaDB for semantic retrieval, and runs a consolidation pass that merges near-duplicate notes and archives stale ones. After multiple sessions, the vault grows as a navigable, human-readable record of everything the agent has learned.
 
 ## Lessons
 
-- [Lesson 1 — Understanding Alzheimer's Disease](/modules/module-03-memory-knowledge/lesson-01)
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [Context is not memory](/modules/module-03-memory-knowledge/lesson-01) | ~45 min |
+| 2 | [Embeddings and vector search](/modules/module-03-memory-knowledge/lesson-02) | ~45 min |
+| 3 | [RAG end to end](/modules/module-03-memory-knowledge/lesson-03) | ~45 min |
+| 4 | [Where RAG fails and agentic RAG](/modules/module-03-memory-knowledge/lesson-04) | ~45 min |
+| 5 | [Long-term memory: consolidation, forgetting, and the vault](/modules/module-03-memory-knowledge/lesson-05) | ~45 min |
+| 6 | [Lab: research agent with persistent memory](/modules/module-03-memory-knowledge/lesson-06-lab) | ~2–3 hrs |
+
+<Callout type="tip">
+Lesson 2 (embeddings) is the foundation the rest of the module rests on. If the intuition for cosine similarity doesn't click there, RAG and agentic retrieval will feel like magic rather than engineering. Take the time to get it right before moving on.
+</Callout>
+
+[**Start Lesson 1 →**](/modules/module-03-memory-knowledge/lesson-01)

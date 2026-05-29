@@ -1,0 +1,210 @@
+---
+title: "The Model Context Protocol"
+module: "module-02-tools-function-calling"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · The Model Context Protocol
+
+You've written a tool. It works. Now your colleague builds a different agent and needs the same tool. They copy your code. A third agent needs it too. Suddenly you have three slightly different implementations of the same tool scattered across three codebases.
+
+Then you need to update the tool's behavior. You update one. The others drift. This is the problem MCP solves.
+
+## The proliferation problem
+
+Every tool is a custom integration. Before MCP, the math was brutal: N agent systems × M tools = NM integrations. Each one is a custom API wrapper, a different auth pattern, and a different error format.
+
+The real cost isn't writing the integrations. It's maintaining them. Every tool update must propagate to every consumer. Every new agent that needs an existing tool must re-implement it.
+
+<Callout type="key">
+MCP (Model Context Protocol) is a standard that lets any agent client connect to any tool server over a common protocol — without custom integration code. Think of it as USB for agent tools. The port is standardized; the device can be anything.
+</Callout>
+
+With MCP, you write the tool once as a server. Any MCP-compatible client can discover and call it. Anthropic released the spec in late 2024; it's now adopted across Claude, Cursor, and a growing ecosystem of open-source clients.
+
+## What MCP is
+
+MCP is a JSON-RPC 2.0 protocol over stdio or HTTP/SSE. An MCP server exposes three primitive types:
+
+- **Tools** — functions the model can call (what we've been building)
+- **Resources** — readable data sources (files, database rows, API responses)
+- **Prompts** — reusable prompt templates the client can inject
+
+For agent use, tools are what you care about. The protocol works like this:
+
+1. Client connects to server (stdio subprocess or HTTP endpoint)
+2. Client calls `tools/list` — server returns all available tools with their JSON schemas
+3. Client passes those schemas to the model alongside the conversation
+4. Model produces a tool call → client calls `tools/call` → server executes and returns the result
+5. Client appends the result to messages and continues
+
+Your agent code doesn't change. It just gets its tool list from the MCP client instead of a hardcoded array.
+
+## Connecting to an MCP server
+
+The `mcp` Python package handles the protocol. Connect to a local server running as a subprocess:
+
+```python
+import asyncio
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+async def run_with_mcp():
+    # Start the MCP server as a subprocess
+    server_params = StdioServerParameters(
+        command="python",
+        args=["my_tool_server.py"],
+    )
+
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            # Discover tools automatically
+            tools_result = await session.list_tools()
+            tools = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.inputSchema,
+                    }
+                }
+                for t in tools_result.tools
+            ]
+
+            # Use tools in your existing calling loop
+            # When a tool call comes in, route it through MCP:
+            result = await session.call_tool("search_web", {"query": "attention mechanisms 2024"})
+            print(result.content)
+
+asyncio.run(run_with_mcp())
+```
+
+You don't need to know what tools the server has in advance. `list_tools()` discovers them at runtime. Add a new tool to the server and every client picks it up on the next connection — no deployment changes on the client side.
+
+## Building a minimal MCP server
+
+An MCP server is a Python file that declares tools using the `mcp` library:
+
+```python
+# my_tool_server.py
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp import Tool, TextContent
+import asyncio
+import httpx
+
+app = Server("my-tools")
+
+@app.list_tools()
+async def list_tools():
+    return [
+        Tool(
+            name="get_weather",
+            description=(
+                "Get current weather conditions for a city. "
+                "Returns temperature (Celsius), condition, and humidity. "
+                "Use for current conditions only — not forecasts."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "City name, e.g. 'London' or 'Tokyo'"
+                    }
+                },
+                "required": ["city"]
+            }
+        )
+    ]
+
+@app.call_tool()
+async def call_tool(name: str, arguments: dict):
+    if name == "get_weather":
+        city = arguments["city"]
+        # Real implementation would call a weather API
+        return [TextContent(type="text", text=f'{{"city": "{city}", "temp": 14, "condition": "cloudy"}}')]
+    raise ValueError(f"Unknown tool: {name}")
+
+async def main():
+    async with stdio_server() as (read, write):
+        await app.run(read, write, app.create_initialization_options())
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+This server can now be used by any MCP client — Claude Desktop, your custom agent, a colleague's project — without either side needing to know about the other's implementation details.
+
+## HTTP/SSE transport
+
+For tools that need to be accessible over a network (shared team infrastructure, cloud-hosted tools), use the HTTP/SSE transport instead of stdio:
+
+```python
+# Server side — add one line to switch transports
+from mcp.server.sse import sse_server
+
+async def main():
+    async with sse_server(host="0.0.0.0", port=8080) as (read, write):
+        await app.run(read, write, app.create_initialization_options())
+```
+
+```python
+# Client side — connect over HTTP instead of subprocess
+from mcp.client.sse import sse_client
+
+async with sse_client("http://localhost:8080/sse") as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        # same API from here
+```
+
+The client code is identical after the connection is established.
+
+## When MCP is worth it, and when it isn't
+
+MCP has overhead: the server/client abstraction, async I/O, subprocess management. For a solo project or a throwaway script, it's overkill.
+
+Use MCP when:
+- Multiple agents or teams need the same tool
+- You want tool discovery at runtime rather than hardcoded schemas
+- You're building tools meant to be shared as a service (internal or external)
+- You're using a client like Claude Desktop that natively supports MCP servers
+
+Use plain functions when:
+- It's a one-off agent for a specific task
+- The tool won't be reused across projects
+- You want the simplest possible debugging surface
+
+<Callout type="tip">
+Before building your own MCP server, check the MCP server registry. There are already production-quality servers for GitHub, Slack, filesystem access, Postgres, and dozens of other integrations. Use an existing server first; build your own when you have a tool that doesn't exist yet.
+</Callout>
+
+The protocol matters less than the discipline it enforces: a single, well-maintained implementation of each tool, with a standard interface everyone can use.
+
+<Quiz
+  question="Your team has three agent projects. Two need access to an internal CRM tool. You implement the CRM integration directly in each project's codebase. Six months later, the CRM API changes. What's the maintenance problem, and what would MCP have changed?"
+  options={[
+    {
+      label: "You must update two codebases instead of one. With MCP, the CRM tool would live in one server; both projects connect to it, and you only update the server.",
+      correct: true,
+      explanation: "This is exactly the proliferation problem MCP solves. One server, N clients. Update the server once; all clients get the new behavior on the next connection. The integration lives in one place and is maintained in one place."
+    },
+    {
+      label: "MCP would prevent the CRM API from changing in the first place, because the server enforces a stable interface.",
+      correct: false,
+      explanation: "MCP doesn't control the underlying API — it just standardizes how your agent calls your wrapper. If the CRM API changes, you still update your server. MCP just means you update one server instead of two separate integrations."
+    },
+    {
+      label: "You must update the JSON schemas in both projects. MCP solves this because schemas are defined in the client, not the server.",
+      correct: false,
+      explanation: "It's the opposite: schemas are defined on the MCP server. Clients discover them at runtime via list_tools(). That's the point — schema updates live in one place."
+    }
+  ]}
+/>
+
+[← Lesson 2](/modules/module-02-tools-function-calling/lesson-02) · [Lesson 4: Tool errors and the security mindset →](/modules/module-02-tools-function-calling/lesson-04)

@@ -1,0 +1,240 @@
+---
+title: "Tool Design: Naming, Descriptions, and Schemas"
+module: "module-02-tools-function-calling"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · Tool Design: Naming, Descriptions, and Schemas
+
+An agent called the wrong tool and corrupted a production record. The root cause wasn't a model bug — it was a vague tool description. The model couldn't tell two tools apart, so it guessed wrong.
+
+Tool design feels like plumbing. It isn't. The quality of your tool descriptions is a direct ceiling on what your agent can reliably do.
+
+## The description is the only thing the model knows
+
+When you give a model access to a tool, you pass it a JSON schema. That schema has a `description` field. That description is the model's entire knowledge of what your tool does, when to use it, and what arguments it expects. There are no other signals.
+
+<Callout type="key">
+A tool description is a prompt. The model reads it the same way it reads everything else — as tokens it must generate a continuation from. Vague descriptions produce vague tool selection. Precise descriptions produce precise tool selection.
+</Callout>
+
+This means the same principles that apply to prompting apply to tool descriptions: be specific, give examples of when to use it (and when not to), and state the preconditions and postconditions explicitly.
+
+## Naming conventions
+
+Good tool names follow a verb-noun pattern and use underscores. The name is the first thing the model reads:
+
+```
+# Good
+search_web(query: str) -> str
+read_file(path: str) -> str
+send_email(to: str, subject: str, body: str) -> bool
+
+# Vague — model can't tell these apart
+data_tool(input: str)
+process(args: dict)
+run(cmd: str)
+```
+
+Rules:
+- Start with an action verb: `get_`, `search_`, `read_`, `write_`, `send_`, `create_`, `delete_`
+- One noun: `_weather`, `_file`, `_email`, `_calendar_event`
+- No abbreviations. `get_usr_prf` is harder for the model to reason about than `get_user_profile`
+- Consistent prefix across a family: `calendar_create_event`, `calendar_list_events`, `calendar_delete_event`
+
+## Writing descriptions that work
+
+The standard that produces reliable tool use: *write the description as if explaining to a competent junior engineer who has never seen your codebase.*
+
+That engineer needs to know:
+1. **What the tool does** — one sentence, concrete action
+2. **When to use it** — the triggering condition
+3. **When NOT to use it** — the boundary condition that prevents misuse
+4. **What the output looks like** — so the model can parse it correctly
+
+```python
+# Weak description — model will misuse this
+{
+    "name": "read_file",
+    "description": "Reads a file",
+    "parameters": { ... }
+}
+
+# Strong description — model uses this correctly
+{
+    "name": "read_file",
+    "description": (
+        "Read the contents of a file at the given path and return them as a string. "
+        "Use this when you need to inspect or process the contents of an existing file. "
+        "Do NOT use this to check if a file exists — use check_file_exists instead. "
+        "Returns the raw file contents as a UTF-8 string. Raises an error if the file "
+        "does not exist or if you do not have read permission."
+    ),
+    "parameters": { ... }
+}
+```
+
+<Callout type="warning">
+The "when NOT to use it" clause is often the most important part of a description. Without it, the model will call the most-plausible-sounding tool for every situation, including ones it wasn't designed for.
+</Callout>
+
+## JSON schema basics
+
+Every tool parameter needs a schema. The schema tells the model what arguments to produce — and it's how you validate arguments before executing anything.
+
+```python
+{
+    "name": "search_web",
+    "description": "Search the web and return the top results as a list of title + URL + snippet objects. Use when the answer requires current information not in the model's training data. Returns up to max_results items.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query. Be specific — 'Python asyncio timeout 2024' produces better results than 'python async'."
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Maximum number of results to return. Defaults to 5. Use 1–3 for focused lookups, up to 10 for broad research.",
+                "minimum": 1,
+                "maximum": 10,
+                "default": 5
+            }
+        },
+        "required": ["query"]
+    }
+}
+```
+
+Key schema properties to use:
+- `"description"` on every parameter — the model reads these when forming its arguments
+- `"type"` — `string`, `integer`, `number`, `boolean`, `array`, `object`
+- `"enum"` — restrict to a closed set of values
+- `"minimum"` / `"maximum"` — bound numeric inputs
+- `"required"` — list the non-optional parameters
+
+`"enum"` deserves special attention. When a parameter has a fixed set of valid values, enumerate them. The model will pick from the list rather than inventing values:
+
+```python
+"sort_order": {
+    "type": "string",
+    "enum": ["asc", "desc", "newest", "oldest"],
+    "description": "Sort order for results."
+}
+```
+
+## The god-tool anti-pattern
+
+The most common tool design mistake: building one tool that does too many things.
+
+```python
+# God-tool — don't do this
+{
+    "name": "do_file_operation",
+    "description": "Perform a file operation. Can read, write, delete, copy, or move files.",
+    "parameters": {
+        "operation": { "type": "string", "enum": ["read", "write", "delete", "copy", "move"] },
+        "path": { "type": "string" },
+        "content": { "type": "string" },  # only used for write
+        "destination": { "type": "string" }  # only used for copy/move
+    }
+}
+```
+
+The model has to figure out which parameters apply to which operation. It will get this wrong. The reasoning overhead also makes the model slower.
+
+Split this into `read_file`, `write_file`, `delete_file`, `copy_file`, `move_file`. Each tool is unambiguous. The model selects the right one by name, then fills exactly the arguments that tool needs.
+
+<Callout type="key">
+Single-responsibility applies to tools the same way it applies to functions. If you can't describe what a tool does in one sentence without using the word "or," split it.
+</Callout>
+
+```python
+# Correct split
+tools = [
+    read_file_tool,    # reads and returns file contents
+    write_file_tool,   # writes string to file, creates if missing
+    delete_file_tool,  # deletes file, errors if not found
+]
+```
+
+More tools is fine. The model can handle a large tool list. What it can't handle is ambiguity inside a single tool.
+
+## Putting it together
+
+A well-designed tool:
+
+```python
+def make_tool(name, description, parameters):
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": parameters,
+                "required": [k for k, v in parameters.items() if v.get("required", False)]
+            }
+        }
+    }
+
+search_tool = make_tool(
+    name="search_web",
+    description=(
+        "Search the web for current information and return the top results. "
+        "Use when the user's question requires up-to-date facts, recent events, "
+        "or domain-specific data not likely in the model's training data. "
+        "Do NOT use for questions answerable from general knowledge — that wastes a tool call. "
+        "Returns: list of {title, url, snippet} objects."
+    ),
+    parameters={
+        "query": {
+            "type": "string",
+            "description": "The search query. Prefer specific phrases over single keywords.",
+            "required": True
+        },
+        "max_results": {
+            "type": "integer",
+            "description": "Number of results. Between 1 and 10.",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5
+        }
+    }
+)
+```
+
+Before shipping any tool, run this checklist:
+
+1. Can you describe what it does in one sentence without "or"?
+2. Does the description say when NOT to use it?
+3. Does every parameter have a description?
+4. Are fixed-value parameters using `"enum"`?
+5. Are numeric parameters bounded with `minimum`/`maximum`?
+
+If any answer is no, the model will eventually call the tool incorrectly.
+
+<Quiz
+  question="An agent has two tools: get_weather(city) and get_forecast(city, days). The description for get_weather just says 'Gets weather data.' A user asks 'What will the weather be like in Paris tomorrow?' The model calls get_weather. What's the root cause?"
+  options={[
+    {
+      label: "The model chose the wrong tool because get_weather appeared first in the tool list — ordering matters.",
+      correct: false,
+      explanation: "Tool ordering has minimal effect on well-described tools. The model selects based on description fit, not list position. The root cause is the description."
+    },
+    {
+      label: "The description for get_weather doesn't say when NOT to use it. 'Gets weather data' applies to both current and forecast queries, so the model can't distinguish.",
+      correct: true,
+      explanation: "Exactly. A 'when NOT to use it' clause — e.g., 'Use for current conditions only. For future forecasts, use get_forecast instead.' — would have directed the model to the right tool. The description is a prompt; you have to tell it the boundary."
+    },
+    {
+      label: "The model hallucinated — it made up tool behavior that wasn't in the schema.",
+      correct: false,
+      explanation: "Hallucination isn't the right frame here. The model made a reasonable inference from an ambiguous description. That's a tool design problem, not a model reliability problem."
+    }
+  ]}
+/>
+
+[← Module overview](/modules/module-02-tools-function-calling) · [Lesson 2: Function calling end to end →](/modules/module-02-tools-function-calling/lesson-02)
