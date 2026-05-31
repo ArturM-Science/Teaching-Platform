@@ -135,6 +135,46 @@ Migrations in `supabase/migrations/`:
 - Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files
 - Mobile sidebar: collapse into a slide-out drawer on small screens
 - Workshop scheduling panel (currently placeholder in dashboard sidebar)
+- **Next module to build: Module 06 — Multi-Agent Systems** (slug: `module-06-multi-agent-systems`, Part 3). Research needed before writing — see session notes below.
+
+## Module 05 — Workflow Patterns & Control Flow (added 2026-05-31)
+
+5 lessons + lab. Three interactive components built for this module:
+
+| Component | File | Used in |
+|---|---|---|
+| `<WorkflowDiagram>` | `WorkflowDiagram.tsx` | Lesson 1 — spectrum from single call to stateful workflow |
+| `<ClassifierRouter>` | `ClassifierRouter.tsx` | Lesson 3 — classify a ticket and watch it route to a branch |
+| `<RepairLoopSim>` | `RepairLoopSim.tsx` | Lesson 4 — two scenarios: converges vs hits MAX_ITERATIONS |
+
+## Next Session — Module 06 Research Notes
+
+Before writing Module 06 (Multi-Agent Systems), research the following:
+
+**Core concepts to cover:**
+- What makes a system "multi-agent" vs a workflow with parallel steps
+- Agent roles: orchestrator, subagent, specialist, critic/reviewer
+- Communication patterns: shared message queue, direct handoff, blackboard/shared memory
+- Coordination primitives: task decomposition, result aggregation, conflict resolution
+- Trust between agents: should Agent B trust Agent A's output, or verify independently?
+- Failure modes specific to multi-agent: cascading errors, conflicting outputs, coordination deadlock
+
+**Frameworks and tooling to research:**
+- Anthropic's own multi-agent guidance and Claude Managed Agents multi-agent roster
+- LangGraph / LangChain agent graphs
+- AutoGen (Microsoft) — agent conversation patterns
+- CrewAI — role-based agent teams
+- OpenAI Swarm (if still relevant)
+- How these compare and when to reach for each
+
+**Questions to answer before writing:**
+1. What is the canonical mental model for an orchestrator-subagent relationship?
+2. How do you prevent a subagent's error from corrupting the orchestrator's state?
+3. What does "agent memory" mean in a multi-agent context (shared vs isolated)?
+4. What are the production failure modes unique to multi-agent systems?
+5. How does evaluation change when you have multiple interacting agents?
+
+**Lab idea:** Build a small multi-agent research team — orchestrator decomposes a question, two specialist agents answer different sub-questions, a critic reviews the combined output, orchestrator synthesises the final answer.
 
 ## Module 14 — Lesson Structure (8 lessons as of 2026-05-31)
 

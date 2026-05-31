@@ -24,6 +24,9 @@ import { EvalSetBuilder } from './EvalSetBuilder'
 import { ScoringPlayground } from './ScoringPlayground'
 import { JudgeBiasDemo } from './JudgeBiasDemo'
 import { RegressionRunnerViz } from './RegressionRunnerViz'
+import { WorkflowDiagram } from './WorkflowDiagram'
+import { ClassifierRouter } from './ClassifierRouter'
+import { RepairLoopSim } from './RepairLoopSim'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -54,4 +57,7 @@ export const mdxComponents = {
   ScoringPlayground,
   JudgeBiasDemo,
   RegressionRunnerViz,
+  WorkflowDiagram,
+  ClassifierRouter,
+  RepairLoopSim,
 }

@@ -298,3 +298,39 @@ No props. Self-contained.
 ```mdx
 <RegressionRunnerViz />
 ```
+
+---
+
+### `<WorkflowDiagram>`
+
+Step-through visualisation of the four levels of workflow complexity: single call → prompt chain → branching → stateful workflow. User clicks between stages via tabs or prev/next. Each stage shows a node diagram and explains what it adds and what it cannot do. Used in Module 05, Lesson 1.
+
+No props. Self-contained.
+
+```mdx
+<WorkflowDiagram />
+```
+
+---
+
+### `<ClassifierRouter>`
+
+Interactive classifier simulation. User selects one of four preset support tickets. The component animates the classifier call (with typed JSON output including confidence score), highlights the routed branch, and shows the audit log entry. One ticket deliberately has low confidence to demonstrate the fallback path. Used in Module 05, Lesson 3.
+
+No props. Self-contained.
+
+```mdx
+<ClassifierRouter />
+```
+
+---
+
+### `<RepairLoopSim>`
+
+Step-through repair loop simulator with two scenarios: one that converges after one repair iteration and one that hits MAX_ITERATIONS=2 and escalates. Shows iteration counter, verifier pass/fail JSON output, and a repair step at each iteration. Teaches stopping conditions by showing what happens when they are and aren't enough. Used in Module 05, Lesson 4.
+
+No props. Self-contained.
+
+```mdx
+<RepairLoopSim />
+```

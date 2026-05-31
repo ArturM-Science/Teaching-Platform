@@ -1,0 +1,153 @@
+---
+title: "Loops, Repair, and Stopping Conditions"
+module: "module-05-workflow-patterns"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 - Loops, Repair, and Stopping Conditions
+
+A single pass through a workflow is not always enough. Sometimes the output needs to be checked and corrected before it is acceptable. Loops let a workflow re-run a step — or a sequence of steps — until a condition is met. The risk is that without a stopping condition, a loop runs forever.
+
+## The verification loop
+
+The core pattern: generate, verify, repair, repeat.
+
+```
+[generator] → output
+                ↓
+          [verifier] → pass? → done
+                ↓ fail
+          [repair prompt] → revised output
+                ↓
+          [verifier] → pass? → done
+                ↓ fail (iteration 2)
+          [repair prompt] → ...
+```
+
+The verifier is separate from the generator. It has one job: check a specific criterion and return a pass/fail signal. It should not also generate a fix — that is the repair step's job. Mixing verification and repair into one step produces outputs that are harder to test independently.
+
+## Self-correction vs external validation
+
+Two places to run verification:
+
+**Self-correction**: Ask the same model that produced the output to review and revise it.
+
+```text
+Review your previous answer. Does it include a citation for every factual claim?
+If not, add the missing citations. Return the revised answer only.
+```
+
+**External validation**: Use a separate call, tool, or deterministic check.
+
+```python
+# Deterministic: count citations
+if citation_count(output) < claim_count(output):
+    trigger_repair()
+
+# Separate model call: independent review
+verifier_result = verifier_model(output, criteria)
+```
+
+External validation is stronger than self-correction. A model that hallucinated a fact is likely to confirm it when asked to verify. A separate check — especially a deterministic one — is not subject to the same bias.
+
+| Approach | Strength | Weakness |
+|---|---|---|
+| Self-correction | Simple, no extra call | Model confirms its own errors |
+| External model | Independent perspective | Higher latency and cost |
+| Deterministic check | Reliable, cheap | Only works for measurable criteria |
+
+Use deterministic checks when the criterion is checkable in code. Use an external model when the criterion is qualitative. Combine both for high-stakes outputs.
+
+## Stopping conditions — the mandatory gate
+
+Every loop must have at least one stopping condition that does not depend on the model deciding it is done.
+
+Three acceptable stopping conditions:
+
+1. **Max iterations**: `if iteration >= MAX_ITERATIONS: break`
+2. **Budget**: `if total_tokens >= TOKEN_BUDGET: break`
+3. **Explicit success signal**: the verifier returns `{"pass": true}`
+
+Without a stopping condition, a loop that encounters a persistent failure — a hallucination the model cannot self-correct, an edge case the verifier always rejects — will run until an external limit (rate limit, timeout, cost cap) terminates it. That external limit is painful and unpredictable.
+
+<Callout type="key">
+Every loop needs an exit condition that does not depend on the model saying it is done. The model's "I'm satisfied" is not a reliable stopping signal.
+</Callout>
+
+## Setting the iteration limit
+
+Set the limit based on the task, not on a round number:
+
+- **One repair pass** is right for most cases. If the output does not pass after one revision, the generator or verifier prompt is probably wrong.
+- **Two to three passes** are appropriate when the criteria are complex and incremental improvement is expected.
+- **More than three passes** usually signals that the generator and verifier are in a loop that cannot converge. Stop, log, and route to a fallback or human review.
+
+```python
+MAX_ITERATIONS = 2
+iteration = 0
+
+output = generator(input)
+while iteration < MAX_ITERATIONS:
+    result = verifier(output)
+    if result["pass"]:
+        break
+    output = repair(output, result["feedback"])
+    iteration += 1
+
+if not result["pass"]:
+    escalate_to_human(input, output, result)
+```
+
+<RepairLoopSim />
+
+<FailureMuseum
+  title="The Loop That Wouldn't Stop"
+  what="A code-generation workflow included a self-correction loop: generate code, run linter, if lint errors exist ask the model to fix them, repeat. The loop had no iteration limit. One input triggered a pattern the model consistently misunderstood — it would 'fix' the lint error by introducing a different one. The loop ran for 47 iterations over 8 minutes before hitting the API rate limit. Cost: $200 in a single session."
+  why="The stopping condition was 'no lint errors', which the model never achieved for this input. There was no max-iterations gate, no budget check, and no human escalation path."
+  lesson="Set MAX_ITERATIONS before you deploy any repair loop. Log iteration count per session. Alert when a loop exceeds half the max — it usually means the generator and verifier are misaligned, not that one more iteration will help."
+/>
+
+<Quiz
+  question="A repair loop has the stopping condition 'stop when the model says the output is correct.' Why is this insufficient?"
+  options={[
+    {
+      label: "Because models never say output is correct.",
+      correct: false,
+      explanation: "Models frequently say output is correct — including when it is not. The problem is not that they won't stop, it's that they stop on incorrect outputs."
+    },
+    {
+      label: "Because the model that generated an error is likely to confirm it when asked to verify, so the loop may never exit on a genuine failure.",
+      correct: true,
+      explanation: "Correct. Self-assessment is unreliable for the same errors the model made in generation. A stopping condition must be independent — max iterations, budget, or an external verifier."
+    },
+    {
+      label: "Because stopping conditions must use exact string matching.",
+      correct: false,
+      explanation: "Stopping conditions can use any reliable signal — iteration count, token budget, a structured verifier output. String matching is one option but not a requirement."
+    }
+  ]}
+/>
+
+<Quiz
+  question="After three repair iterations, the verifier still returns a fail. What should happen?"
+  options={[
+    {
+      label: "Keep looping — more iterations will eventually converge.",
+      correct: false,
+      explanation: "If the loop has not converged after three iterations, additional iterations rarely help. The generator and verifier are likely misaligned. Continuing wastes tokens and time."
+    },
+    {
+      label: "Exit the loop and route to a fallback or human review.",
+      correct: true,
+      explanation: "Correct. When the max iteration limit is hit without passing, escalate rather than continue. Log the input and all iterations so the misalignment can be diagnosed."
+    },
+    {
+      label: "Switch to a different model and restart from zero.",
+      correct: false,
+      explanation: "Swapping models at runtime without understanding why the loop failed is unpredictable. Log and escalate first; changing the model is a fix you make after diagnosis, not during the run."
+    }
+  ]}
+/>
+
+[Previous: Lesson 3](/modules/module-05-workflow-patterns/lesson-03) - [Lesson 5: Parallelism ->](/modules/module-05-workflow-patterns/lesson-05)

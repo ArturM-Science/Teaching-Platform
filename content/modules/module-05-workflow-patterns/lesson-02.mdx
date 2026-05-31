@@ -1,0 +1,136 @@
+---
+title: "Sequential Chains and Context Passing"
+module: "module-05-workflow-patterns"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 - Sequential Chains and Context Passing
+
+The simplest workflow is a chain: step one runs, its output becomes the input to step two, and so on. The engineering challenge is not wiring the steps together — it is deciding what to carry forward and what to drop.
+
+## The basic chain
+
+```
+question → [researcher] → raw_notes → [writer] → draft → [editor] → final
+```
+
+Each step receives input and produces output. The output is passed to the next step as part of its prompt. Three things to decide at each handoff:
+
+1. **What does the next step need?** Not everything the previous step produced.
+2. **What format should it be in?** Structured data (JSON, bullet list) is easier to consume than free prose.
+3. **How much of the earlier context should travel forward?** Less is usually better.
+
+## The context accumulation problem
+
+The naive approach is to append every step's output into a growing context string and pass the whole thing forward. This breaks in two ways:
+
+**Window overflow**: After several steps, the accumulated context exceeds the model's context window. The model either errors, truncates silently, or degrades on the content it keeps.
+
+**Quality degradation**: Long contexts with irrelevant earlier output dilute the signal for later steps. The model attends to the wrong things.
+
+```
+step 1 output: 2,000 tokens
+step 2 output: 2,000 tokens
+step 3 input: 4,000 tokens of prior output + 500 token prompt = 4,500 tokens
+step 4 input: 6,500 tokens of prior output + 500 token prompt = 7,000 tokens
+...
+```
+
+At ten steps, a chain with no compression consumes 20,000+ tokens of context that is mostly noise.
+
+<Callout type="warning">
+Carrying raw step output forward across many steps bloats context and degrades quality. Every handoff is a design decision about what the next step actually needs.
+</Callout>
+
+## The compression step pattern
+
+Insert a compression step between stages to reduce context before the next step consumes it.
+
+```
+[researcher] → raw_notes (2,000 tokens)
+             → [compressor] → summary (300 tokens)
+             → [writer] → draft
+```
+
+The compressor's job is explicit: reduce the prior output to what the next step needs, in the format the next step expects. A good compressor prompt:
+
+```text
+Summarise the following research notes for a writer who needs to draft a 500-word explainer.
+
+Include:
+- The three most important facts with their sources
+- Any caveats or contradictions
+- Nothing else
+
+Notes:
+{raw_notes}
+```
+
+## Structured handoffs
+
+Prose is hard for downstream steps to parse reliably. Prefer structured output at each handoff:
+
+```json
+{
+  "category": "billing",
+  "confidence": 0.94,
+  "key_facts": ["account overcharged $47", "charge date: 2026-05-01"],
+  "recommended_template": "billing_overcharge"
+}
+```
+
+A downstream step consuming this JSON can extract exactly what it needs without parsing prose. It also makes the handoff testable: you can run the upstream step, inspect the JSON, and verify it before wiring in the downstream step.
+
+## Prompt chaining vs single long prompt
+
+| Approach | When to prefer |
+|---|---|
+| Single long prompt | Task is self-contained; one model can hold the full context |
+| Prompt chain | Steps have different goals; output of one is input to another; verification between steps adds value |
+
+Prompt chaining is not always better. A chain that calls the API four times for a task a single prompt handles has four times the latency and four times the failure surface. Use chains when the step separation is real, not cosmetic.
+
+<Quiz
+  question="A five-step workflow carries the full output of every previous step into each new step's context. What problem will this cause?"
+  options={[
+    {
+      label: "Nothing — larger context always improves quality.",
+      correct: false,
+      explanation: "Larger context does not automatically improve quality. Irrelevant earlier output dilutes the signal for later steps, and at sufficient length it causes window overflow or silent truncation."
+    },
+    {
+      label: "Context accumulation: the window fills with irrelevant prior output, degrading quality and eventually causing overflow.",
+      correct: true,
+      explanation: "Correct. Each handoff without compression adds noise. The fix is explicit compression steps that extract only what the next step needs."
+    },
+    {
+      label: "The model will refuse to process inputs larger than one step's output.",
+      correct: false,
+      explanation: "Models do not refuse based on accumulated context size in this way. They silently degrade or truncate, which is harder to detect than an outright refusal."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Why is structured output (like JSON) preferred over prose at each step handoff?"
+  options={[
+    {
+      label: "Because JSON is the only format models can generate reliably.",
+      correct: false,
+      explanation: "Models can generate prose, JSON, YAML, and other formats. The preference for JSON at handoffs is about downstream parsability and testability, not model capability."
+    },
+    {
+      label: "Because it makes the handoff parseable, testable, and explicit about what the next step receives.",
+      correct: true,
+      explanation: "Correct. A downstream step consuming structured data can extract exactly what it needs. You can also inspect and test the handoff independently without running the full chain."
+    },
+    {
+      label: "Because prose takes more tokens.",
+      correct: false,
+      explanation: "Token count is not the primary reason. Structured output improves reliability and testability at the handoff boundary."
+    }
+  ]}
+/>
+
+[Previous: Lesson 1](/modules/module-05-workflow-patterns/lesson-01) - [Lesson 3: Branching ->](/modules/module-05-workflow-patterns/lesson-03)

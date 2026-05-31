@@ -1,0 +1,327 @@
+---
+title: "Lab: Build a Multi-Step Research Workflow"
+module: "module-05-workflow-patterns"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab - Build a Multi-Step Research Workflow
+
+<LabBrief title="Multi-Step Research Workflow" time="2-3 hours">
+
+#### Objective
+
+Build a three-stage research pipeline: a planner that turns a question into structured queries, a parallel searcher that fans out and fans back in, and a synthesiser with a bounded verification loop that catches missing citations.
+
+#### Setup
+
+Start from a clean directory:
+
+```bash
+mkdir research-workflow && cd research-workflow
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install anthropic
+```
+
+Use environment variables for API keys — never hardcode them:
+
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+```
+
+#### Deliverables
+
+- `workflow/planner.py` — turns a research question into 3–5 structured search queries
+- `workflow/searcher.py` — runs queries in parallel, returns structured results
+- `workflow/synthesiser.py` — merges results into a draft answer with citations
+- `workflow/verifier.py` — checks citations; triggers one repair pass if any are missing
+- `workflow/runner.py` — orchestrates the full pipeline end-to-end
+- `WORKFLOW.md` — ASCII control-flow diagram, stopping conditions documented, one known failure mode named
+
+#### Hard constraints
+
+- Max 2 repair iterations in the verifier loop — no more, enforced in code
+- Planner must return queries as a Python list, not free text
+- Searcher must use `asyncio.gather` or equivalent — not a sequential loop
+- Runner must print: stages executed, iteration count, estimated token cost
+
+</LabBrief>
+
+## Step 1: Build the planner
+
+The planner receives a research question and returns a list of search queries — structured, not prose.
+
+```python
+# workflow/planner.py
+import json
+import anthropic
+
+client = anthropic.Anthropic()
+
+def plan_queries(question: str) -> list[str]:
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=512,
+        messages=[{
+            "role": "user",
+            "content": f"""Turn this research question into 3-5 targeted search queries.
+
+Return JSON only: {{"queries": ["query 1", "query 2", ...]}}
+
+Question: {question}"""
+        }]
+    )
+    data = json.loads(response.content[0].text)
+    return data["queries"]
+```
+
+Test the planner before continuing. Pass a real question, print the queries, and verify they are a list of strings — not a paragraph.
+
+```python
+if __name__ == "__main__":
+    queries = plan_queries("What are the main causes of context window overflow in LLM applications?")
+    for q in queries:
+        print(f"- {q}")
+```
+
+## Step 2: Build the parallel searcher
+
+The searcher receives the list of queries and runs them in parallel. For this lab, simulate search results — you are testing the workflow structure, not integrating a real search API.
+
+```python
+# workflow/searcher.py
+import asyncio
+import anthropic
+
+client = anthropic.Anthropic()
+
+async def search_one(query: str) -> dict:
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=300,
+        messages=[{
+            "role": "user",
+            "content": f"""Simulate a search result for this query. Return 2-3 key facts as JSON.
+
+{{"query": "...", "facts": ["fact 1", "fact 2", ...], "source": "simulated"}}
+
+Query: {query}"""
+        }]
+    )
+    import json
+    return json.loads(response.content[0].text)
+
+async def search_all(queries: list[str]) -> list[dict]:
+    return await asyncio.gather(*[search_one(q) for q in queries])
+```
+
+Verify: run `asyncio.run(search_all(queries))` and confirm you get back a list of dicts, one per query.
+
+## Step 3: Build the synthesiser
+
+The synthesiser merges all search results into a draft answer with explicit citations.
+
+```python
+# workflow/synthesiser.py
+import json
+import anthropic
+
+client = anthropic.Anthropic()
+
+def synthesise(question: str, search_results: list[dict]) -> str:
+    results_text = json.dumps(search_results, indent=2)
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=800,
+        messages=[{
+            "role": "user",
+            "content": f"""Write a 300-word answer to the question below using only the provided search results.
+
+Rules:
+- Every factual claim must include a citation: [Source: <source value>]
+- Do not invent facts not present in the results
+- End with a "Sources used:" list
+
+Question: {question}
+
+Search results:
+{results_text}"""
+        }]
+    )
+    return response.content[0].text
+```
+
+## Step 4: Build the verifier with a repair loop
+
+The verifier checks that every sentence containing a factual claim has a citation. If not, it triggers a repair pass. Max 2 iterations — enforced in code.
+
+```python
+# workflow/verifier.py
+import anthropic
+
+client = anthropic.Anthropic()
+
+MAX_ITERATIONS = 2
+
+def verify(draft: str) -> dict:
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=256,
+        messages=[{
+            "role": "user",
+            "content": f"""Check this draft for missing citations.
+
+Return JSON: {{"pass": true/false, "missing_citations": ["sentence missing citation", ...]}}
+
+Draft:
+{draft}"""
+        }]
+    )
+    import json
+    return json.loads(response.content[0].text)
+
+def repair(draft: str, missing: list[str]) -> str:
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=800,
+        messages=[{
+            "role": "user",
+            "content": f"""Add citations to the following sentences in this draft.
+Only edit those specific sentences. Return the full revised draft.
+
+Sentences needing citations:
+{chr(10).join(f"- {s}" for s in missing)}
+
+Draft:
+{draft}"""
+        }]
+    )
+    return response.content[0].text
+
+def verify_with_repair(draft: str) -> tuple[str, int]:
+    iteration = 0
+    while iteration < MAX_ITERATIONS:
+        result = verify(draft)
+        if result["pass"]:
+            break
+        draft = repair(draft, result["missing_citations"])
+        iteration += 1
+    return draft, iteration
+```
+
+## Step 5: Wire the runner
+
+```python
+# workflow/runner.py
+import asyncio
+from planner import plan_queries
+from searcher import search_all
+from synthesiser import synthesise
+from verifier import verify_with_repair
+
+def run(question: str):
+    print(f"\n{'='*50}")
+    print(f"Research question: {question}")
+    print(f"{'='*50}\n")
+
+    print("[1/4] Planning queries...")
+    queries = plan_queries(question)
+    print(f"  Generated {len(queries)} queries")
+
+    print("[2/4] Searching (parallel)...")
+    results = asyncio.run(search_all(queries))
+    print(f"  Received {len(results)} result sets")
+
+    print("[3/4] Synthesising...")
+    draft = synthesise(question, results)
+
+    print("[4/4] Verifying citations...")
+    final, iterations = verify_with_repair(draft)
+    print(f"  Completed in {iterations} repair iteration(s)")
+
+    print("\n--- Final answer ---")
+    print(final)
+    print(f"\nStages executed: planning → parallel search ({len(queries)} branches) → synthesis → verification ({iterations} iteration(s))")
+
+if __name__ == "__main__":
+    run("What are the main causes of context window overflow in LLM applications?")
+```
+
+## Step 6: Document the workflow
+
+Create `WORKFLOW.md` with:
+
+```md
+# Research Workflow
+
+## Control flow
+
+question
+  → [planner] → queries (list)
+  → [searcher × N, parallel] → search_results (list)
+  → [synthesiser] → draft
+  → [verifier] → pass?
+       ↓ fail (max 2 iterations)
+       [repair] → revised draft → [verifier]
+  → final answer
+
+## Stopping conditions
+
+- Verifier loop: exits on pass=true OR after MAX_ITERATIONS=2
+- If max iterations reached without pass: output is returned with a warning
+
+## Known failure mode
+
+[Describe one failure mode you observed or anticipated, e.g.:
+"If the simulated search results contain no factual claims, the synthesiser
+produces a draft with no citations to check, and the verifier always passes — 
+masking a content-quality issue."]
+```
+
+<Rubric
+  threshold="All criteria must score 3 (Meets) or above to pass."
+  criteria={[
+    {
+      name: "Workflow structure",
+      exceeds: "Stages are cleanly separated with structured handoffs (typed data, not prose). Each stage can be tested independently.",
+      meets: "Four stages exist (planner, searcher, synthesiser, verifier) and are wired in the runner.",
+      approaching: "Stages exist but share state or are partially merged into a single function.",
+      below: "A single script with no stage separation."
+    },
+    {
+      name: "Parallelism",
+      exceeds: "asyncio.gather is used correctly. Partial failure handling is implemented — one failing branch does not crash the whole workflow.",
+      meets: "Searcher uses asyncio.gather or equivalent. Results are returned as a list, one per query.",
+      approaching: "Parallel structure attempted but queries run sequentially or results are not properly collected.",
+      below: "No parallelism — queries run one at a time in a loop."
+    },
+    {
+      name: "Verification loop",
+      exceeds: "MAX_ITERATIONS is a named constant, not a magic number. Loop exits cleanly on pass or on limit. Iteration count is reported.",
+      meets: "Loop exits on verifier pass or after MAX_ITERATIONS=2. Stopping condition is explicit in code.",
+      approaching: "Loop exists but stopping condition is missing or depends on the model's self-assessment.",
+      below: "No verification loop — draft is passed through without checking."
+    },
+    {
+      name: "Documentation",
+      exceeds: "WORKFLOW.md includes a control-flow diagram, stopping conditions with exact values, and a named failure mode with a mitigation suggestion.",
+      meets: "WORKFLOW.md includes a control-flow diagram, stopping conditions, and one named failure mode.",
+      approaching: "WORKFLOW.md exists but is missing one of: diagram, stopping conditions, or failure mode.",
+      below: "No WORKFLOW.md."
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-05-workflow-patterns"
+  items={[
+    "I can explain when a workflow is the right choice over a single prompt call",
+    "I can design a sequential chain and decide what context to compress at each handoff",
+    "I can implement classifier-based routing with a fallback path",
+    "I can write a repair loop with an explicit stopping condition that does not rely on model self-assessment",
+    "I can fan work out to parallel branches and aggregate the results safely"
+  ]}
+  next="Module 05 complete — you can now design and implement multi-step agent workflows. Module 06 extends this to full multi-agent systems with independent agents coordinating."
+/>
+
+[Previous: Lesson 5](/modules/module-05-workflow-patterns/lesson-05)

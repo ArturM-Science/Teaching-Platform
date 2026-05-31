@@ -1,0 +1,48 @@
+---
+title: "Workflow Patterns & Control Flow"
+module: "module-05-workflow-patterns"
+part: 3
+slug: "module-05-workflow-patterns"
+---
+
+# Module 05 - Workflow Patterns & Control Flow
+
+**Part 3 — Orchestration & Multi-Agent** - 5 lessons + lab - ~5.5 hours total
+
+<LearningObjectives>
+- Explain when a workflow is the right unit of composition instead of a single prompt call
+- Build sequential chains that compress context between steps to avoid window overflow
+- Implement classifier-based routing that sends requests to the right specialist
+- Write verification loops with explicit stopping conditions that cannot run forever
+- Fan work out to parallel branches and aggregate results safely
+- Deliver a working multi-step research workflow with documented control flow and bounded repair
+</LearningObjectives>
+
+## What you'll build
+
+You will build a three-stage research workflow: a planner that turns a question into structured queries, a parallel searcher that fans out and fans back in, and a synthesiser with a bounded verification loop that catches missing citations. The final lab asks you to wire all stages together, document the control flow, and identify one failure mode your stopping condition protects against.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [From prompt to workflow](/modules/module-05-workflow-patterns/lesson-01) | ~40 min |
+| 2 | [Sequential chains and context passing](/modules/module-05-workflow-patterns/lesson-02) | ~45 min |
+| 3 | [Branching, routing, and classifiers](/modules/module-05-workflow-patterns/lesson-03) | ~45 min |
+| 4 | [Loops, repair, and stopping conditions](/modules/module-05-workflow-patterns/lesson-04) | ~45 min |
+| 5 | [Parallelism: fan-out, fan-in, and aggregation](/modules/module-05-workflow-patterns/lesson-05) | ~45 min |
+| Lab | [Lab: build a multi-step research workflow](/modules/module-05-workflow-patterns/lesson-06-lab) | ~2-3 hrs |
+
+<Callout type="key">
+A workflow is not a better prompt. It is a different unit of composition — one that adds structure, verification, and control to work that a single call cannot reliably complete.
+</Callout>
+
+## Where this fits
+
+Module 04 taught you how to evaluate a single agent. This module teaches you how to compose multiple steps into a controlled pipeline. Module 06 extends that into full multi-agent systems where independent agents coordinate.
+
+## Official docs
+
+- [Anthropic: Build with Claude — Workflow patterns](https://docs.anthropic.com/en/docs/build-with-claude/workflow-patterns)
+
+[**Start Lesson 1 ->**](/modules/module-05-workflow-patterns/lesson-01)

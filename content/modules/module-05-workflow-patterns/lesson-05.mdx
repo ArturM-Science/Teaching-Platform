@@ -1,0 +1,140 @@
+---
+title: "Parallelism: Fan-Out, Fan-In, and Aggregation"
+module: "module-05-workflow-patterns"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 - Parallelism: Fan-Out, Fan-In, and Aggregation
+
+Sequential chains run one step at a time. When steps are independent of each other, running them in parallel reduces total latency and enables cross-checking. The challenge is aggregating the results correctly — and knowing when parallel branches are safe to run independently and when they are not.
+
+## Fan-out
+
+Fan-out sends the same input to multiple branches simultaneously. Each branch runs independently and returns its own result.
+
+```
+input
+  ├── [branch A: security review]
+  ├── [branch B: performance review]
+  └── [branch C: test coverage review]
+         ↓         ↓         ↓
+      result_A  result_B  result_C
+```
+
+Fan-out is useful when:
+
+- The same input needs to be evaluated from multiple independent angles
+- You want independent verification (two branches reaching the same conclusion is stronger evidence than one)
+- The branches do not share state and do not write to the same resource
+
+## Fan-in and aggregation
+
+Fan-in collects the results from parallel branches and combines them into a single output.
+
+Three aggregation strategies:
+
+| Strategy | When to use |
+|---|---|
+| **Merge** | Results are complementary — combine all findings into one report |
+| **Majority vote** | Results are redundant — take the answer that appears most often |
+| **Best-of-N** | Results are ranked — score each and take the highest |
+
+```python
+results = await asyncio.gather(branch_a(input), branch_b(input), branch_c(input))
+
+# Merge example
+merged_report = "\n\n".join(r["findings"] for r in results)
+
+# Majority vote example
+votes = [r["verdict"] for r in results]
+final_verdict = max(set(votes), key=votes.count)
+```
+
+Choose the aggregation strategy based on what the branches are doing. Merging results from three independent security reviewers misses the point — you want to know where they agree, not pile all findings together without weight.
+
+## When parallelism is worth it
+
+Parallelism adds latency overhead from coordination and multiplies token cost by the number of branches. It is worth the cost when:
+
+- **The branches are genuinely independent.** If branch B depends on branch A's output, you cannot run them in parallel — they must be sequential.
+- **Latency is the bottleneck.** Running three 5-second calls in parallel takes 5 seconds total; sequentially it takes 15.
+- **Independent agreement strengthens confidence.** Two independent branches reaching the same conclusion provides stronger signal than one branch run twice.
+
+<Callout type="warning">
+Parallel branches that write to the same resource — a file, a database row, an API object — need a merge strategy or they will conflict. Do not run parallel branches that share mutable state.
+</Callout>
+
+## When parallelism hurts
+
+- **Shared mutable state.** Two branches writing to the same file will produce corrupted output or a race condition.
+- **Result ordering matters.** If the aggregation depends on which branch finishes first, parallel execution introduces nondeterminism.
+- **Cost is the bottleneck, not latency.** Three parallel branches cost three times as many tokens. If you are optimising for cost rather than speed, sequential is cheaper.
+- **The task is simple.** Parallel overhead — launching async tasks, aggregating results, handling partial failures — is not free. For small tasks, sequential is simpler and nearly as fast.
+
+## Handling partial failures
+
+When one of three parallel branches fails, you have three options:
+
+1. **Fail the whole fan-out.** Safe, but loses the results from branches that succeeded.
+2. **Continue with partial results.** Aggregate what succeeded and flag what failed.
+3. **Retry the failed branch.** Appropriate when failures are transient (rate limit, timeout).
+
+The right choice depends on whether partial results are useful. A three-way security review where one branch fails can still produce a useful partial report — fail-fast is usually too conservative.
+
+```python
+results = await asyncio.gather(*branches, return_exceptions=True)
+successful = [r for r in results if not isinstance(r, Exception)]
+failed = [r for r in results if isinstance(r, Exception)]
+
+if len(successful) == 0:
+    raise WorkflowError("All branches failed")
+
+report = aggregate(successful)
+if failed:
+    report["warnings"] = f"{len(failed)} branch(es) failed and were excluded"
+```
+
+<Quiz
+  question="Three parallel branches evaluate the same code diff: one checks security, one checks performance, one checks test coverage. What aggregation strategy fits best?"
+  options={[
+    {
+      label: "Majority vote — take the verdict that appears most often.",
+      correct: false,
+      explanation: "Majority vote is for redundant branches returning the same type of answer. These branches return different types of findings — merge is correct."
+    },
+    {
+      label: "Merge — combine all findings into one report, since each branch contributes a different dimension.",
+      correct: true,
+      explanation: "Correct. The branches are complementary, not redundant. Merging produces a complete multi-dimensional report."
+    },
+    {
+      label: "Best-of-N — score each branch and take the highest-scoring result.",
+      correct: false,
+      explanation: "Best-of-N is for redundant branches where you want the highest-quality answer to one question. These branches answer different questions."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Two parallel branches both write their output to the same JSON file. What is the risk?"
+  options={[
+    {
+      label: "The file will grow too large.",
+      correct: false,
+      explanation: "File size is not the primary risk. The issue is concurrent writes corrupting or overwriting each other."
+    },
+    {
+      label: "Race condition or data corruption — the branches will overwrite each other's output.",
+      correct: true,
+      explanation: "Correct. Parallel branches must not share mutable state. Use separate output files or a merge step after both branches complete."
+    },
+    {
+      label: "The second branch will always overwrite the first, producing correct but incomplete output.",
+      correct: false,
+      explanation: "The outcome depends on timing and is nondeterministic. In some environments both writes may partially succeed, producing corrupted JSON."
+    }
+  ]}
+/>
+
+[Previous: Lesson 4](/modules/module-05-workflow-patterns/lesson-04) - [Lab ->](/modules/module-05-workflow-patterns/lesson-06-lab)

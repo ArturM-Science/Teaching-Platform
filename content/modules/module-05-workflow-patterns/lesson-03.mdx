@@ -1,0 +1,142 @@
+---
+title: "Branching, Routing, and Classifiers"
+module: "module-05-workflow-patterns"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 - Branching, Routing, and Classifiers
+
+Not every input should follow the same path. A support ticket about a billing error needs a different handler than one about a login failure. Branching adds conditional logic to a workflow — the path taken depends on what was observed at a prior step.
+
+## What branching adds
+
+A linear chain runs every step for every input. Branching routes inputs to different steps based on a condition:
+
+```
+input → [classifier] → category
+                          ↓
+              billing → [billing_handler]
+              technical → [technical_handler]
+              general → [general_handler]
+```
+
+The classifier is cheap to run and produces a structured decision. The handlers are more expensive and specialised. This pattern pays off when:
+
+- Different inputs genuinely need different processing
+- One handler would produce worse output than a specialist for a given category
+- You want to apply different safety checks, templates, or tools depending on input type
+
+## The classifier → specialist pattern
+
+The most common routing pattern in agent workflows:
+
+1. **Classifier step**: a fast, low-cost call that reads the input and returns a category label (and optionally a confidence score)
+2. **Specialist step**: a separate, purpose-built prompt or agent that handles one category well
+
+```text
+Classify the following support message into exactly one of: billing, technical, general.
+Return JSON: {"category": "...", "confidence": 0.0}
+
+Message: {input}
+```
+
+The classifier output is machine-readable, which makes the routing decision deterministic in code — not left to the next model to interpret.
+
+```python
+result = classifier(input)
+if result["category"] == "billing":
+    return billing_handler(input)
+elif result["category"] == "technical":
+    return technical_handler(input)
+else:
+    return general_handler(input)
+```
+
+## Fallback chains
+
+Not every path succeeds on the first attempt. A fallback chain tries the primary path; if it fails or returns low confidence, it falls back to a safer alternative.
+
+```
+input → [primary handler]
+              ↓ (if confidence < 0.7 or error)
+        [fallback handler]
+              ↓ (if still unresolved)
+        [escalate to human]
+```
+
+Fallback chains are especially useful when:
+
+- The primary handler uses an expensive model that occasionally fails
+- Low-confidence outputs should not be sent to the user without review
+- Certain error types need human eyes regardless of model confidence
+
+<ClassifierRouter />
+
+## Making routing decisions auditable
+
+Every branch decision should be logged. When a bug report arrives saying "the wrong template was sent to a customer," you need to know what the classifier returned, not just what the handler produced.
+
+Minimum logging at each branch point:
+
+```json
+{
+  "input_hash": "a3f9...",
+  "classifier_output": {"category": "billing", "confidence": 0.91},
+  "branch_taken": "billing_handler",
+  "timestamp": "2026-05-31T09:14:00Z"
+}
+```
+
+This gives you a trace through the workflow for every input — essential for debugging and for catching silent misrouting.
+
+<FailureMuseum
+  title="The Branch That Always Fired"
+  what="A classifier was trained on a dataset that was 80% billing tickets. It learned to output 'billing' with high confidence for most inputs — including technical and general tickets that shared billing-adjacent vocabulary ('charge', 'account', 'plan'). The billing handler was invoked for 94% of tickets. The technical handler almost never ran."
+  why="The classifier was evaluated on accuracy against the training distribution, which was dominated by billing tickets. It looked good on paper. In production, 'billing' was the dominant class and the model defaulted to it."
+  lesson="Test classifiers on balanced held-out sets before wiring them into a workflow. Monitor the distribution of branch outcomes in production — a classifier that routes 90%+ to one branch is likely misfiring, not working."
+/>
+
+<Quiz
+  question="You have a workflow that routes customer messages to one of three handlers. The classifier returns a confidence score. What should happen when confidence is below 0.6?"
+  options={[
+    {
+      label: "Route to the most common handler as a default.",
+      correct: false,
+      explanation: "Defaulting to the most common handler on low confidence will mishandle the cases the classifier is least sure about. A fallback or human escalation is safer."
+    },
+    {
+      label: "Trigger a fallback path — either a safer general handler or human escalation.",
+      correct: true,
+      explanation: "Correct. Low confidence is a signal that the classifier is uncertain. A fallback path prevents misrouted low-confidence cases from reaching the wrong specialist."
+    },
+    {
+      label: "Retry the classifier until it returns high confidence.",
+      correct: false,
+      explanation: "Retrying with the same input and same prompt will usually return the same uncertain result. Retry is not the right tool for genuine ambiguity — fallback or escalation is."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Why should every branch decision be logged?"
+  options={[
+    {
+      label: "To slow down the pipeline so humans can review each step.",
+      correct: false,
+      explanation: "Logging does not slow down the pipeline — it writes asynchronously. The purpose is auditability, not rate-limiting."
+    },
+    {
+      label: "So that when a misrouting bug is reported, you can trace what the classifier returned and which branch was taken.",
+      correct: true,
+      explanation: "Correct. Without branch logging, a misrouting bug is almost impossible to diagnose. Logging the classifier output and branch taken gives you a trace for every input."
+    },
+    {
+      label: "Because models cannot route correctly without seeing prior decisions.",
+      correct: false,
+      explanation: "Models do not consume the routing log at runtime. The log is for the engineer debugging failures, not for the model making decisions."
+    }
+  ]}
+/>
+
+[Previous: Lesson 2](/modules/module-05-workflow-patterns/lesson-02) - [Lesson 4: Loops ->](/modules/module-05-workflow-patterns/lesson-04)

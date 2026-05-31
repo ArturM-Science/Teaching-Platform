@@ -1,0 +1,110 @@
+---
+title: "From Prompt to Workflow"
+module: "module-05-workflow-patterns"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 - From Prompt to Workflow
+
+A single prompt call is the right tool for most tasks. When it isn't, the failure is usually visible: the output is too shallow, the context window fills before the work is done, or an error in step two propagates silently into the final answer. Workflows exist to fix those specific problems — not to add structure for its own sake.
+
+## When a single call breaks down
+
+A prompt call has one context window, one output, and no checkpoints. That works well when the task is self-contained. It breaks when:
+
+- **The task is too long for one context window.** A single call cannot process a 200-page document and write a synthesis; it has to drop content or hallucinate what it did not see.
+- **Different steps need different capabilities.** Classifying a support ticket and then drafting a reply are different problems. A single prompt trying to do both degrades at both.
+- **Errors compound silently.** If step one produces a wrong assumption, step two builds on it. There is no checkpoint between them to catch the drift.
+- **You need to verify before continuing.** A research step should be checked before feeding its output into a legal summary. A single call has no internal gate.
+
+## What a workflow adds
+
+A workflow is a directed set of steps where the output of one step becomes the input of the next, with control logic deciding which step runs when.
+
+```
+input → [step A] → [step B] → [step C] → output
+                       ↑
+                   [branch condition]
+```
+
+Three things a workflow adds that a single call cannot:
+
+| What | Why it matters |
+|---|---|
+| **Checkpoints** | Verify output before passing it forward |
+| **Branching** | Route to different steps based on what happened |
+| **Bounded loops** | Retry or repair until a condition is met, then stop |
+
+## The composition spectrum
+
+Not every multi-step task needs a full workflow engine. The options from simplest to most complex:
+
+| Option | When to use |
+|---|---|
+| Single call | Self-contained task, fits in one context window |
+| Prompt chain | 2-4 sequential steps, no branching needed |
+| Stateful workflow | Branching, loops, or verification required |
+| Multi-agent system | Independent agents with separate roles and context |
+
+Start at the simplest option that meets the requirement. A workflow you do not need is overhead you will maintain forever.
+
+## When NOT to build a workflow
+
+A workflow adds coordination cost. Before adding one, ask:
+
+- Can a longer or better-structured prompt handle this?
+- Is the multi-step nature from the problem itself, or from an underspecified prompt?
+- Will the extra steps add latency that matters to the user?
+
+The most common mistake is building a five-step pipeline for a task that a single well-crafted prompt would handle in one call.
+
+<WorkflowDiagram />
+
+<Callout type="key">
+A workflow is not a better prompt. It is a different unit of composition — add one only when single-call limitations are the actual constraint.
+</Callout>
+
+<Quiz
+  question="An agent needs to classify a support ticket as billing, technical, or general, then draft a reply using the appropriate template. Why might a workflow help here?"
+  options={[
+    {
+      label: "Because workflows are always more reliable than single calls.",
+      correct: false,
+      explanation: "Workflows add overhead. They are not automatically more reliable — they are more appropriate when the task genuinely has distinct stages with different requirements."
+    },
+    {
+      label: "Because classification and reply drafting are different subtasks that benefit from separate steps with a checkpoint between them.",
+      correct: true,
+      explanation: "Correct. Separating classification from drafting lets you verify the category before generating the reply, and lets you use different prompts optimised for each stage."
+    },
+    {
+      label: "Because the context window is always too small for a single call.",
+      correct: false,
+      explanation: "Context window limits are one reason to use a workflow, but not the reason here. The benefit is stage separation and verification, not length."
+    }
+  ]}
+/>
+
+<Quiz
+  question="You are building a tool that summarises a short email (under 200 words) into a subject line. Should you use a workflow?"
+  options={[
+    {
+      label: "Yes — all summarisation tasks benefit from multi-step pipelines.",
+      correct: false,
+      explanation: "A short, self-contained task with a single clear output is exactly what a single call is for. A workflow here would add latency and complexity with no benefit."
+    },
+    {
+      label: "No — the task is self-contained, fits in one context window, and needs no branching or verification step.",
+      correct: true,
+      explanation: "Correct. Start at the simplest option. A workflow would be overhead for a task this bounded."
+    },
+    {
+      label: "Only if the email contains attachments.",
+      correct: false,
+      explanation: "Attachment handling is a separate concern. The decision to use a workflow is about task structure — branching, loops, verification — not input format alone."
+    }
+  ]}
+/>
+
+[Lesson 2: Sequential chains ->](/modules/module-05-workflow-patterns/lesson-02)
