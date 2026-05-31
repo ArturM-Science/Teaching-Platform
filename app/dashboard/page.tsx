@@ -46,6 +46,21 @@ export default async function DashboardPage() {
 
   if (!user) redirect('/login')
 
+  // Fetch completed module slugs for this user
+  const { data: progressRows } = await supabase
+    .from('progress')
+    .select('status, modules(slug)')
+    .eq('user_id', user.id)
+    .eq('status', 'complete')
+
+  const completedSlugs = new Set<string>(
+    (progressRows ?? [])
+      .map((r: { modules: { slug: string } | null }) => r.modules?.slug)
+      .filter(Boolean) as string[]
+  )
+
+  const completedCount = completedSlugs.size
+
   // Override status to locked if the module has no index.mdx on disk
   const modulesWithStatus = await Promise.all(
     modules.map(async m => ({
@@ -53,6 +68,7 @@ export default async function DashboardPage() {
       status: (m.status === 'ready' || m.status === 'coming') && !(await hasContent(m.slug))
         ? 'locked'
         : m.status,
+      complete: completedSlugs.has(m.slug),
     }))
   )
 
@@ -96,13 +112,13 @@ export default async function DashboardPage() {
                     const row = (
                       <div className={`flex items-center justify-between gap-4 px-5 py-4 ${isClickable ? 'hover:bg-zinc-50 transition-colors' : 'opacity-50'}`}>
                         <div className="flex items-center gap-4">
-                          <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-sm font-semibold ${m.status === 'ready' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'}`}>
-                            {m.number}
+                          <div className={`flex h-10 w-10 items-center justify-center rounded-lg text-sm font-semibold ${m.complete ? 'bg-green-600 text-white' : m.status === 'ready' ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-500'}`}>
+                            {m.complete ? '✓' : m.number}
                           </div>
                           <div>
                             <p className="font-medium text-zinc-900">{m.title}</p>
-                            <p className={`mt-0.5 text-xs ${m.status === 'ready' ? 'text-green-600 font-medium' : 'text-zinc-400'}`}>
-                              {statusLabel[m.status]}
+                            <p className={`mt-0.5 text-xs ${m.complete ? 'text-green-600 font-medium' : m.status === 'ready' ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                              {m.complete ? 'Completed' : statusLabel[m.status]}
                             </p>
                           </div>
                         </div>
@@ -128,15 +144,22 @@ export default async function DashboardPage() {
 
         <aside className="space-y-6">
           <div className="rounded-lg border border-zinc-200 bg-white p-6">
+            <h2 className="text-lg font-semibold tracking-tight">Your progress</h2>
+            <p className="mt-3 text-3xl font-bold text-zinc-900">
+              {completedCount} <span className="text-base font-normal text-zinc-400">/ {modules.length}</span>
+            </p>
+            <p className="mt-1 text-sm text-zinc-500">modules completed</p>
+            <div className="mt-4 h-2 rounded-full bg-zinc-100">
+              <div
+                className="h-2 rounded-full bg-green-500 transition-all"
+                style={{ width: `${Math.round((completedCount / modules.length) * 100)}%` }}
+              />
+            </div>
+          </div>
+          <div className="rounded-lg border border-zinc-200 bg-white p-6">
             <h2 className="text-lg font-semibold tracking-tight">Next workshop</h2>
             <p className="mt-3 text-sm leading-6 text-zinc-500">
               Live workshop scheduling will plug into this panel after the core learner flow is stable.
-            </p>
-          </div>
-          <div className="rounded-lg border border-zinc-200 bg-white p-6">
-            <h2 className="text-lg font-semibold tracking-tight">Current focus</h2>
-            <p className="mt-3 text-sm leading-6 text-zinc-500">
-              Finish Module 0, then connect the first checkpoint to real progress tracking.
             </p>
           </div>
         </aside>
