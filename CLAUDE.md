@@ -131,6 +131,7 @@ Migrations in `supabase/migrations/`:
 
 ## What's Next
 
+- **Run migration 002 in Supabase** — paste `supabase/migrations/002_seed_course_modules.sql` into the Supabase SQL editor (Settings → SQL Editor). Not done yet as of 2026-05-31. After running, verify the app on the Vercel URL.
 - Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files
 - Mobile sidebar: collapse into a slide-out drawer on small screens
 - Workshop scheduling panel (currently placeholder in dashboard sidebar)
