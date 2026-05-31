@@ -143,11 +143,27 @@ Migrations in `supabase/migrations/`:
 
 ## What's Next
 
-- **Run migration 002 in Supabase** — paste `supabase/migrations/002_seed_course_modules.sql` into the Supabase SQL editor (Settings → SQL Editor). Not done yet as of 2026-05-31. After running, verify the app on the Vercel URL.
-- Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files (Module 06 lab already has it)
+- Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files (Module 06 labs already have it; earlier modules do not)
 - Mobile sidebar: collapse into a slide-out drawer on small screens
 - Workshop scheduling panel (currently placeholder in dashboard sidebar)
 - **Next module to build: Module 07** — Evaluation (how evaluation changes with multi-agent systems is a natural bridge from Module 06)
+- Landing page: test on mobile — hero 3D canvas sizing, nav, CTA buttons
+- Landing page: consider adding a testimonials or social-proof section below the curriculum
+
+## Landing Page (animated hero added 2026-06-01)
+
+`app/page.tsx` is now a full animated landing page. Stack:
+
+| File | Role |
+|---|---|
+| `components/NavBar.tsx` | Sticky nav — transparent + white text over hero, transitions to white bg + dark text on scroll |
+| `components/HeroSection.tsx` | `'use client'` — drifting gradient orbs, typewriter headline, 3D agent network, CTA buttons |
+| `components/AgentNetwork3D.tsx` | React Three Fiber canvas — 5 glowing nodes (orchestrator/specialists/critic/output), flowing particles along edges, bloom post-processing, drag-to-rotate |
+| `components/FadeUpSection.tsx` | `IntersectionObserver` wrapper — fades children up as they enter the viewport |
+
+CSS keyframe animations (`float-a`, `float-b`, `float-c`, `blink`, `dash`, `fade-up`) live in `app/globals.css`.
+
+Dependencies added: `three`, `@react-three/fiber`, `@react-three/drei`, `@react-three/postprocessing`.
 
 ## Module 05 — Workflow Patterns & Control Flow (added 2026-05-31)
 
