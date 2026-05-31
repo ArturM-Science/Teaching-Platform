@@ -99,6 +99,38 @@ All components live in `components/mdx/`. See `components/mdx/README.md` for ful
 
 ## Auth & Progress
 
-Supabase Auth is wired. Progress tracking is the next priority — connect the learner dashboard to real Supabase data (currently using placeholders).
+Supabase Auth is wired. Progress tracking is live as of 2026-05-31.
 
 Server actions live in `app/auth/actions.ts`. The confirmation callback route is `app/auth/confirm/route.ts`.
+
+Progress server action: `app/progress/actions.ts` → `markModuleComplete(moduleSlug)`. Upserts a `complete` row into `public.progress` and revalidates `/dashboard`.
+
+`Checkpoint` accepts an optional `moduleSlug` prop — when all items are ticked it calls `markModuleComplete`. Add it to every checkpoint in MDX:
+```mdx
+<Checkpoint moduleSlug="module-00-mental-models" items={[...]} next="..." />
+```
+
+## Sidebar Navigation
+
+`components/LessonSidebar.tsx` — client component, uses `usePathname()` to highlight the active lesson. Shows "Overview" (module index) then numbered lessons. Lab lessons show "Lab" instead of a number.
+
+`app/(learner)/modules/[module]/layout.tsx` — server layout that fetches lessons for the current module and renders the two-column layout (256px sidebar + fluid content).
+
+## Database
+
+Migrations in `supabase/migrations/`:
+- `001_initial_schema.sql` — users, courses, modules, progress, workshops, RLS policies
+- `002_seed_course_modules.sql` — seeds the AI Agents course + all 15 module rows (run this in the Supabase SQL editor if not done yet)
+
+## Dashboard
+
+`app/dashboard/page.tsx` fetches the user's completed slugs from Supabase and shows:
+- Green ✓ badge on completed modules
+- "Completed" label instead of "Ready"
+- Progress widget in the sidebar: "X / 15 modules completed" with a progress bar
+
+## What's Next
+
+- Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files
+- Mobile sidebar: collapse into a slide-out drawer on small screens
+- Workshop scheduling panel (currently placeholder in dashboard sidebar)
