@@ -2,6 +2,18 @@
 
 # AI Agents Teaching Platform — Codebase Guide
 
+## Session Start Protocol
+
+At the beginning of every new conversation in this project, before doing anything else:
+
+1. Read `CLAUDE.md` (this file) fully — especially "What's Next" and any module notes
+2. Read any memory files in the project memory folder
+3. Tell the user in plain language:
+   - What was accomplished in the previous session (modules built, features added, files changed)
+   - What the plan is for this session based on "What's Next"
+   - Any pending commands or actions that need to be run (migrations, npm install, etc.) — then run them immediately without asking
+4. Then wait for the user to confirm or redirect before starting work
+
 ## Stack
 
 - **Framework:** Next.js 16, App Router, React Server Components
