@@ -1,0 +1,181 @@
+---
+title: "Routines: Scheduled and Triggered Cloud Automation"
+module: "module-14-claude-code"
+lesson: 6
+slug: "lesson-06-routines"
+---
+
+# Lesson 6 - Routines: Scheduled and Triggered Cloud Automation
+
+Everything covered so far requires your machine to be on and a session to be open. Routines remove that constraint. A routine is a Claude Code run that happens on Anthropic's cloud infrastructure — triggered by a clock, an API call, or a GitHub event — with no human present.
+
+## What a routine is
+
+A routine has three parts:
+
+| Part | What it means |
+|---|---|
+| Prompt | The instructions Claude follows on every run |
+| Repositories | One or more repos, cloned fresh from the default branch each time |
+| Trigger | What starts the run: a schedule, an API call, or a GitHub event |
+
+Optionally you can add **connectors** — integrations with Slack, Linear, and similar services that give Claude a way to read from or post to external tools.
+
+Routines run autonomously. There are no permission dialogs. Claude pushes results to a `claude/`-prefixed branch by default, so every run produces a reviewable artifact.
+
+<Callout type="key">
+A routine is not a session left open overnight. It is a fresh, isolated run that starts, does the work, and ends — leaving a branch or a posted message as evidence.
+</Callout>
+
+## Three trigger types
+
+### Schedule
+
+The most common trigger. You specify a recurring interval or a one-off timestamp.
+
+Available intervals: hourly, daily, weekdays, weekly, or a custom cron expression.
+
+```text
+/schedule daily PR review at 9am
+```
+
+```text
+/schedule weekly dependency audit every Monday at 8am
+```
+
+The minimum interval for a scheduled routine is one hour. For faster polling during an active session, use `/loop` instead.
+
+### API trigger
+
+Each routine gets a dedicated HTTP endpoint with bearer token authentication. Send a POST request and the routine fires immediately.
+
+```bash
+curl -X POST https://api.anthropic.com/v1/routines/<id>/fire \
+  -H "Authorization: Bearer <token>" \
+  -H "x-api-version: experimental-cc-routine-2026-04-01" \
+  -d '{"text": "Deploy verification triggered by CI pipeline"}'
+```
+
+The response returns a session ID and a URL for monitoring. This makes routines composable with alerting systems, CI pipelines, and monitoring tools.
+
+### GitHub trigger
+
+Routines can subscribe to GitHub events on repositories where the Claude GitHub App is installed.
+
+Supported events:
+- Pull request: opened, closed, assigned, labeled, merged
+- Release: created, published, edited, deleted
+
+You can filter by author, branch, title, labels, and draft status.
+
+```text
+On every PR opened against main:
+- Apply the team security checklist
+- Leave a comment with blocking findings only
+- Skip if the PR title starts with "chore:"
+```
+
+## Creating routines
+
+**Via CLI** — in any session:
+
+```text
+/schedule
+```
+
+Claude will ask you to describe the routine conversationally and configure the trigger. Use `/schedule list` to see all routines, `/schedule update` to change one, and `/schedule run` to trigger immediately without using a daily cap.
+
+**Via web UI** — at `claude.ai/code/routines`: click New routine, add a prompt, connect a repo, and choose a trigger.
+
+## Routines vs other automation options
+
+| Option | Runs on | Machine must be on | Session must be open | Min interval |
+|---|---|---|---|---|
+| Routines | Anthropic cloud | No | No | 1 hour |
+| Desktop tasks | Your machine | Yes | No | 1 minute |
+| `/loop` | Your machine | Yes | Yes | 1 minute |
+| Managed Agents | Cloud (API) | No | No | On demand |
+
+Use **Routines** for unattended scheduled or event-driven work that does not need a running machine.
+
+Use **Managed Agents** when you are building a product, need an SDK integration, or require detailed control over sessions, events, tool policies, and environment configuration.
+
+## What routines are good for
+
+**Backlog maintenance** — runs against an issue tracker nightly, applies labels, assigns owners, posts a Slack summary of stale items.
+
+**PR review** — fires on every PR opened, applies your team checklist, leaves a comment with blocking findings only.
+
+**Deploy verification** — triggered by your CI pipeline after a production deploy, runs smoke checks and posts a go/no-go to Slack.
+
+**Documentation drift** — runs weekly, scans merged PRs for changes that outdate API docs, opens update PRs.
+
+**Dependency audit** — runs Monday morning, checks for new CVEs in pinned dependencies, files issues.
+
+## Plan limits
+
+| Plan | Routine runs per day |
+|---|---|
+| Pro | 5 |
+| Max | 15 |
+| Team / Enterprise | 25 |
+
+One-off runs triggered via `/schedule run` do not count against the daily cap. Requires CLI v2.1.81+ and a claude.ai subscription (not an API key).
+
+## When NOT to use routines
+
+- The task needs files that are not in a Git repo
+- You need sub-hourly frequency (use `/loop` instead)
+- The task requires interactive approval at specific steps (use Managed Agents with `always_ask` policies)
+- The org has disabled routines in admin settings
+
+<FailureMuseum
+  title="The Routine That Filed 40 Duplicate Issues"
+  what="A backlog-maintenance routine was configured to open issues for items with no owner. The first run worked correctly. After a repo restructure, the ownership field moved to a different label. The routine could no longer find owners — so it re-filed every existing unowned ticket as a new issue. Forty duplicates in one morning."
+  why="The prompt was written against a specific data shape that changed. The routine had no way to detect that its understanding of 'no owner' had drifted."
+  lesson="Routines need guardrails just like any automation: assert preconditions before acting, cap the number of write operations per run, and test against a fork before pointing at a real tracker."
+/>
+
+<Quiz
+  question="You want Claude to review every PR opened against your main branch and leave a comment. Your machine is not always on. Which trigger type fits?"
+  options={[
+    {
+      label: "GitHub trigger, subscribing to the pull_request opened event.",
+      correct: true,
+      explanation: "Correct. GitHub triggers fire on repository events. The routine runs on Anthropic's cloud so your machine does not need to be on."
+    },
+    {
+      label: "A scheduled routine running every 5 minutes.",
+      correct: false,
+      explanation: "The minimum schedule interval is 1 hour, and polling is less precise than reacting to the event. GitHub trigger is the right fit here."
+    },
+    {
+      label: "/loop with a 5-minute interval.",
+      correct: false,
+      explanation: "/loop runs on your machine and requires the session to stay open. It stops when you close Claude Code."
+    }
+  ]}
+/>
+
+<Quiz
+  question="A routine ran correctly last week but started producing bad output after a repo restructure. What most likely went wrong?"
+  options={[
+    {
+      label: "The Anthropic cloud infrastructure changed.",
+      correct: false,
+      explanation: "Cloud infrastructure is not the likely variable here. The prompt and the repo shape are."
+    },
+    {
+      label: "The prompt was written against a data shape that no longer exists after the restructure.",
+      correct: true,
+      explanation: "Correct. Routines run a fixed prompt against a fresh clone. If the repo structure the prompt assumed has changed, the output will drift or break."
+    },
+    {
+      label: "The daily run cap was exceeded.",
+      correct: false,
+      explanation: "Exceeding the cap prevents runs from starting — it does not produce bad output from runs that do start."
+    }
+  ]}
+/>
+
+[Previous: Lesson 5](/modules/module-14-claude-code/lesson-05) - [Lesson 7: Managed Agents ->](/modules/module-14-claude-code/lesson-06)

@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 
 export type AuthFormState = {
   error?: string
+  success?: string
 }
 
 function getAppUrl() {
@@ -89,4 +90,51 @@ export async function logOut() {
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')
+}
+
+export async function requestPasswordReset(
+  _state: AuthFormState,
+  formData: FormData
+): Promise<AuthFormState> {
+  const email = String(formData.get('email') ?? '').trim()
+
+  if (!email) {
+    return { error: 'Email is required.' }
+  }
+
+  const supabase = await createClient()
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${getAppUrl()}/auth/confirm?next=/reset-password`,
+  })
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  return { success: 'Check your email for a password reset link.' }
+}
+
+export async function updatePassword(
+  _state: AuthFormState,
+  formData: FormData
+): Promise<AuthFormState> {
+  const password = String(formData.get('password') ?? '')
+  const confirm = String(formData.get('confirm') ?? '')
+
+  if (!password || password.length < 6) {
+    return { error: 'Password must be at least 6 characters.' }
+  }
+
+  if (password !== confirm) {
+    return { error: 'Passwords do not match.' }
+  }
+
+  const supabase = await createClient()
+  const { error } = await supabase.auth.updateUser({ password })
+
+  if (error) {
+    return { error: error.message }
+  }
+
+  redirect('/dashboard')
 }

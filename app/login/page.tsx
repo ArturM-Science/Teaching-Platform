@@ -25,6 +25,12 @@ export default function LoginPage() {
             footerHref="/signup"
             footerLabel="Create an account"
           />
+
+          <div className="mt-4 text-center">
+            <Link href="/forgot-password" className="text-sm text-zinc-500 hover:text-zinc-900">
+              Forgot your password?
+            </Link>
+          </div>
         </div>
       </div>
     </main>

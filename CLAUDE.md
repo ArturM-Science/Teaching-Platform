@@ -135,3 +135,20 @@ Migrations in `supabase/migrations/`:
 - Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files
 - Mobile sidebar: collapse into a slide-out drawer on small screens
 - Workshop scheduling panel (currently placeholder in dashboard sidebar)
+
+## Module 14 — Lesson Structure (8 lessons as of 2026-05-31)
+
+A Routines lesson was added as Lesson 6 (`lesson-06-routines.mdx`), shifting Managed Agents to Lesson 7 and Lab to Lesson 8. Lesson numbers in frontmatter were updated; slugs and URLs were preserved.
+
+| # | Slug | Topic |
+|---|------|-------|
+| 1 | lesson-01 | What Claude Code is |
+| 2 | lesson-02 | Prompting, plan mode, checkpoints |
+| 3 | lesson-03 | CLAUDE.md, rules, memory, skills, MCP, hooks |
+| 4 | lesson-04 | Permissions, sandboxing, safe autonomy |
+| 5 | lesson-05 | Parallel work |
+| 6 | lesson-06-routines | Routines: scheduled and triggered cloud automation |
+| 7 | lesson-06 | Claude Managed Agents |
+| 8 | lesson-07-lab | Lab |
+
+Official routines docs: https://code.claude.com/docs/en/routines
