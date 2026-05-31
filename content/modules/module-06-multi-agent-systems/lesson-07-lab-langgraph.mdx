@@ -1,0 +1,294 @@
+---
+title: "Framework Lab: LangGraph"
+module: "module-06-multi-agent-systems"
+lesson: 7
+slug: "lesson-07-lab-langgraph"
+---
+
+# Framework Lab — LangGraph
+
+<LabBrief
+  title="Build the Research Pipeline in LangGraph"
+  duration="~90 minutes"
+  objective="Implement the 4-agent research pipeline (orchestrator → specialists → critic → synthesis) using LangGraph's directed graph model. You will define typed shared state, wire agent nodes with conditional edges, and add checkpointing for pause-and-resume."
+/>
+
+## Why LangGraph for this pipeline
+
+LangGraph's core abstraction — a typed state object that all nodes read from and write to — maps directly to the research pipeline. The orchestrator writes sub-questions into state; the specialists write their findings; the critic reads both and writes a verdict; the orchestrator reads the verdict and synthesises. Every transition is an explicit edge.
+
+Checkpointing is the production differentiator: at any edge, LangGraph can save the current state to persistent storage. For a research pipeline that runs for minutes, this means you can pause for human review after the critic pass without losing work.
+
+## Installation
+
+```bash
+pip install langgraph langchain-anthropic
+```
+
+```python
+import os
+os.environ["ANTHROPIC_API_KEY"] = "your-key-here"
+```
+
+## Step 1 — Define the shared state
+
+The state schema is the contract between all agents. Every field that any node reads or writes must be declared here.
+
+```python
+from typing import TypedDict, List, Optional
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_anthropic import ChatAnthropic
+
+llm = ChatAnthropic(model="claude-opus-4-5")
+
+class ResearchState(TypedDict):
+    question: str
+    sub_question_a: str          # model compression angle
+    sub_question_b: str          # inference optimisation angle
+    specialist_a_output: dict    # {findings: [...], citations: [...]}
+    specialist_b_output: dict    # {findings: [...], citations: [...]}
+    critic_verdict: dict         # {pass: bool, issues: [...], score: float}
+    repair_count: int
+    final_answer: str
+```
+
+<Callout type="tip">
+TypedDict gives you static type checking across all node functions. If a node writes a field that isn't in the state schema, your type checker catches it before runtime.
+</Callout>
+
+## Step 2 — Define the agent nodes
+
+Each node is a Python function: it receives the current state and returns a dict of fields to update.
+
+```python
+ORCHESTRATOR_DECOMPOSE_PROMPT = """
+You are a research orchestrator. Given a research question, decompose it into 
+exactly two focused sub-questions:
+- Sub-question A: focused on model compression (quantisation, pruning, distillation)
+- Sub-question B: focused on inference optimisation (batching, caching, hardware)
+
+Return JSON: {{"sub_question_a": "...", "sub_question_b": "..."}}
+"""
+
+def orchestrator_decompose(state: ResearchState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content": ORCHESTRATOR_DECOMPOSE_PROMPT},
+        {"role": "user", "content": state["question"]}
+    ])
+    import json
+    parsed = json.loads(response.content)
+    return {
+        "sub_question_a": parsed["sub_question_a"],
+        "sub_question_b": parsed["sub_question_b"],
+        "repair_count": 0
+    }
+
+
+COMPRESSION_SPECIALIST_PROMPT = """
+You are a specialist in model compression techniques. 
+Research ONLY model compression: quantisation, pruning, knowledge distillation, 
+structured sparsity. Return JSON: 
+{{"findings": ["..."], "citations": ["..."], "key_claim": "..."}}
+If asked about anything outside model compression, return {{"out_of_scope": true}}.
+"""
+
+def specialist_compression(state: ResearchState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content": COMPRESSION_SPECIALIST_PROMPT},
+        {"role": "user", "content": state["sub_question_a"]}
+    ])
+    import json
+    return {"specialist_a_output": json.loads(response.content)}
+
+
+INFERENCE_SPECIALIST_PROMPT = """
+You are a specialist in LLM inference optimisation.
+Research ONLY inference efficiency: speculative decoding, KV cache optimisation,
+continuous batching, hardware-aware serving, PagedAttention.
+Return JSON: {{"findings": ["..."], "citations": ["..."], "key_claim": "..."}}
+If asked about anything outside inference, return {{"out_of_scope": true}}.
+"""
+
+def specialist_inference(state: ResearchState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content": INFERENCE_SPECIALIST_PROMPT},
+        {"role": "user", "content": state["sub_question_b"]}
+    ])
+    import json
+    return {"specialist_b_output": json.loads(response.content)}
+
+
+CRITIC_PROMPT = """
+You are a research quality reviewer. Evaluate both specialist outputs.
+Check: Are all claims supported by citations? Are there contradictions?
+Is the scope appropriate for each specialist?
+
+Return JSON: {{"pass": true/false, "score": 0.0-1.0, "issues": ["..."]}}
+Pass if score >= 0.75 and no uncited claims.
+"""
+
+def critic_review(state: ResearchState) -> dict:
+    content = f"""
+Specialist A output: {state["specialist_a_output"]}
+Specialist B output: {state["specialist_b_output"]}
+"""
+    response = llm.invoke([
+        {"role": "system", "content": CRITIC_PROMPT},
+        {"role": "user", "content": content}
+    ])
+    import json
+    return {
+        "critic_verdict": json.loads(response.content),
+        "repair_count": state["repair_count"] + 1
+    }
+
+
+SYNTHESIS_PROMPT = """
+You are a research orchestrator synthesising a final answer.
+You have two specialist reports and a quality verdict from the critic.
+Write a comprehensive answer that:
+1. Notes where the specialists agree
+2. Highlights any divergences  
+3. Flags any issues the critic raised
+4. Provides a clear conclusion
+
+Keep it under 500 words.
+"""
+
+def orchestrator_synthesise(state: ResearchState) -> dict:
+    content = f"""
+Question: {state["question"]}
+Specialist A (compression): {state["specialist_a_output"]}
+Specialist B (inference): {state["specialist_b_output"]}
+Critic verdict: {state["critic_verdict"]}
+"""
+    response = llm.invoke([
+        {"role": "system", "content": SYNTHESIS_PROMPT},
+        {"role": "user", "content": content}
+    ])
+    return {"final_answer": response.content}
+```
+
+## Step 3 — Wire the routing logic
+
+The router function runs after the critic. It returns a string that LangGraph uses to select the next edge.
+
+```python
+MAX_REPAIRS = 2
+
+def route_after_critic(state: ResearchState) -> str:
+    verdict = state["critic_verdict"]
+    if verdict.get("pass"):
+        return "synthesise"
+    if state["repair_count"] >= MAX_REPAIRS:
+        return "escalate"   # escalate maps to END
+    return "repair"         # repair maps back to specialists
+```
+
+## Step 4 — Build and compile the graph
+
+```python
+# Initialise graph with state schema
+graph = StateGraph(ResearchState)
+
+# Add nodes
+graph.add_node("decompose",       orchestrator_decompose)
+graph.add_node("specialist_a",    specialist_compression)
+graph.add_node("specialist_b",    specialist_inference)
+graph.add_node("critic",          critic_review)
+graph.add_node("synthesise",      orchestrator_synthesise)
+
+# Entry point
+graph.set_entry_point("decompose")
+
+# Decompose fans out to both specialists
+graph.add_edge("decompose",    "specialist_a")
+graph.add_edge("decompose",    "specialist_b")
+
+# Both specialists feed the critic
+# LangGraph waits for all incoming edges before executing a node
+graph.add_edge("specialist_a", "critic")
+graph.add_edge("specialist_b", "critic")
+
+# Critic routes conditionally
+graph.add_conditional_edges(
+    "critic",
+    route_after_critic,
+    {
+        "synthesise": "synthesise",
+        "repair":     "specialist_a",   # re-run both on repair
+        "escalate":   END
+    }
+)
+
+# Synthesise ends the pipeline
+graph.add_edge("synthesise", END)
+
+# Compile with in-memory checkpointer
+checkpointer = MemorySaver()
+app = graph.compile(checkpointer=checkpointer)
+```
+
+<Callout type="key">
+When both `specialist_a` and `specialist_b` have edges pointing to `critic`, LangGraph automatically waits for both to complete before executing `critic`. This gives you parallel execution with a natural join point — no explicit synchronisation code required.
+</Callout>
+
+## Step 5 — Run the pipeline
+
+```python
+config = {"configurable": {"thread_id": "research-001"}}
+
+result = app.invoke(
+    {
+        "question": "What is the current state of LLM efficiency research — "
+                    "model compression and inference optimisation?"
+    },
+    config=config
+)
+
+print(result["final_answer"])
+
+# Inspect the full state at any point
+snapshot = app.get_state(config)
+print(snapshot.values["critic_verdict"])
+```
+
+## Step 6 — Add a human-in-the-loop interrupt
+
+LangGraph's interrupt allows you to pause at a specific edge and wait for human input before continuing.
+
+```python
+# Recompile with interrupt BEFORE synthesis
+app_with_review = graph.compile(
+    checkpointer=checkpointer,
+    interrupt_before=["synthesise"]   # pause here for human review
+)
+
+# Run until the interrupt
+result = app_with_review.invoke({"question": "..."}, config=config)
+# At this point, execution has paused at the synthesise node
+
+# Human reviews critic verdict
+state = app_with_review.get_state(config)
+print("Critic verdict:", state.values["critic_verdict"])
+
+# Human approves — resume execution
+app_with_review.invoke(None, config=config)
+```
+
+## Exercises
+
+**1. Add a repair node.** Currently the graph sends a failed critic verdict back to `specialist_a` with no guidance. Add a dedicated `repair_orchestrator` node that reads the critic's `issues` list and generates improved instructions for each specialist before re-running them.
+
+**2. Implement parallel fan-out correctly.** In the current implementation, when the critic fails and the graph routes to `repair`, only `specialist_a` is re-run (the edge `repair → specialist_a` means `specialist_b` is skipped). Fix this: route to a `repair_orchestrator` node that feeds back to both specialists.
+
+**3. Add LangSmith tracing.** Set `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` in your environment. Re-run the pipeline and open LangSmith. Inspect the trace for each node execution — which node takes the longest? What does the state look like after the critic runs?
+
+**4. Test the escalation path.** Change `MAX_REPAIRS = 0`. Run the pipeline. Verify that the critic fails, the graph immediately routes to `END` (escalation), and `final_answer` is empty. Add an `escalate` node that logs the failure before ending.
+
+<Callout type="warning">
+LangGraph's fan-out (one node → multiple nodes) and fan-in (multiple nodes → one node) require the compiled graph to have no ambiguous ordering. If you add edges that create cycles not resolved by conditional routing, the graph will raise a validation error at compile time — not at runtime.
+</Callout>
+
+[Next framework lab: Claude Agent SDK →](/modules/module-06-multi-agent-systems/lesson-08-lab-claude-sdk)

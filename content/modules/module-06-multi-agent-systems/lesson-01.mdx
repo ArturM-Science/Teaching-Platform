@@ -1,0 +1,100 @@
+---
+title: "What Makes a System Multi-Agent?"
+module: "module-06-multi-agent-systems"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 — What Makes a System Multi-Agent?
+
+The word "multi-agent" gets applied to a lot of things. Parallel steps, branching workflows, systems that call an LLM twice — all of these get called multi-agent. Most of them are not. The distinction matters because the two architectures have fundamentally different failure modes, cost profiles, and design requirements.
+
+## The architectural line
+
+Anthropic's own documentation draws the line clearly:
+
+- **Workflows** are systems where LLMs and tools are orchestrated through predefined code paths.
+- **Agents** are systems where LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks.
+
+A multi-agent system is a system where multiple agents — each with its own context window and decision-making — coordinate dynamically to complete a task. The coordination itself is not predefined; the agents determine at runtime what to do next.
+
+A parallel workflow, by contrast, is a predefined structure that happens to run concurrently. The branching points are fixed in code. There is no agent deciding whether to spawn a new worker or re-plan the approach.
+
+## The four architectural differences
+
+| Dimension | Parallel workflow | Multi-agent system |
+|---|---|---|
+| **Control flow** | Predetermined by the developer | Determined dynamically by agents |
+| **Coordination** | Implicit in code structure | Explicit agent-to-agent communication |
+| **Context** | Shared or split, but fixed | Each agent has its own isolated context window |
+| **Adaptation** | Cannot adapt to unexpected branches | Can spawn new subagents, re-plan, reroute |
+
+The context window difference is the most practically important. In a parallel workflow, you might split a document across two prompt calls — but the structure of that split is decided before runtime. In a multi-agent system, the orchestrating agent decides mid-execution whether to spawn two or five subagents, what each one should focus on, and how to handle an unexpected result.
+
+## When multi-agent is the right choice
+
+Three conditions justify multi-agent complexity:
+
+1. **The task decomposes by domain.** A security review, a legal review, and a correctness review require different expertise and benefit from separate focused system prompts.
+
+2. **Information volume exceeds one context window.** If you need to process 50 documents and synthesise findings, a single agent cannot hold all the documents at once. Subagents each process a slice.
+
+3. **You need dynamic replanning.** If discovering that Institution A has no public data should change how you approach Institution B, the orchestrator needs to be able to adapt — not just run the predefined fallback branch.
+
+## The cost of coordination
+
+Multi-agent complexity is not free. A 2024 Google research study found that coordination overhead reduces sequential reasoning performance by 39–70% compared to single-agent approaches. The orchestrator has to manage state, interpret subagent outputs, and synthesise — all of which adds latency and token cost.
+
+Anthropic's guidance: start with the simplest architecture. "Optimising single LLM calls with retrieval and in-context examples is usually enough" for most applications. Add multi-agent structure only when there is a measurable benefit.
+
+The most common mistake is reaching for multi-agent architecture because a task has multiple steps. Multiple steps is a workflow. Multi-agent is for tasks where the coordination itself must be dynamic.
+
+<AgentVsWorkflow />
+
+<Callout type="key">
+A multi-agent system is not a parallel workflow with more steps. The distinction is dynamic coordination: agents that decide at runtime what to do, who to delegate to, and how to re-plan when something unexpected happens.
+</Callout>
+
+<Quiz
+  question="A pipeline retrieves customer emails, classifies each one as billing or technical, then routes it to the correct reply template. Is this multi-agent?"
+  options={[
+    {
+      label: "Yes — it involves multiple steps and two different handlers.",
+      correct: false,
+      explanation: "Multiple steps and branching are workflow patterns. The control flow here is predefined: classify → route → reply. No agent decides at runtime whether to spawn a new subagent or re-plan. This is a workflow."
+    },
+    {
+      label: "No — the control flow is predefined. Classification and routing are fixed branches, not dynamic decisions.",
+      correct: true,
+      explanation: "Correct. The classifier always routes to one of two fixed branches. Nothing adapts at runtime based on what the classifier found. This is a branching workflow — well-suited for its purpose, and simpler to debug than a multi-agent system."
+    },
+    {
+      label: "It depends on whether the classifier uses an LLM.",
+      correct: false,
+      explanation: "Whether the classifier is an LLM or a regex does not determine whether the system is multi-agent. The architecture is determined by whether coordination is dynamic — whether agents make runtime decisions about what to do next."
+    }
+  ]}
+/>
+
+<Quiz
+  question="An orchestrating agent decomposes a research question into five sub-questions, spawns a specialist subagent for each, and then re-plans after discovering that two sub-questions have conflicting source material. Which condition justifies the multi-agent architecture here?"
+  options={[
+    {
+      label: "The task has five sub-questions.",
+      correct: false,
+      explanation: "The number of steps does not determine whether multi-agent is appropriate. Five sequential prompt calls would also have five steps."
+    },
+    {
+      label: "Dynamic replanning — the orchestrator adapts mid-execution when it discovers conflicting source material.",
+      correct: true,
+      explanation: "Correct. A predefined workflow cannot respond to conflicting sources by changing its own plan. The orchestrator's ability to re-plan based on what subagents discover is exactly what distinguishes this from a parallel workflow."
+    },
+    {
+      label: "The orchestrator calls an LLM more than once.",
+      correct: false,
+      explanation: "Calling an LLM multiple times is a prompt chain. Multi-agent requires dynamic coordination — agents making runtime decisions about the work, not just sequential calls."
+    }
+  ]}
+/>
+
+[Lesson 2: Agent roles →](/modules/module-06-multi-agent-systems/lesson-02)

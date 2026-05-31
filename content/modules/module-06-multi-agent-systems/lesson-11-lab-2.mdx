@@ -1,0 +1,506 @@
+---
+title: "Lab 2: Cross-System Agent Communication"
+module: "module-06-multi-agent-systems"
+lesson: 11
+slug: "lesson-11-lab-2"
+---
+
+# Lab 2 — Cross-System Agent Communication
+
+<LabBrief
+  title="Build Two Multi-Agent Systems That Talk to Each Other"
+  duration="~2 hours"
+  objective="Implement two independent multi-agent systems connected by a typed handoff schema. System A (a research team) produces a structured report. System B (a publishing team) receives it and transforms it into a polished deliverable. You will design the trust boundary between the systems and implement agent-to-agent communication across a system boundary."
+/>
+
+## What this lab demonstrates
+
+Everything in the previous labs happened inside a single multi-agent system. This lab shows what happens at the boundary between two systems.
+
+In production, multi-agent systems are rarely isolated. A research system feeds a reporting system. An analysis system feeds a decision system. A data ingestion system feeds a processing system. The handoff between systems is where the most serious failures happen — and where trust boundaries matter most.
+
+The scenario:
+
+```
+╔══════════════════════════════════════╗
+║         SYSTEM A — Research Team    ║
+║                                      ║
+║  Orchestrator A                      ║
+║      ↓ decomposes                    ║
+║  Specialist A    Specialist B        ║
+║      ↓               ↓              ║
+║  Critic ← reviews both              ║
+║      ↓ if pass                       ║
+║  Orchestrator A synthesises          ║
+║      ↓                               ║
+║  ResearchHandoff (typed schema)      ║
+╚══════════════════════════════════════╝
+              ↓ 
+         [SYSTEM BOUNDARY]
+         [trust checkpoint]
+              ↓ 
+╔══════════════════════════════════════╗
+║       SYSTEM B — Publishing Team    ║
+║                                      ║
+║  Writer — transforms research        ║
+║      ↓                               ║
+║  Editor — reviews and refines        ║
+║      ↓                               ║
+║  Formatter — produces deliverable    ║
+╚══════════════════════════════════════╝
+              ↓
+         Final Blog Post
+```
+
+System A uses LangGraph. System B uses CrewAI. The handoff between them is a Pydantic model — the trust boundary.
+
+## Part 1 — The handoff schema
+
+The schema at the boundary is the most important design decision. It defines what System A guarantees to provide and what System B can rely on.
+
+```python
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional
+from datetime import datetime
+
+class ResearchFinding(BaseModel):
+    claim: str
+    citation: str        # required — no uncited claims cross the boundary
+    confidence: float    # 0.0-1.0 critic score for this specific claim
+
+class ResearchHandoff(BaseModel):
+    """
+    The typed contract between System A (research) and System B (publishing).
+    System B must validate this schema before processing.
+    """
+    # Provenance
+    question: str
+    produced_at: datetime
+    system_a_version: str = "1.0"
+    
+    # Research content
+    compression_findings: List[ResearchFinding]
+    inference_findings: List[ResearchFinding]
+    key_compression_claim: str
+    key_inference_claim: str
+    
+    # Quality metadata from critic
+    overall_score: float         # critic score, 0.0-1.0
+    agreements: List[str]        # where both specialists agree
+    divergences: List[str]       # where findings differ
+    unresolved_issues: List[str] # issues critic flagged but couldn't resolve
+    
+    # Trust signal
+    passed_critic: bool
+    critic_revision_count: int
+    
+    @validator("overall_score")
+    def score_must_be_acceptable(cls, v):
+        if v < 0.6:
+            raise ValueError(
+                f"Research quality score {v} is below the minimum threshold (0.6). "
+                "System B will not accept low-quality research."
+            )
+        return v
+    
+    @validator("compression_findings", "inference_findings")
+    def findings_must_be_cited(cls, findings):
+        for f in findings:
+            if not f.citation or f.citation.strip() == "":
+                raise ValueError(
+                    f"Uncited finding blocked at system boundary: '{f.claim}'"
+                )
+        return findings
+```
+
+<Callout type="key">
+The validator functions run at the system boundary — before System B processes anything. An uncited claim or low-quality score raises a `ValidationError` that System B's orchestrator handles, rather than letting bad data silently propagate through the publishing pipeline.
+</Callout>
+
+## Part 2 — System A: The Research Team (LangGraph)
+
+This is the pipeline from the LangGraph lab, extended to produce a `ResearchHandoff` object as its final output.
+
+```python
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_anthropic import ChatAnthropic
+from typing import TypedDict, List
+import json
+from datetime import datetime, timezone
+
+llm = ChatAnthropic(model="claude-opus-4-5")
+
+class SystemAState(TypedDict):
+    question: str
+    sub_question_a: str
+    sub_question_b: str
+    specialist_a_output: dict
+    specialist_b_output: dict
+    critic_verdict: dict
+    repair_count: int
+    handoff: dict   # populated at the end — this is the ResearchHandoff
+
+
+# --- Agent nodes (abbreviated — same as LangGraph lab) ---
+
+def orchestrator_decompose(state: SystemAState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content": "Decompose the question into two sub-questions. "
+         "Return JSON: {sub_question_a: '...', sub_question_b: '...'}"},
+        {"role": "user", "content": state["question"]}
+    ])
+    parsed = json.loads(response.content)
+    return {**parsed, "repair_count": 0}
+
+
+def specialist_compression(state: SystemAState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content": 
+         "Research model compression. Return JSON: "
+         "{findings: [{claim, citation, confidence}], key_claim: '...'}"},
+        {"role": "user", "content": state["sub_question_a"]}
+    ])
+    return {"specialist_a_output": json.loads(response.content)}
+
+
+def specialist_inference(state: SystemAState) -> dict:
+    response = llm.invoke([
+        {"role": "system", "content":
+         "Research inference optimisation. Return JSON: "
+         "{findings: [{claim, citation, confidence}], key_claim: '...'}"},
+        {"role": "user", "content": state["sub_question_b"]}
+    ])
+    return {"specialist_b_output": json.loads(response.content)}
+
+
+def critic_review(state: SystemAState) -> dict:
+    content = (
+        f"Specialist A: {state['specialist_a_output']}\n"
+        f"Specialist B: {state['specialist_b_output']}"
+    )
+    response = llm.invoke([
+        {"role": "system", "content":
+         "Review both outputs. Return JSON: "
+         "{pass: bool, score: float, uncited_claims: [], "
+         "agreements: [], divergences: [], issues: []}"},
+        {"role": "user", "content": content}
+    ])
+    return {
+        "critic_verdict": json.loads(response.content),
+        "repair_count": state["repair_count"] + 1
+    }
+
+
+def produce_handoff(state: SystemAState) -> dict:
+    """Final node — packages the research into the typed handoff schema."""
+    verdict = state["critic_verdict"]
+    a_out   = state["specialist_a_output"]
+    b_out   = state["specialist_b_output"]
+    
+    handoff_data = {
+        "question":             state["question"],
+        "produced_at":          datetime.now(timezone.utc).isoformat(),
+        "system_a_version":     "1.0",
+        "compression_findings": a_out.get("findings", []),
+        "inference_findings":   b_out.get("findings", []),
+        "key_compression_claim": a_out.get("key_claim", ""),
+        "key_inference_claim":   b_out.get("key_claim", ""),
+        "overall_score":        verdict.get("score", 0.0),
+        "agreements":           verdict.get("agreements", []),
+        "divergences":          verdict.get("divergences", []),
+        "unresolved_issues":    verdict.get("issues", []),
+        "passed_critic":        verdict.get("pass", False),
+        "critic_revision_count": state["repair_count"],
+    }
+    return {"handoff": handoff_data}
+
+
+def route_after_critic(state: SystemAState) -> str:
+    verdict = state["critic_verdict"]
+    if verdict.get("pass"):
+        return "produce_handoff"
+    if state["repair_count"] >= 2:
+        return "produce_handoff"   # produce handoff even on failure; validator will catch it
+    return "repair"
+
+
+# --- Build the graph ---
+
+graph = StateGraph(SystemAState)
+graph.add_node("decompose",      orchestrator_decompose)
+graph.add_node("specialist_a",   specialist_compression)
+graph.add_node("specialist_b",   specialist_inference)
+graph.add_node("critic",         critic_review)
+graph.add_node("produce_handoff", produce_handoff)
+
+graph.set_entry_point("decompose")
+graph.add_edge("decompose",    "specialist_a")
+graph.add_edge("decompose",    "specialist_b")
+graph.add_edge("specialist_a", "critic")
+graph.add_edge("specialist_b", "critic")
+graph.add_conditional_edges("critic", route_after_critic, {
+    "produce_handoff": "produce_handoff",
+    "repair":          "specialist_a",
+})
+graph.add_edge("produce_handoff", END)
+
+system_a = graph.compile(checkpointer=MemorySaver())
+```
+
+## Part 3 — The system boundary
+
+The boundary function validates the handoff and handles validation failures before System B ever sees the data.
+
+```python
+from pydantic import ValidationError
+
+def cross_system_handoff(raw_handoff: dict) -> ResearchHandoff:
+    """
+    The trust checkpoint between System A and System B.
+    Raises if the handoff fails validation — System B never receives bad data.
+    """
+    try:
+        handoff = ResearchHandoff(**raw_handoff)
+        print(f"✓ Handoff validated — quality score: {handoff.overall_score:.2f}")
+        print(f"  {len(handoff.compression_findings)} compression findings")
+        print(f"  {len(handoff.inference_findings)} inference findings")
+        print(f"  Unresolved issues: {len(handoff.unresolved_issues)}")
+        return handoff
+    except ValidationError as e:
+        # Log the failure with full context
+        print("✗ Handoff validation failed at system boundary:")
+        for error in e.errors():
+            print(f"  [{error['loc']}] {error['msg']}")
+        # Options: retry System A, escalate to human, return error to caller
+        raise SystemBoundaryError(
+            "System A produced output that does not meet System B's quality threshold. "
+            f"Errors: {e.errors()}"
+        ) from e
+
+class SystemBoundaryError(Exception):
+    pass
+```
+
+## Part 4 — System B: The Publishing Team (CrewAI)
+
+System B receives the validated `ResearchHandoff` and transforms it into a polished blog post. Notice that System B's agents do not re-research — they transform. The research is already done.
+
+```python
+from crewai import Agent, Task, Crew, Process
+from langchain_anthropic import ChatAnthropic
+
+claude = ChatAnthropic(model="claude-opus-4-5")
+
+# System B agents
+writer = Agent(
+    role="Technical Writer",
+    goal="Transform structured research findings into a clear, engaging blog post.",
+    backstory=(
+        "You are a technical writer who makes complex AI research accessible to "
+        "senior engineers. You never introduce new technical claims — you only "
+        "transform and clarify what the research already says."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,
+)
+
+editor = Agent(
+    role="Senior Technical Editor",
+    goal=(
+        "Review and refine the draft for clarity, accuracy, and structure. "
+        "Flag any claims not present in the source research."
+    ),
+    backstory=(
+        "You are a technical editor with a reputation for catching claims that "
+        "drift beyond the source material. You ensure the post is accurate to "
+        "the research — no embellishment, no speculation."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,
+)
+
+formatter = Agent(
+    role="Content Formatter",
+    goal="Format the edited draft as a publication-ready markdown blog post.",
+    backstory=(
+        "You are a content formatter who produces clean, well-structured markdown. "
+        "You add appropriate headings, code blocks, and callouts — you do not change content."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,
+)
+
+
+def build_system_b_tasks(handoff: ResearchHandoff):
+    """Build System B tasks from the validated handoff."""
+    
+    # Serialise handoff for injection into task descriptions
+    compression_summary = "\n".join(
+        f"- {f.claim} [{f.citation}]" 
+        for f in handoff.compression_findings
+    )
+    inference_summary = "\n".join(
+        f"- {f.claim} [{f.citation}]" 
+        for f in handoff.inference_findings
+    )
+    agreements  = "\n".join(f"- {a}" for a in handoff.agreements)
+    divergences = "\n".join(f"- {d}" for d in handoff.divergences)
+    issues      = "\n".join(f"- {i}" for i in handoff.unresolved_issues)
+
+    write_task = Task(
+        description=f"""Write a blog post draft based ONLY on this research:
+
+QUESTION ANSWERED: {handoff.question}
+
+MODEL COMPRESSION FINDINGS:
+{compression_summary}
+KEY COMPRESSION CLAIM: {handoff.key_compression_claim}
+
+INFERENCE OPTIMISATION FINDINGS:
+{inference_summary}
+KEY INFERENCE CLAIM: {handoff.key_inference_claim}
+
+AREAS OF AGREEMENT:
+{agreements or '(none identified)'}
+
+DIVERGENCES:
+{divergences or '(none identified)'}
+
+UNRESOLVED ISSUES (flag these in the post):
+{issues or '(none)'}
+
+RESEARCH QUALITY SCORE: {handoff.overall_score:.2f}
+
+Do NOT introduce any new claims. Transform these findings into readable prose.""",
+        agent=writer,
+        expected_output=(
+            "A 600-800 word blog post draft covering both compression and inference "
+            "findings, noting agreements and divergences, with all citations preserved."
+        ),
+    )
+
+    edit_task = Task(
+        description=(
+            "Review the draft. Check: (1) every technical claim traces back to the "
+            "source research, (2) no new claims were introduced by the writer, "
+            "(3) divergences and unresolved issues are clearly flagged. "
+            "Refine for clarity and flow."
+        ),
+        agent=editor,
+        expected_output=(
+            "An edited draft with tracked changes noted as [EDITOR: reason], "
+            "and a brief editorial note at the top listing any drift corrections made."
+        ),
+        context=[write_task],
+    )
+
+    format_task = Task(
+        description=(
+            "Format the edited draft as a publication-ready markdown blog post. "
+            "Add: title (H1), section headings (H2/H3), a TL;DR callout at the top, "
+            "a references section at the bottom. Do not change content."
+        ),
+        agent=formatter,
+        expected_output=(
+            "Complete markdown blog post with title, TL;DR, sections, "
+            "inline citations preserved, and a references list."
+        ),
+        context=[edit_task],
+    )
+
+    return [write_task, edit_task, format_task]
+
+
+def run_system_b(handoff: ResearchHandoff) -> str:
+    tasks = build_system_b_tasks(handoff)
+    crew = Crew(
+        agents=[writer, editor, formatter],
+        tasks=tasks,
+        process=Process.sequential,  # linear pipeline: write → edit → format
+        verbose=1,
+    )
+    result = crew.kickoff()
+    return result.raw
+```
+
+## Part 5 — Wire the two systems together
+
+```python
+def run_full_pipeline(question: str) -> str:
+    print("=" * 60)
+    print("SYSTEM A — Research Team starting")
+    print("=" * 60)
+    
+    config = {"configurable": {"thread_id": "research-001"}}
+    a_result = system_a.invoke({"question": question}, config=config)
+    
+    print("\n" + "=" * 60)
+    print("SYSTEM BOUNDARY — Validating handoff")
+    print("=" * 60)
+    
+    handoff = cross_system_handoff(a_result["handoff"])
+    
+    print("\n" + "=" * 60)
+    print("SYSTEM B — Publishing Team starting")
+    print("=" * 60)
+    
+    final_post = run_system_b(handoff)
+    return final_post
+
+
+# Run the full pipeline
+question = (
+    "What is the current state of LLM efficiency research — "
+    "specifically model compression and inference optimisation?"
+)
+
+blog_post = run_full_pipeline(question)
+print("\n" + "=" * 60)
+print("FINAL OUTPUT")
+print("=" * 60)
+print(blog_post)
+```
+
+## What agent-to-agent communication looks like here
+
+The handoff from System A to System B is not a function call — it is an explicit communication event with:
+
+1. **A defined sender** (System A's `produce_handoff` node)
+2. **A defined receiver** (System B's `build_system_b_tasks` function)
+3. **A typed message schema** (`ResearchHandoff`) both sides agree on
+4. **A validation checkpoint** that runs before the receiver processes anything
+5. **An escalation path** (`SystemBoundaryError`) if the message fails validation
+
+This is what "agent-to-agent communication" means at a system level: not free-form conversation, but structured message-passing with agreed schemas and explicit trust boundaries.
+
+<Callout type="key">
+The boundary between two multi-agent systems is the highest-trust point in the architecture. Everything inside System A is contained within System A's context and coordination. Once data crosses the boundary into System B, it is treated by System B's agents as external input — and external input is always validated before processing.
+</Callout>
+
+## Exercises
+
+**1. Test the boundary validator.** Manually construct a `ResearchHandoff` dict with an uncited claim (set `citation: ""`). Call `cross_system_handoff()`. Verify that `SystemBoundaryError` is raised and that System B never starts.
+
+**2. Add a quality escalation path.** If `cross_system_handoff` raises `SystemBoundaryError`, instead of crashing, retry System A with a higher quality threshold in the critic (raise the pass threshold to 0.85). If System A still fails after one retry, return a human-readable error to the user explaining why the pipeline could not complete.
+
+**3. Make the systems cross-framework in the other direction.** Swap the frameworks: implement System A in CrewAI and System B in LangGraph. The `ResearchHandoff` schema stays the same — it is framework-agnostic. Does the handoff work the same way? What changes?
+
+**4. Add an acknowledgement from System B.** After System B completes, have it send an `AcknowledgementMessage` back to System A (log it, or write it to a shared file). The acknowledgement should include: whether the research was usable, how many writer corrections the editor made, and the final word count. This simulates System B providing feedback to System A — a pattern used in iterative production pipelines to improve System A's outputs over time.
+
+**5. Add observability across both systems.** Add timing instrumentation: record when System A starts, when the handoff is produced, when System B starts, and when the final post is complete. Log the quality score, revision count, and token usage from both systems. What is the total wall-clock time? What is the breakdown between System A and System B?
+
+<Checkpoint
+  moduleSlug="module-06-multi-agent-systems"
+  items={[
+    "I understand why the ResearchHandoff schema is defined as a Pydantic model rather than a dict",
+    "I can explain what happens at the system boundary if a finding has no citation",
+    "I understand why System B uses Process.sequential while System A uses a conditional graph",
+    "I can describe two failure modes specific to cross-system communication (not within-system failures)",
+    "I completed at least one of the exercises above"
+  ]}
+  next="/modules/module-06-multi-agent-systems"
+/>

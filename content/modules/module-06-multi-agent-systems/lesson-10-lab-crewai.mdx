@@ -1,0 +1,273 @@
+---
+title: "Framework Lab: CrewAI"
+module: "module-06-multi-agent-systems"
+lesson: 10
+slug: "lesson-10-lab-crewai"
+---
+
+# Framework Lab — CrewAI
+
+<LabBrief
+  title="Build the Research Pipeline in CrewAI"
+  duration="~90 minutes"
+  objective="Implement the 4-agent research pipeline using CrewAI's role/crew/task model. You will define agents with role, goal, and backstory, wire them into a hierarchical crew, and understand why the abstraction adds token overhead — and when that trade-off is worth it."
+/>
+
+## The mental model
+
+CrewAI thinks in teams, not graphs. You describe who each agent is (role, goal, backstory), what they need to do (Tasks), and how the team works together (Process). CrewAI handles the orchestration — you do not wire edges or write routing logic. This is the lowest barrier to entry of the four frameworks.
+
+The `hierarchical` process is the most relevant for our pipeline: CrewAI automatically creates a manager agent that delegates tasks, validates outputs, and reassigns if the result is unsatisfactory. This mirrors our orchestrator role — without you having to implement the orchestration logic yourself.
+
+## Installation
+
+```bash
+pip install crewai crewai-tools
+```
+
+```python
+import os
+os.environ["ANTHROPIC_API_KEY"] = "your-key-here"
+```
+
+## Step 1 — Define the agents
+
+CrewAI agents are defined with `role` (what they are), `goal` (what they optimise for), and `backstory` (context that shapes their behaviour). These three fields together set the agent's system prompt.
+
+```python
+from crewai import Agent, Task, Crew, Process
+from langchain_anthropic import ChatAnthropic
+
+claude = ChatAnthropic(model="claude-opus-4-5")
+
+# The orchestrator — acts as manager in hierarchical process
+orchestrator = Agent(
+    role="Research Orchestrator",
+    goal=(
+        "Coordinate research specialists to answer complex questions about LLM efficiency. "
+        "Decompose questions, delegate to experts, validate quality, and synthesise findings."
+    ),
+    backstory=(
+        "You are a senior research director with a track record of producing accurate, "
+        "well-cited technical reports. You never accept uncited claims and always push "
+        "specialists to revise before synthesis."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=True,   # manager agents must have delegation enabled
+    max_iter=5,              # max attempts before giving up on a task
+)
+
+compression_specialist = Agent(
+    role="Model Compression Specialist",
+    goal=(
+        "Research and report on model compression techniques: quantisation, pruning, "
+        "knowledge distillation, and structured sparsity. Every claim must be cited."
+    ),
+    backstory=(
+        "You are a research scientist specialising in efficient deep learning. You have "
+        "published on GPTQ, AWQ, and SparseGPT. You only discuss compression — "
+        "never inference serving or hardware optimisation."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,  # specialists do not sub-delegate
+    max_iter=3,
+)
+
+inference_specialist = Agent(
+    role="Inference Optimisation Specialist",
+    goal=(
+        "Research and report on LLM inference optimisation: speculative decoding, "
+        "KV cache management, continuous batching, and hardware-aware serving. "
+        "Every claim must have a citation."
+    ),
+    backstory=(
+        "You are a systems researcher specialising in LLM serving infrastructure. "
+        "You know vLLM, TensorRT-LLM, and PagedAttention in depth. You only discuss "
+        "inference serving — never model architecture or compression."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,
+    max_iter=3,
+)
+
+critic = Agent(
+    role="Research Quality Critic",
+    goal=(
+        "Evaluate research outputs for citation coverage, factual consistency, "
+        "and scope adherence. Return a structured verdict — never generate new research."
+    ),
+    backstory=(
+        "You are an editorial reviewer with a reputation for rigorous standards. "
+        "You catch uncited claims, scope drift, and logical inconsistencies. "
+        "You do not produce research — you evaluate it."
+    ),
+    llm=claude,
+    verbose=True,
+    allow_delegation=False,
+    max_iter=2,
+)
+```
+
+## Step 2 — Define the tasks
+
+CrewAI tasks define what needs to be done, who does it, and what a good output looks like. The `expected_output` field acts as the quality criterion — the manager uses it to evaluate whether to accept or reassign.
+
+```python
+QUESTION = (
+    "What is the current state of LLM efficiency research — "
+    "specifically model compression and inference optimisation?"
+)
+
+compression_task = Task(
+    description=f"""Research model compression techniques relevant to this question:
+    
+    {QUESTION}
+    
+    Focus ONLY on: quantisation, pruning, knowledge distillation, structured sparsity.
+    Include specific papers, benchmarks, and concrete performance numbers where available.
+    Every factual claim must include a citation.""",
+    agent=compression_specialist,
+    expected_output=(
+        "A structured report with: (1) 3-5 key findings each with citations, "
+        "(2) benchmark comparisons where available, (3) a key_claim — the single "
+        "most important finding. All claims cited. No inference optimisation content."
+    ),
+)
+
+inference_task = Task(
+    description=f"""Research inference optimisation techniques relevant to this question:
+    
+    {QUESTION}
+    
+    Focus ONLY on: speculative decoding, KV cache management (PagedAttention, RadixAttention),
+    continuous batching, hardware-aware serving, quantised inference runtimes.
+    Every factual claim must include a citation.""",
+    agent=inference_specialist,
+    expected_output=(
+        "A structured report with: (1) 3-5 key findings each with citations, "
+        "(2) benchmark comparisons where available, (3) a key_claim — the single "
+        "most important finding. All claims cited. No compression content."
+    ),
+)
+
+critic_task = Task(
+    description="""Review the outputs from the Model Compression Specialist and 
+    the Inference Optimisation Specialist.
+    
+    Check:
+    1. Citation coverage — is every factual claim cited?
+    2. Scope adherence — did each specialist stay in their domain?
+    3. Consistency — do the two outputs contradict each other?
+    
+    Return a structured verdict.""",
+    agent=critic,
+    expected_output=(
+        "A verdict with: pass (true/false), score (0.0-1.0), "
+        "uncited_claims (list), scope_violations (list), "
+        "contradictions (list), verdict_summary (one sentence). "
+        "Pass threshold: score >= 0.75 AND uncited_claims is empty."
+    ),
+    context=[compression_task, inference_task],  # critic reads both specialist outputs
+)
+
+synthesis_task = Task(
+    description=f"""Synthesise the specialists' research and the critic's verdict 
+    into a final answer to the original question:
+    
+    {QUESTION}
+    
+    Your synthesis must:
+    1. Open with the key claim from each specialist
+    2. Note where findings reinforce each other
+    3. Note any divergences or tensions
+    4. Flag unresolved issues the critic identified
+    5. End with a clear one-sentence conclusion""",
+    agent=orchestrator,
+    expected_output=(
+        "A comprehensive answer under 500 words with: key claims from each specialist, "
+        "areas of agreement, divergences, unresolved critic issues, and a clear conclusion."
+    ),
+    context=[compression_task, inference_task, critic_task],  # synthesiser reads all
+)
+```
+
+## Step 3 — Assemble and run the crew
+
+```python
+crew = Crew(
+    agents=[orchestrator, compression_specialist, inference_specialist, critic],
+    tasks=[compression_task, inference_task, critic_task, synthesis_task],
+    process=Process.hierarchical,  # orchestrator manages delegation and quality
+    manager_agent=orchestrator,    # orchestrator is the explicit manager
+    verbose=2,                     # 0=silent, 1=brief, 2=full output
+    memory=False,                  # disable long-term memory for this lab
+    max_rpm=10,                    # rate limit API calls
+)
+
+result = crew.kickoff(inputs={"question": QUESTION})
+print(result.raw)
+```
+
+<Callout type="tip">
+`Process.hierarchical` is the closest CrewAI equivalent to the orchestrator-workers pattern. The manager agent (orchestrator) receives the full task list, decides which agent handles each task, and can reject outputs and reassign if they don't match `expected_output`. This means the orchestrator prompt is executed automatically — you don't write the routing logic.
+</Callout>
+
+## Step 4 — Understanding the token overhead
+
+CrewAI's abstraction convenience comes with a cost. Add instrumentation to measure it:
+
+```python
+from crewai.utilities import Logger
+
+# Track usage after run
+usage = result.token_usage
+print(f"Total tokens: {usage.total_tokens:,}")
+print(f"Prompt tokens: {usage.prompt_tokens:,}")
+print(f"Completion tokens: {usage.completion_tokens:,}")
+
+# For comparison: a single Claude call on the same question
+from anthropic import Anthropic
+client = Anthropic()
+single_response = client.messages.create(
+    model="claude-opus-4-5",
+    max_tokens=1000,
+    messages=[{"role": "user", "content": QUESTION}]
+)
+single_tokens = single_response.usage.input_tokens + single_response.usage.output_tokens
+print(f"Single call tokens: {single_tokens:,}")
+print(f"Overhead ratio: {usage.total_tokens / single_tokens:.1f}x")
+```
+
+In the 2026 benchmark, CrewAI carried ~3× the token overhead of LangGraph for the same pipeline on simple tasks. On complex tasks where the orchestrator needs multiple revision cycles, this ratio grows. Understanding it helps you decide when the abstraction is worth the cost.
+
+## Step 5 — Using sequential process (for comparison)
+
+The `sequential` process runs tasks in order: compression → inference → critic → synthesis. No manager, no delegation. Try it and compare the output quality:
+
+```python
+crew_sequential = Crew(
+    agents=[compression_specialist, inference_specialist, critic, orchestrator],
+    tasks=[compression_task, inference_task, critic_task, synthesis_task],
+    process=Process.sequential,
+    verbose=1,
+)
+
+result_sequential = crew_sequential.kickoff(inputs={"question": QUESTION})
+```
+
+`sequential` is faster and cheaper than `hierarchical` because there is no manager LLM call overhead. The trade-off: if the critic fails, there is no mechanism to re-run the specialist. Use `hierarchical` when you need quality enforcement; use `sequential` when the task is linear and the output contract is well-defined enough that revision loops are unnecessary.
+
+## Exercises
+
+**1. Compare process types.** Run the same question with `Process.sequential`, `Process.hierarchical`. Measure token usage and subjective output quality for each. When does the hierarchical manager add meaningful value?
+
+**2. Add a human feedback loop.** After `critic_task`, add a `Task` with `human_input=True` — this pauses the crew and asks you to approve before synthesis. Use this to override the critic's verdict manually. What happens to the synthesis if you reject an output the critic passed?
+
+**3. Test `max_iter` as a circuit breaker.** Set `max_iter=1` on `compression_specialist`. The orchestrator will only try once — if the output fails the critic, it cannot retry. Verify that the crew escalates gracefully rather than looping indefinitely.
+
+**4. Add long-term memory.** Set `memory=True` on the crew. Run the pipeline twice with slightly different questions (e.g., first ask about compression only, then about both). Does the second run benefit from the first? What does CrewAI's memory store contain?
+
+[Next: Lab 2 — Cross-System Agent Communication →](/modules/module-06-multi-agent-systems/lesson-11-lab-2)

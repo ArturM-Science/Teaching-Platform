@@ -1,0 +1,104 @@
+---
+title: "Communication Patterns and Coordination"
+module: "module-06-multi-agent-systems"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 — Communication Patterns and Coordination
+
+How agents talk to each other is an architectural decision with long-term consequences. The communication pattern determines how failures propagate, how easy the system is to debug, and how it scales. Most multi-agent systems use one of three patterns — or a hybrid of all three.
+
+## Direct handoff
+
+In a direct handoff, one agent explicitly transfers control to the next. Only one agent is "active" at a time. LangGraph implements this via a `Command` object that specifies the destination agent and the payload. OpenAI's Swarm framework showed the prototype: each agent locally decides whether to handle a task or pass it to a peer.
+
+**Why it works:** Direct handoff is the most auditable pattern. You always know which agent has control, what it received, and what it returned. Causality is explicit — trace any output back through the handoff chain and you see every decision.
+
+**The trade-off:** Agents run serially. One agent must complete before the next begins, which eliminates parallelism. If a handoff fails — the receiving agent crashes, or the message is lost — the task is orphaned with no natural recovery path. For tasks where every step must complete before the next can begin, this is the right pattern. For tasks that could benefit from parallel execution, it is a bottleneck.
+
+## Shared message queue
+
+In a queue-based architecture, agents publish messages to a shared queue. Other agents subscribe and consume messages that match their role. No agent directly calls another — the queue mediates all coordination.
+
+This pattern decouples agents in time and space. The research agent does not wait for the synthesis agent — it publishes its output to the queue and moves on. The synthesis agent consumes when it is ready.
+
+**Why it works:** High throughput is the primary advantage. Multiple agents can consume from the queue simultaneously, achieving genuine parallelism without any agent waiting for another. Agent availability is also decoupled: if the synthesis agent is temporarily unavailable, messages accumulate and are processed when it recovers.
+
+**The trade-off:** Debugging is significantly harder. Message ordering issues produce subtle bugs where an agent acts on a message that should have been superseded by a later one. Tracing causality requires reconstructing the message log rather than following a simple call chain.
+
+## Blackboard / shared state
+
+All agents read from and write to a common structured store — the "blackboard." Agents monitor the current state and contribute when they can add value. This is the oldest multi-agent coordination pattern, originating in 1980s AI research and now re-emerging with LLMs.
+
+A 2024 study on the bMAS (Blackboard-based LLM Multi-Agent System) architecture found that blackboard-mediated systems "can match or exceed the performance of both static and dynamically orchestrated LLM multi-agent systems while maintaining high token efficiency." The reason: agents build on each other's partial results without needing explicit handoffs.
+
+**Why it works:** Natural collaboration. An agent writes a partial result; another agent reads it, extends it, and writes back. The blackboard becomes a shared working memory that the entire team builds incrementally.
+
+**The trade-off:** Write conflicts and stale reads are the primary risks. If two agents update the same field simultaneously, the later write wins — and the earlier agent's work is lost. If Agent B reads a field that Agent A is about to correct, B acts on stale data. These consistency failures account for a significant portion of coordination failures in production multi-agent systems.
+
+## Hybrid (what production systems use)
+
+Most production multi-agent systems combine patterns. LangGraph uses a graph-based shared state — a structured blackboard — combined with explicit handoff edges. Anthropic's Research product uses a shared synthesis context that subagents write into, combined with a final orchestrator synthesis pass.
+
+The hybrid approach applies each pattern where its strengths matter: handoffs where auditability is critical, queues where throughput is critical, and shared state where agents need to build on each other's partial work.
+
+## Agent memory: shared vs isolated
+
+The same three patterns apply to memory. In a multi-agent system, the question is not just "what does an agent know" but "what is shared between agents and what is isolated to each one."
+
+**Isolated memory** — each agent has private memory. Clean separation, easy reasoning about what each agent knows. Risk: agents cannot build on each other's discoveries.
+
+**Shared memory** — all agents read from and write to a common store. Enables collective intelligence. Risk: the most common multi-agent failure mode. One agent writes incorrect data; all subsequent agents act on it.
+
+**Hybrid (dominant in production):** Each agent has `agent_id`-scoped private memory for its own context, plus access to a shared `workspace` namespace for collective knowledge. Treat shared memory writes as transactions — one writer, explicit versioning, staleness checks before acting.
+
+<CommunicationPatternSim />
+
+<Callout type="key">
+Choose your communication pattern based on your dominant constraint. Direct handoff if you need auditability. Message queue if you need throughput. Shared state if agents need to build on each other's work. Most production systems use all three.
+</Callout>
+
+<Quiz
+  question="Your system must be fully auditable — every agent handoff logged, every decision traceable to a specific agent at a specific time. Which communication pattern fits best?"
+  options={[
+    {
+      label: "Shared message queue — it generates a complete message log.",
+      correct: false,
+      explanation: "A message queue does produce a log, but reconstructing causality from message ordering is complex. It is not the most natural fit for strict auditability requirements."
+    },
+    {
+      label: "Direct handoff — explicit control transfer at each step, with a clear owner at every moment.",
+      correct: true,
+      explanation: "Correct. Direct handoff gives you explicit auditability: at any moment, one agent has control. Every handoff is an explicit event with a defined source, destination, and payload. This maps directly to audit requirements."
+    },
+    {
+      label: "Blackboard — all writes are recorded in the shared state.",
+      correct: false,
+      explanation: "Blackboard systems record state changes, but multiple agents can write simultaneously, making it harder to attribute decisions to specific agents at specific times."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Two agents need to collaborate on a research document: Agent A writes the historical background, Agent B reads it and adds current developments, Agent C reads both and writes a synthesis. Which pattern fits this naturally?"
+  options={[
+    {
+      label: "Direct handoff — A passes to B who passes to C.",
+      correct: false,
+      explanation: "Direct handoff would work here, but it forces serial execution. If A and C could work on different sections simultaneously, handoff is a bottleneck."
+    },
+    {
+      label: "Blackboard / shared state — agents build incrementally on each other's partial results.",
+      correct: true,
+      explanation: "Correct. This is exactly what blackboard coordination is designed for. A writes its section; B reads it and extends it; C reads both and synthesises. Each agent contributes when it can add value, without waiting for explicit handoffs."
+    },
+    {
+      label: "Message queue — each agent publishes its output as a message.",
+      correct: false,
+      explanation: "A queue could work, but it does not naturally capture the incremental build-on pattern. B would need to consume A's message, extend it, and republish — which is effectively a handoff via queue, not a natural blackboard collaboration."
+    }
+  ]}
+/>
+
+[Lesson 4: Trust, security, and failure modes →](/modules/module-06-multi-agent-systems/lesson-04)

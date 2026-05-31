@@ -334,3 +334,51 @@ No props. Self-contained.
 ```mdx
 <RepairLoopSim />
 ```
+
+---
+
+### `<AgentVsWorkflow>`
+
+Scenario picker that shows whether a described task calls for a multi-agent system or a workflow — and why. Four preset scenarios (deep research, email summarisation, code security review, support email routing). Each shows a verdict badge (Multi-agent / Workflow), a list of reasons, and a key insight. Used in Module 06, Lesson 1.
+
+No props. Self-contained.
+
+```mdx
+<AgentVsWorkflow />
+```
+
+---
+
+### `<AgentRoleExplorer>`
+
+Interactive explorer for the four agent roles: Orchestrator, Subagent, Specialist, Critic. User clicks a role card to select it, then switches between five field tabs (Receives, Produces, Typical tools, If it fails, Real-world example). Includes a pipeline overview diagram with clickable role buttons. Used in Module 06, Lesson 2.
+
+No props. Self-contained.
+
+```mdx
+<AgentRoleExplorer />
+```
+
+---
+
+### `<CommunicationPatternSim>`
+
+Interactive simulator for the three multi-agent communication patterns: Direct Handoff, Shared Message Queue, Blackboard / Shared State. User selects a pattern to see pros, trade-offs, and best-fit use cases. Then selects a failure scenario (agent goes offline, bad output) to see how each pattern handles it differently. Used in Module 06, Lesson 3.
+
+No props. Self-contained.
+
+```mdx
+<CommunicationPatternSim />
+```
+
+---
+
+### `<FailureCascadeSim>`
+
+Step-through failure cascade simulator with two scenarios. **Memory poisoning:** shows a hallucination being written to shared memory and contaminating three downstream agents, then shows the structured-handoff mitigation. **Coordination deadlock:** shows two agents in mutual WAITING state with no error signal, then shows the timeout circuit breaker and design-time contract mitigation. Includes an infection tracker for the memory poisoning scenario. Used in Module 06, Lesson 4.
+
+No props. Self-contained.
+
+```mdx
+<FailureCascadeSim />
+```

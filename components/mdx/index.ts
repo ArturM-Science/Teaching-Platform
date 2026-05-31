@@ -27,6 +27,10 @@ import { RegressionRunnerViz } from './RegressionRunnerViz'
 import { WorkflowDiagram } from './WorkflowDiagram'
 import { ClassifierRouter } from './ClassifierRouter'
 import { RepairLoopSim } from './RepairLoopSim'
+import { AgentVsWorkflow } from './AgentVsWorkflow'
+import { AgentRoleExplorer } from './AgentRoleExplorer'
+import { CommunicationPatternSim } from './CommunicationPatternSim'
+import { FailureCascadeSim } from './FailureCascadeSim'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -60,4 +64,8 @@ export const mdxComponents = {
   WorkflowDiagram,
   ClassifierRouter,
   RepairLoopSim,
+  AgentVsWorkflow,
+  AgentRoleExplorer,
+  CommunicationPatternSim,
+  FailureCascadeSim,
 }

@@ -1,0 +1,269 @@
+---
+title: "Framework Lab: AutoGen / AG2"
+module: "module-06-multi-agent-systems"
+lesson: 9
+slug: "lesson-09-lab-autogen"
+---
+
+# Framework Lab — AutoGen / AG2
+
+<LabBrief
+  title="Build the Research Pipeline in AutoGen / AG2"
+  duration="~90 minutes"
+  objective="Implement the 4-agent research pipeline using AutoGen's conversational GroupChat model. You will see how agents debate, critique, and iterate via a shared conversation thread — and experience both the strengths and costs of the conversational approach."
+/>
+
+## The mental model
+
+AutoGen's core idea: agents communicate through a shared conversation thread. Instead of explicit tool calls or graph edges, agents take turns speaking — and the `GroupChatManager` decides who speaks next. This maps naturally to workflows that benefit from iterative refinement: one agent writes, another critiques, the first revises.
+
+AG2 (AutoGen v0.4) introduced event-driven architecture and explicit graph workflows. This lab uses the GroupChat API (still the most widely used) and then shows the AG2 upgrade path.
+
+## Installation
+
+```bash
+pip install pyautogen
+# For use with Claude:
+pip install pyautogen[anthropic]
+```
+
+```python
+import os
+os.environ["ANTHROPIC_API_KEY"] = "your-key-here"
+
+config_list = [{
+    "model": "claude-opus-4-5",
+    "api_key": os.environ["ANTHROPIC_API_KEY"],
+    "api_type": "anthropic",
+}]
+
+llm_config = {"config_list": config_list, "timeout": 120}
+```
+
+## Step 1 — Define the agents
+
+```python
+import autogen
+
+orchestrator = autogen.AssistantAgent(
+    name="Orchestrator",
+    system_message="""You are the research orchestrator. Your role:
+
+1. DECOMPOSE: When given a research question, state the two sub-questions:
+   - Sub-question A (for CompressionSpecialist): compression angle
+   - Sub-question B (for InferenceSpecialist): inference angle
+   Address each specialist by name when delegating.
+
+2. COORDINATE: After both specialists have responded, say:
+   "Critic, please review the outputs from CompressionSpecialist and InferenceSpecialist."
+
+3. HANDLE VERDICT: If the critic says PASS, synthesise a final answer. 
+   If FAIL, address the specific specialist with feedback and ask them to revise.
+   Maximum 2 revision cycles.
+
+4. SYNTHESISE: When ready, produce:
+   FINAL_ANSWER:
+   [your synthesis here]
+   
+   This terminates the conversation.
+""",
+    llm_config=llm_config,
+    human_input_mode="NEVER",
+)
+
+compression_specialist = autogen.AssistantAgent(
+    name="CompressionSpecialist",
+    system_message="""You are a model compression research specialist.
+
+SCOPE: Only quantisation (int8, fp16, GPTQ, AWQ), pruning, knowledge distillation, 
+structured sparsity. Refuse any out-of-scope questions.
+
+When delegated a research question by Orchestrator:
+- Research your findings
+- Structure your response:
+  COMPRESSION FINDINGS:
+  - Finding 1 [Citation: Author (Year)]
+  - Finding 2 [Citation: Author (Year)]
+  KEY CLAIM: [single most important finding]
+
+If asked about inference, respond: "OUT_OF_SCOPE: This falls under inference optimisation. 
+Please direct this to InferenceSpecialist."
+""",
+    llm_config=llm_config,
+    human_input_mode="NEVER",
+)
+
+inference_specialist = autogen.AssistantAgent(
+    name="InferenceSpecialist",
+    system_message="""You are an LLM inference optimisation specialist.
+
+SCOPE: Only speculative decoding, KV cache management, continuous batching, 
+PagedAttention, hardware-aware serving. Refuse out-of-scope questions.
+
+When delegated a research question by Orchestrator:
+- Research your findings
+- Structure your response:
+  INFERENCE FINDINGS:
+  - Finding 1 [Citation: Author (Year)]
+  - Finding 2 [Citation: Author (Year)]
+  KEY CLAIM: [single most important finding]
+
+If asked about model compression, respond: "OUT_OF_SCOPE: This falls under compression. 
+Please direct this to CompressionSpecialist."
+""",
+    llm_config=llm_config,
+    human_input_mode="NEVER",
+)
+
+critic = autogen.AssistantAgent(
+    name="Critic",
+    system_message="""You are the research quality critic. You evaluate — you do not research.
+
+When asked to review specialist outputs:
+1. Check every factual claim has a citation
+2. Check each specialist stayed in scope
+3. Check for contradictions between the two outputs
+
+Respond with:
+VERDICT: PASS or FAIL
+SCORE: 0.0-1.0
+UNCITED_CLAIMS: [list any claims without citations]
+ISSUES: [list any problems]
+SUMMARY: [one sentence]
+
+PASS threshold: score >= 0.75 AND no uncited claims.
+""",
+    llm_config=llm_config,
+    human_input_mode="NEVER",
+)
+
+# UserProxy triggers the conversation and detects termination
+user_proxy = autogen.UserProxyAgent(
+    name="UserProxy",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=20,
+    is_termination_msg=lambda x: "FINAL_ANSWER:" in x.get("content", ""),
+    code_execution_config=False,
+)
+```
+
+## Step 2 — Configure the GroupChat
+
+```python
+groupchat = autogen.GroupChat(
+    agents=[user_proxy, orchestrator, compression_specialist, inference_specialist, critic],
+    messages=[],
+    max_round=25,
+    # "auto" lets the LLM decide who speaks next based on conversation context
+    speaker_selection_method="auto",
+    # Prevent the same agent from speaking twice in a row unnecessarily
+    allow_repeat_speaker=False,
+)
+
+manager = autogen.GroupChatManager(
+    groupchat=groupchat,
+    llm_config=llm_config,
+)
+```
+
+## Step 3 — Run the pipeline
+
+```python
+question = (
+    "What is the current state of LLM efficiency research — "
+    "specifically model compression and inference optimisation?"
+)
+
+chat_result = user_proxy.initiate_chat(
+    manager,
+    message=question,
+    silent=False,  # Set True to suppress verbose output
+)
+
+# Extract the final answer
+final_message = chat_result.chat_history[-1]["content"]
+print(final_message)
+```
+
+## Step 4 — Inspect the conversation history
+
+One of AutoGen's strengths is that the full conversation history is available for analysis.
+
+```python
+history = chat_result.chat_history
+
+# Count turns per agent
+from collections import Counter
+turn_counts = Counter(msg["name"] for msg in history if "name" in msg)
+print("Turns per agent:", dict(turn_counts))
+
+# Find all critic verdicts
+critic_turns = [msg for msg in history if msg.get("name") == "Critic"]
+for turn in critic_turns:
+    print("Critic verdict:", turn["content"][:200])
+
+# Total token cost estimate
+total_chars = sum(len(msg["content"]) for msg in history)
+print(f"Approx tokens: ~{total_chars // 4:,}")
+```
+
+<Callout type="warning">
+AutoGen's token cost compounds with conversation length. In a 4-agent, 20-round GroupChat, every agent call includes the full conversation history up to that point. A 10-round conversation where each round averages 500 tokens means round 10's context is ~5,000 tokens just from history — before any new content.
+</Callout>
+
+## Step 5 — The AG2 upgrade path
+
+AG2 (AutoGen v0.4) introduces explicit graph-based workflows that are more predictable than speaker selection via LLM. Here is the same pipeline restructured as an AG2 graph:
+
+```python
+# AG2 graph-based approach (requires autogen-agentchat >= 0.4)
+from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.teams import DiGraphGroupChat, DiGraphGroupChatManager
+from autogen_agentchat.conditions import TextMentionTermination
+
+# Define agents (same system prompts as above, different class)
+orchestrator_a2 = AssistantAgent("Orchestrator", system_message="...", model_client=...)
+compression_a2  = AssistantAgent("CompressionSpecialist", system_message="...", model_client=...)
+inference_a2    = AssistantAgent("InferenceSpecialist", system_message="...", model_client=...)
+critic_a2       = AssistantAgent("Critic", system_message="...", model_client=...)
+
+# Define the directed graph explicitly
+# Orchestrator → both specialists; specialists → critic; critic → orchestrator or END
+team = DiGraphGroupChat(
+    participants=[orchestrator_a2, compression_a2, inference_a2, critic_a2],
+    edges={
+        "Orchestrator":          ["CompressionSpecialist", "InferenceSpecialist"],
+        "CompressionSpecialist": ["Critic"],
+        "InferenceSpecialist":   ["Critic"],
+        "Critic":                ["Orchestrator"],  # orchestrator handles verdict
+    },
+    termination_condition=TextMentionTermination("FINAL_ANSWER:"),
+)
+
+# Run — execution follows the graph, not LLM speaker selection
+result = await team.run(task=question)
+```
+
+The AG2 graph approach trades the flexibility of LLM-selected speakers for the predictability of explicit edges — closer in spirit to LangGraph than to the original AutoGen GroupChat.
+
+## Comparing the two approaches
+
+| | GroupChat (AutoGen v0.2) | DiGraph (AG2 v0.4) |
+|---|---|---|
+| Speaker selection | LLM decides dynamically | Explicit graph edges |
+| Predictability | Low — can go off-script | High — path is defined |
+| Flexibility | High — handles unexpected task shapes | Medium — graph must cover all paths |
+| Token cost | High — full history every call | Lower — only relevant context |
+| Debugging | Hard — trace conversation log | Easier — edges define expected path |
+
+## Exercises
+
+**1. Count token cost vs LangGraph.** Run the same question in AutoGen and in your LangGraph implementation (from the previous lab). Compare total token usage. How much overhead does the full conversation history add?
+
+**2. Test speaker selection failure.** Change `speaker_selection_method="round_robin"`. Run the pipeline. What goes wrong? How does a rigid turn order break the flexible research workflow?
+
+**3. Add a human agent.** Replace `UserProxyAgent` with a version that has `human_input_mode="ALWAYS"`. Run the pipeline. The conversation will pause and ask you for input after each turn. Use this to redirect the Critic — tell it to be stricter or more lenient — and see how the pipeline adapts.
+
+**4. Implement the AG2 graph version.** Port your GroupChat implementation to `DiGraphGroupChat`. Add a conditional edge from `Critic` back to `CompressionSpecialist` or `InferenceSpecialist` based on which specialist had uncited claims. How do you handle conditional routing in AG2 vs `add_conditional_edges` in LangGraph?
+
+[Next framework lab: CrewAI →](/modules/module-06-multi-agent-systems/lesson-10-lab-crewai)

@@ -1,0 +1,268 @@
+---
+title: "Framework Lab: Claude Agent SDK"
+module: "module-06-multi-agent-systems"
+lesson: 8
+slug: "lesson-08-lab-claude-sdk"
+---
+
+# Framework Lab — Claude Agent SDK
+
+<LabBrief
+  title="Build the Research Pipeline with the Claude Agent SDK"
+  duration="~90 minutes"
+  objective="Implement the 4-agent research pipeline using the Claude Agent SDK's subagent model. The orchestrator spawns specialists as tool calls. You will see how context isolation, structured handoffs, and the Agent tool compose into a working multi-agent system."
+/>
+
+## The mental model
+
+In the Claude Agent SDK, the orchestrator does not call specialists directly — it uses them as tools. From the orchestrator's perspective, spawning a subagent is identical to calling `web_search` or `read_file`. The subagent runs in its own isolated context window, does its work, and returns a result. The orchestrator receives only the result — not the subagent's full working context.
+
+This is what makes the SDK's approach fundamentally different from LangGraph. There is no shared state schema — coordination happens through tool call inputs and outputs.
+
+## Installation
+
+```bash
+pip install anthropic
+# The Agent tool is built into Claude — no extra SDK package required
+# for the hosted Managed Agents version, use the claude-sdk package
+pip install claude-sdk  # for local/self-hosted use
+```
+
+## Step 1 — Define the specialist agents
+
+Each specialist is an `AgentDefinition`: a description (used when the orchestrator decides which agent to spawn), a system prompt, and a tool list.
+
+```python
+from claude_sdk import ClaudeAgent, AgentDefinition, ClaudeAgentOptions
+
+SPECIALISTS = {
+    "compression-specialist": AgentDefinition(
+        description=(
+            "Expert in model compression: quantisation, pruning, knowledge distillation, "
+            "and structured sparsity. Call this agent for research on making models smaller."
+        ),
+        prompt="""You are a model compression research specialist.
+        
+Your scope is strictly: quantisation (int8, fp16, GPTQ, AWQ), pruning (structured/unstructured),
+knowledge distillation, and structured sparsity techniques.
+
+When called with a research question:
+1. Research the question within your scope
+2. Return a structured JSON response:
+   {
+     "findings": ["finding 1", "finding 2", ...],
+     "key_benchmarks": {"technique": "metric"},
+     "citations": ["Author (Year) - Title"],
+     "key_claim": "single most important finding"
+   }
+   
+If asked about anything outside model compression, return:
+{"out_of_scope": true, "reason": "..."}
+""",
+        tools=["web_search"],
+    ),
+
+    "inference-specialist": AgentDefinition(
+        description=(
+            "Expert in LLM inference optimisation: speculative decoding, KV cache management, "
+            "continuous batching, PagedAttention, and hardware-aware serving."
+        ),
+        prompt="""You are an LLM inference optimisation specialist.
+
+Your scope is strictly: speculative decoding, KV cache management (PagedAttention, RadixAttention),
+continuous batching, hardware-aware serving (tensor parallelism, pipeline parallelism),
+and quantised inference runtimes (vLLM, TensorRT-LLM).
+
+When called with a research question:
+1. Research the question within your scope
+2. Return structured JSON:
+   {
+     "findings": ["finding 1", "finding 2", ...],
+     "key_benchmarks": {"technique": "metric"},
+     "citations": ["Author (Year) - Title"],
+     "key_claim": "single most important finding"
+   }
+
+If asked about anything outside inference optimisation, return:
+{"out_of_scope": true, "reason": "..."}
+""",
+        tools=["web_search"],
+    ),
+
+    "critic": AgentDefinition(
+        description=(
+            "Quality reviewer. Evaluates research outputs for citation coverage, "
+            "factual consistency, and scope adherence. Returns a structured verdict."
+        ),
+        prompt="""You are a research quality critic. You do not generate research — you evaluate it.
+
+When called with two specialist outputs (A and B), evaluate:
+1. Citation coverage: every factual claim must have a citation
+2. Scope adherence: each specialist stayed within their domain
+3. Internal consistency: no contradictions between A and B
+
+Return structured JSON:
+{
+  "pass": true/false,
+  "score": 0.0-1.0,
+  "uncited_claims": ["claim 1", ...],
+  "scope_violations": ["specialist A mentioned inference optimisation which is out of scope"],
+  "contradictions": ["A claims X but B implies not-X"],
+  "verdict_summary": "one sentence"
+}
+
+Pass threshold: score >= 0.75 AND uncited_claims is empty.
+""",
+        tools=[],  # critic is read-only: no tools, only evaluation
+    ),
+}
+```
+
+## Step 2 — Write the orchestrator system prompt
+
+The orchestrator coordinates the pipeline. Its system prompt defines the workflow — not code, but natural language instructions that the LLM follows.
+
+```python
+ORCHESTRATOR_PROMPT = """
+You are the lead orchestrator of a multi-agent research pipeline.
+
+## Your workflow
+
+When given a research question:
+
+**Phase 1 — Decompose**
+Break the question into two focused sub-questions:
+- Sub-question A: the model compression angle
+- Sub-question B: the inference optimisation angle
+
+**Phase 2 — Spawn specialists (in parallel)**
+Use the Agent tool to call compression-specialist with sub-question A.
+Use the Agent tool to call inference-specialist with sub-question B.
+Spawn both at the same time — do not wait for A before calling B.
+
+**Phase 3 — Critic review**
+Pass both specialists' outputs to the critic agent.
+If the critic returns pass=false AND score < 0.75:
+  - Identify which specialist had uncited claims (from uncited_claims)
+  - Re-spawn that specialist with feedback: "Your previous output had uncited claims: [list]. 
+    Please research again and ensure every claim has a citation."
+  - Re-run the critic on the corrected output
+  - Do this at most 2 times. If still failing after 2 attempts, return the best available
+    output with a note that it did not pass quality review.
+
+**Phase 4 — Synthesise**
+Write a final answer (under 500 words) that:
+1. Opens with the most important finding from each specialist
+2. Notes where the two specialists' findings reinforce each other
+3. Notes any divergences or tensions between their findings
+4. Flags any issues the critic identified that were not fully resolved
+5. Ends with a clear one-sentence conclusion
+
+## Output schema
+Return your final answer in this JSON:
+{
+  "question": "...",
+  "compression_key_claim": "...",
+  "inference_key_claim": "...",
+  "synthesis": "...",
+  "critic_score": 0.0,
+  "unresolved_issues": []
+}
+"""
+```
+
+## Step 3 — Build and run the agent
+
+```python
+agent = ClaudeAgent(
+    prompt=ORCHESTRATOR_PROMPT,
+    options=ClaudeAgentOptions(
+        model="claude-opus-4-5",
+        allowed_tools=["Agent", "web_search"],
+        agents=SPECIALISTS,
+        # Pre-approve agent spawning — no permission prompt per spawn
+        permission_mode="auto_approve_tools",
+    )
+)
+
+question = (
+    "What is the current state of LLM efficiency research — "
+    "specifically model compression and inference optimisation?"
+)
+
+result = agent.run(question)
+print(result.output)
+```
+
+## Step 4 — Inspect subagent message lineage
+
+Every message produced inside a subagent's context includes a `parent_tool_use_id` field that traces it back to the orchestrator's tool call that spawned it.
+
+```python
+# After the agent run completes, inspect the session
+for event in result.session.events:
+    if event.type == "tool_use" and event.tool_name == "Agent":
+        print(f"Spawned: {event.input['agent_name']}")
+        print(f"Tool use ID: {event.tool_use_id}")
+    if hasattr(event, "parent_tool_use_id") and event.parent_tool_use_id:
+        print(f"  ↳ Subagent message (parent: {event.parent_tool_use_id})")
+```
+
+This lineage tracking lets you reconstruct exactly which orchestrator call produced which subagent output — critical for debugging and auditing.
+
+## Step 5 — Using Managed Agents (hosted version)
+
+If you are using Anthropic's hosted Managed Agents (in public beta as of April 2026), the architecture is the same but the session and execution are managed by Anthropic's infrastructure:
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+# Create a managed session
+session = client.beta.managed_agents.sessions.create(
+    model="claude-opus-4-5",
+    system=ORCHESTRATOR_PROMPT,
+    tools=[
+        # Agents are registered as tools in Managed Agents
+        {
+            "type": "computer_use_20250124",  # example tool type
+            "name": "Agent",
+        }
+    ],
+    betas=["managed-agents-2026-04-01"],
+)
+
+# Run the session
+response = client.beta.managed_agents.sessions.run(
+    session_id=session.id,
+    input=question
+)
+print(response.output_text)
+```
+
+<Callout type="tip">
+Managed Agents sessions are stateful: the session persists across multiple calls. This means you can pause, inspect state, and resume without losing work — equivalent to LangGraph's checkpointing, but managed entirely by Anthropic's infrastructure.
+</Callout>
+
+## Key differences from LangGraph
+
+| | Claude Agent SDK | LangGraph |
+|---|---|---|
+| State | Implicit — inside the orchestrator's context window | Explicit — typed schema shared across all nodes |
+| Coordination | Orchestrator decides at runtime via tool calls | Graph edges defined at design time |
+| Checkpointing | Managed Agents: built-in; self-hosted: implement yourself | Built-in via `MemorySaver` or `PostgresSaver` |
+| Parallelism | Orchestrator spawns agents in the same tool call turn | Automatic fan-out via multiple edges from one node |
+| Observability | `parent_tool_use_id` lineage; session event log | LangSmith trace-level logging per node |
+
+## Exercises
+
+**1. Enforce structured handoffs.** The orchestrator currently passes specialist outputs as free-form context. Modify the specialist prompts to return strict Pydantic-validated JSON, and add a validation step in the orchestrator prompt: "Before passing to the critic, verify that both outputs match this schema: `{findings: list[str], citations: list[str], key_claim: str}`. If a specialist returns out_of_scope, re-spawn with a corrected sub-question."
+
+**2. Add session persistence.** Re-run the same session twice with `thread_id="research-001"`. The second run should resume from where the first left off (using the session's event history). Verify by checking that the second run does not re-run the orchestrator decompose step.
+
+**3. Test scope enforcement.** Modify the orchestrator prompt to ask the compression specialist about speculative decoding (inference scope). Verify that the specialist returns `out_of_scope: true` and the orchestrator re-routes the question to the inference specialist.
+
+**4. Compare token cost.** Run the same question on a single Claude call (no subagents) and on the multi-agent pipeline. Compare the total token count. Does the multi-agent system produce a meaningfully better answer? At what quality threshold does the extra cost become worthwhile?
+
+[Next framework lab: AutoGen / AG2 →](/modules/module-06-multi-agent-systems/lesson-09-lab-autogen)

@@ -1,0 +1,106 @@
+---
+title: "Agent Roles: Orchestrator, Subagent, Specialist, Critic"
+module: "module-06-multi-agent-systems"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 — Agent Roles: Orchestrator, Subagent, Specialist, Critic
+
+Every production multi-agent system organises around the same four functional roles, regardless of framework. The names vary — supervisor, worker, lead, reviewer — but the functions are consistent. Understanding these roles before writing any code prevents the most common design mistake: giving agents responsibilities that belong to a different role.
+
+## The four roles
+
+### Orchestrator
+
+The orchestrator plans the overall task, decomposes it into subtasks, delegates to subagents, tracks completion, and synthesises the results. It does not do ground-level work — its value is coordination, not execution.
+
+Anthropic's Research product is the canonical public example. The lead agent analyses the user's request, develops a strategic research approach, and spawns three to five specialised subagents with specific research mandates. After the subagents return, the orchestrator runs a dedicated citation-verification pass before synthesising the final answer. This deliberate separation of synthesis from verification is evidence of role discipline.
+
+The orchestrator holds the most critical context. If it fails, the entire pipeline stalls — it owns the synthesis state. Design it to be resilient: save research plans to external memory before context windows fill, and define explicit escalation paths for subagent failures.
+
+### Subagent
+
+A subagent receives a specific, bounded task from the orchestrator, executes it using tools, and returns a structured result. It operates with its own isolated context window, which is what enables genuine parallelism.
+
+The subagent's return contract matters as much as the task itself. It should return a summary relevant to the orchestrator's synthesis need, not its full context. The orchestrator's context window fills quickly if every subagent returns everything it processed.
+
+In the Claude Agent SDK, subagent outputs are tracked via a `parent_tool_use_id` field — each message from within a subagent's context can be traced back to the orchestrator call that spawned it.
+
+### Specialist
+
+A specialist is a subagent with intentional constraints. Where a general subagent does whatever the task requires, a specialist is designed to refuse work outside its domain.
+
+A software review pipeline might include an architecture specialist, an implementation specialist, a test-coverage specialist, and a security specialist. Each specialist's system prompt explicitly defines what it evaluates — and what it does not. The security specialist does not comment on architecture. The architecture specialist does not run test analysis.
+
+This constraint is a feature, not a limitation. Focused system prompts with narrow scope produce higher-quality outputs than general prompts that try to cover everything. A specialist failure affects only its domain — the architecture review continues even if the security scan fails.
+
+### Critic / Reviewer
+
+The critic receives another agent's output and evaluates it against defined criteria. It returns a structured verdict: pass or fail, with specific gaps and suggested corrections. It does not modify outputs — it evaluates them.
+
+The critic is the primary mechanism for inter-agent quality assurance. Anthropic's research on multi-agent systems found that including a dedicated reviewer "significantly reduces hallucinations and improves overall reliability" compared to systems where the generating agent also evaluates its own output.
+
+One important caveat: a critic that consistently passes bad output is worse than no critic at all — it creates false confidence. Test your critic against known-bad outputs before deploying.
+
+## Roles are functional, not structural
+
+The same LLM can play different roles in sequence. An agent that synthesises research (orchestrator role) might also verify citations (critic role) in the same pipeline. What matters is that each function has a clear definition of what it receives, what it produces, and what happens when it fails.
+
+A common mistake is assigning multiple conflicting roles to a single agent. An orchestrator that also tries to do specialist research loses focus on both. Keep roles separated — if an agent is trying to do two things, it is usually doing both worse than two dedicated agents would.
+
+## The performance data
+
+Anthropic's internal multi-agent research system — orchestrator plus three to five subagents plus citation verification — outperformed single-agent Claude Opus 4 by 90.2% on internal evaluations. The cost: approximately 15× the tokens of a normal chat interaction. Token usage alone explained 80% of the variance in research quality.
+
+This is the trade-off: multi-agent with well-defined roles produces significantly better output for complex tasks, at significantly higher cost. Role definition is what makes the cost worthwhile.
+
+<AgentRoleExplorer />
+
+<Callout type="warning">
+A critic that consistently passes bad output is more dangerous than no critic. It creates false confidence. Before relying on a critic agent in production, test it against outputs you know are wrong.
+</Callout>
+
+<Quiz
+  question="A critic agent evaluates a subagent's research output and returns: 'pass: false, reason: three claims lack citations.' What should the orchestrator do?"
+  options={[
+    {
+      label: "Discard the output and ask the user to retry.",
+      correct: false,
+      explanation: "Discarding is a last resort. The critic's structured verdict tells the orchestrator exactly what is wrong — it should use that feedback to fix the output, not throw it away."
+    },
+    {
+      label: "Pass the critic's feedback back to the subagent or a repair step, then re-evaluate.",
+      correct: true,
+      explanation: "Correct. The critic's structured verdict is an input to a repair loop. The orchestrator passes the specific feedback — 'three claims lack citations' — to the subagent or a dedicated repair step, which corrects those claims and sends the output back to the critic."
+    },
+    {
+      label: "Override the critic and accept the output anyway.",
+      correct: false,
+      explanation: "Overriding the critic defeats the purpose of having one. If the critic threshold is too strict, adjust the criteria — don't override individual verdicts."
+    }
+  ]}
+/>
+
+<Quiz
+  question="A pipeline has a single 'super agent' that classifies input, generates a response, verifies it, and synthesises a final answer. What is the main risk?"
+  options={[
+    {
+      label: "It uses too many tokens.",
+      correct: false,
+      explanation: "Token cost is a concern but not the main risk. A single super-agent that tries to handle everything has a more fundamental problem: conflicting roles degrade quality in each function."
+    },
+    {
+      label: "The agent cannot run in parallel.",
+      correct: false,
+      explanation: "Parallelism is a benefit of role separation, but not the core issue here. The core issue is that conflicting roles in a single agent degrade the quality of each function."
+    },
+    {
+      label: "Conflicting roles degrade output quality — a self-evaluating generator cannot objectively critique its own work.",
+      correct: true,
+      explanation: "Correct. Self-evaluation is one of the weakest verification strategies. An agent that generates output is motivated to pass it. Separating generation from evaluation — even with the same underlying model — significantly improves critique quality."
+    }
+  ]}
+/>
+
+[Lesson 3: Communication patterns →](/modules/module-06-multi-agent-systems/lesson-03)

@@ -1,0 +1,56 @@
+---
+title: "Multi-Agent Systems"
+module: "module-06-multi-agent-systems"
+part: 3
+slug: "module-06-multi-agent-systems"
+---
+
+# Module 06 - Multi-Agent Systems
+
+**Part 3 — Orchestration & Multi-Agent** - 5 lessons + lab - ~5.5 hours total
+
+<LearningObjectives>
+- Explain the architectural difference between a parallel workflow and a true multi-agent system
+- Identify the four agent roles — orchestrator, subagent, specialist, and critic — and describe what each one does
+- Choose the right communication pattern for a given coordination requirement
+- Apply zero-trust principles to inter-agent communication and explain why blind trust is dangerous
+- Recognise the three categories of multi-agent failure from the MAST taxonomy and design mitigations for each
+- Select between LangGraph, the Claude Agent SDK, AutoGen, and CrewAI based on your dominant constraint
+- Design a four-agent research pipeline with defined roles, communication pattern, and failure mitigations
+</LearningObjectives>
+
+## What you'll build
+
+You will design and implement a four-agent research pipeline in four different frameworks, then connect two independent multi-agent systems via a typed handoff schema. By the end you will have working code in LangGraph, the Claude Agent SDK, AutoGen, and CrewAI — and a cross-system pipeline showing agent-to-agent communication across a trust boundary.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [What makes a system multi-agent?](/modules/module-06-multi-agent-systems/lesson-01) | ~40 min |
+| 2 | [Agent roles: orchestrator, subagent, specialist, critic](/modules/module-06-multi-agent-systems/lesson-02) | ~45 min |
+| 3 | [Communication patterns and coordination](/modules/module-06-multi-agent-systems/lesson-03) | ~45 min |
+| 4 | [Trust, security, and failure modes](/modules/module-06-multi-agent-systems/lesson-04) | ~50 min |
+| 5 | [Frameworks in practice](/modules/module-06-multi-agent-systems/lesson-05) | ~45 min |
+| Lab | [Design lab: framework-agnostic pipeline design](/modules/module-06-multi-agent-systems/lesson-06-lab) | ~45 min |
+| Lab | [Framework lab: LangGraph](/modules/module-06-multi-agent-systems/lesson-07-lab-langgraph) | ~90 min |
+| Lab | [Framework lab: Claude Agent SDK](/modules/module-06-multi-agent-systems/lesson-08-lab-claude-sdk) | ~90 min |
+| Lab | [Framework lab: AutoGen / AG2](/modules/module-06-multi-agent-systems/lesson-09-lab-autogen) | ~90 min |
+| Lab | [Framework lab: CrewAI](/modules/module-06-multi-agent-systems/lesson-10-lab-crewai) | ~90 min |
+| Lab 2 | [Cross-system agent communication](/modules/module-06-multi-agent-systems/lesson-11-lab-2) | ~2 hrs |
+
+<Callout type="key">
+Multi-agent complexity is not free. Add it only when the task genuinely requires dynamic coordination — independent roles, parallel context windows, or mid-task replanning. For most tasks, a well-designed workflow is enough.
+</Callout>
+
+## Where this fits
+
+Module 05 taught you how to compose steps into controlled workflows. This module extends that into systems where independent agents coordinate dynamically. Module 07 will cover evaluation — including how evaluation changes when multiple agents interact.
+
+## Official docs
+
+- [Anthropic: Building effective agents](https://www.anthropic.com/research/building-effective-agents)
+- [Anthropic: Agent SDK — Subagents](https://docs.anthropic.com/en/docs/claude-code/sub-agents)
+- [Anthropic: Agent Teams](https://code.claude.com/docs/en/agent-teams)
+
+[**Start Lesson 1 ->**](/modules/module-06-multi-agent-systems/lesson-01)

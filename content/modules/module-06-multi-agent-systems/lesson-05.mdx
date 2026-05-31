@@ -1,0 +1,127 @@
+---
+title: "Frameworks in Practice"
+module: "module-06-multi-agent-systems"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 — Frameworks in Practice
+
+By 2026, every major AI lab ships a multi-agent framework. The question is not which framework is "best" — it is which mental model matches your dominant constraint. Pick the wrong framework for your constraint and you will spend most of your time fighting it.
+
+## LangGraph
+
+**Mental model:** Directed graph. Agents are nodes. Transitions between agents are edges. All agents share a typed state schema that they read from and write to.
+
+LangGraph requires you to define the graph structure explicitly — where the edges go, what conditions determine which edge is taken. This is more work upfront and produces significantly better outcomes in production. You always know the possible paths through your system before it runs.
+
+Built-in checkpointing is LangGraph's production differentiator. At any edge, the graph state can be saved to persistent storage. This enables pause-and-resume for long-running workflows, human-in-the-loop interventions at defined points, and recovery from infrastructure failures without starting over. LangSmith — LangGraph's observability platform — provides trace-level logging for every node execution and edge transition.
+
+In an independent 2026 benchmark across 2,000 task instances, LangGraph recorded the fastest latency of the four major frameworks.
+
+**Best for:** Production deployments, systems that require auditability, workflows needing human-in-the-loop interventions, and any use case where you need to trace exactly what happened and why.
+
+**Trade-off:** More explicit graph definition means more upfront design. LangGraph is not the right choice for rapid prototyping when you do not yet know the shape of your workflow.
+
+## Claude Agent SDK / Managed Agents
+
+**Mental model:** Tool-use chain. The orchestrating LLM treats "spawn subagent" as a tool call. Subagents run in isolated context windows and return results to the orchestrator. Managed Agents extends this with Anthropic-hosted infrastructure — they run the agent containers, manage session state, and handle scaling.
+
+The Managed Agents architecture separates three components:
+- **Session:** An append-only log of all agent activity — persists across calls
+- **Harness:** The loop that calls Claude and routes tool calls — stateless, runs independently
+- **Sandbox:** Execution environment for code and file operations — generic tool interface
+
+This separation enables "multiple brains, multiple hands" scaling: multiple stateless harnesses can run independently against the same session, and agents can reason about multiple sandboxes simultaneously.
+
+The Claude Agent SDK also includes Agent Teams — an experimental feature where multiple Claude Code instances collaborate via a shared task list and mailbox for direct inter-agent messaging. Teams are disabled by default; enable with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
+
+**Best for:** Safety-critical applications (healthcare, finance, legal), deep integration with Anthropic's model family, use cases requiring computer interaction (browser, desktop), teams who want Anthropic to handle infrastructure.
+
+**Trade-off:** Locked to Claude models. Lighter on explicit orchestration primitives than LangGraph.
+
+## AutoGen / AG2
+
+**Mental model:** Conversational GroupChat. Multiple agents share a single conversation thread. A `GroupChatManager` — or in AG2, an explicit graph — determines who speaks next.
+
+AG2 is the v0.4 rewrite of the original AutoGen — async-first, event-driven, moving from implicit GroupChat management toward explicit graph-based workflows. The original GroupChat pattern is still widely cited in tutorials but is being superseded by the graph approach.
+
+AutoGen's conversational structure is natural for iterative refinement: one agent writes code, another reviews it, another tests it, the original revises based on test failures. The conversation thread captures the entire reasoning history.
+
+Human-in-the-loop is native — a human can be added to the GroupChat as a participant, receiving messages and responding like any other agent.
+
+**Trade-off:** Every agent turn involves a full LLM call with the accumulated conversation history. A four-agent debate with five rounds is twenty LLM calls minimum, with the conversation growing longer each round. This makes AutoGen expensive for high-volume, real-time use cases.
+
+**Best for:** Research prototyping, code generation workflows where agents iterate and critique, tasks needing conversational debate, teams coming from an academic background where AutoGen is the standard baseline.
+
+## CrewAI
+
+**Mental model:** Role-playing crew. Define agents with `role`, `goal`, and `backstory`. Assemble them into a `Crew` with `Tasks`. Choose a process type to determine how the crew works.
+
+Three process types:
+- **Sequential:** Tasks run in order, each output feeding the next
+- **Hierarchical:** CrewAI automatically creates a manager agent that delegates tasks, validates outputs, and reassigns if unsatisfactory
+- **Consensual:** Agents contribute perspectives; the output reflects the merged viewpoints
+
+CrewAI has the shallowest learning curve of the four frameworks. The role/crew/task abstraction maps directly to how most teams think about dividing work — you describe who does what in plain English, and CrewAI structures the execution.
+
+**Trade-off:** In a 2026 independent benchmark, CrewAI carried roughly 3× the token footprint of the other three frameworks on simple tasks. The abstraction adds overhead.
+
+**Best for:** Rapid prototyping, business-oriented pipelines, teams without deep AI engineering background, use cases that map naturally to human team structures (content pipeline, market research, customer service).
+
+## How evaluation changes with multiple agents
+
+Single-agent evaluation: given input X, does the agent produce acceptable output Y? Multi-agent evaluation cannot be reduced to this, because:
+
+- Agent behaviour depends on the sequence and content of other agents' outputs
+- Emergent failures arise from interactions that don't appear in any single agent's unit test
+- The system can reach incorrect final outputs via paths where every individual agent step was locally correct
+
+The minimum evaluation stack for a multi-agent system:
+
+| Layer | What it tests |
+|---|---|
+| Unit | Each agent in isolation with fixed input fixtures |
+| Integration | Agent pairs with recorded message fixtures |
+| System | End-to-end scenarios — happy path and known MAST failure modes |
+| Adversarial | Prompt injection propagation across agent boundaries |
+| Production | Time-to-first-output anomalies (deadlock signal), format failures (coordination failure signal) |
+
+Multi-turn evaluation — assessing complete agent conversations rather than individual interactions — is now the minimum bar. Coordination deadlocks produce no error signal, so production monitoring must watch agent activity patterns and time-to-output, not just output quality.
+
+## Framework selection
+
+```
+Dominant constraint?
+├── Control + observability + production  → LangGraph
+├── Safety-critical + Anthropic models    → Claude Agent SDK
+├── Research + conversational iteration   → AutoGen / AG2
+└── Speed of development + business logic → CrewAI
+```
+
+<Callout type="key">
+The framework you choose is not the most important decision. Role definition, communication pattern, and failure handling matter more than which library you use. A well-designed system on any framework outperforms a poorly designed system on the "best" framework.
+</Callout>
+
+<Quiz
+  question="Your team is building a compliance monitoring system for a bank. It must be fully auditable, pause for human review before high-risk decisions, and run in production at scale. Which framework fits best?"
+  options={[
+    {
+      label: "CrewAI — low learning curve means faster deployment.",
+      correct: false,
+      explanation: "Speed of development is not the dominant constraint here. Auditability, human-in-the-loop, and production scale are — and CrewAI's abstraction layer makes it harder to satisfy strict auditability requirements."
+    },
+    {
+      label: "LangGraph — explicit graph structure, built-in checkpointing, and LangSmith observability directly address the auditability and human-in-the-loop requirements.",
+      correct: true,
+      explanation: "Correct. LangGraph's explicit graph definition satisfies auditability (every path is defined before runtime), checkpointing satisfies pause-for-review (state is saved at any edge), and LangSmith satisfies production observability."
+    },
+    {
+      label: "AutoGen — conversational structure makes it easy to add a human participant.",
+      correct: false,
+      explanation: "AutoGen's human-in-the-loop support is its strength, but its conversational overhead and lack of explicit graph structure make it a poor fit for strict production auditability at scale."
+    }
+  ]}
+/>
+
+[Lab: Design a multi-agent research team →](/modules/module-06-multi-agent-systems/lesson-06-lab)

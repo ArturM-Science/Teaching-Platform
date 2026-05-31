@@ -1,0 +1,189 @@
+---
+title: "Lab: Design a Multi-Agent Research Team"
+module: "module-06-multi-agent-systems"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab — Design a Multi-Agent Research Team
+
+<LabBrief
+  title="Design a Multi-Agent Research Team"
+  duration="~45 minutes"
+  objective="Design a four-agent pipeline that answers a complex research question. You will write system prompts for each agent, choose and justify a communication pattern, identify failure modes, and write the orchestrator's synthesis prompt."
+/>
+
+## The scenario
+
+Your team is building an AI research assistant. A user submits the question:
+
+> "What is the current state of large language model efficiency research — specifically model compression and inference optimisation — and how do the leading approaches compare?"
+
+This question is too broad for a single agent to answer well. It requires gathering information from multiple sub-domains, comparing findings across sources, and producing a coherent synthesis. Your job is to design the multi-agent pipeline that handles it.
+
+## The target architecture
+
+Your pipeline has four agents:
+
+```
+User question
+      ↓
+[Orchestrator]
+      ↓ decomposes into 2 sub-questions
+      ↓
+[Specialist A]          [Specialist B]
+Model compression       Inference optimisation
+      ↓                       ↓
+      ↓ ← outputs fed back →  ↓
+[Critic / Reviewer]
+Reviews combined output
+      ↓
+[Orchestrator]
+Final synthesis
+      ↓
+Answer to user
+```
+
+## Task 1 — Write system prompts for each agent
+
+Write a system prompt (4–8 sentences) for each of the four agents. Each system prompt must specify:
+
+1. The agent's role and what it does
+2. What input it receives and in what format
+3. What output it must produce and in what format
+4. What it explicitly does NOT do (scope boundary)
+
+**Orchestrator system prompt:**
+
+```
+You are the orchestrator of a multi-agent research pipeline...
+[Write your prompt here]
+```
+
+**Specialist A (model compression) system prompt:**
+
+```
+You are a specialist researcher focused exclusively on model compression techniques...
+[Write your prompt here]
+```
+
+**Specialist B (inference optimisation) system prompt:**
+
+```
+You are a specialist researcher focused exclusively on inference optimisation...
+[Write your prompt here]
+```
+
+**Critic / Reviewer system prompt:**
+
+```
+You are a critic agent. You do not generate research — you evaluate it...
+[Write your prompt here]
+```
+
+<Callout type="tip">
+Good system prompts for specialists include an explicit refusal: "If asked about topics outside model compression, return: out_of_scope: true." Scope boundaries prevent specialists from drifting into each other's domains.
+</Callout>
+
+## Task 2 — Choose and justify a communication pattern
+
+From the three patterns covered in Lesson 3, choose one (or a justified hybrid) for your pipeline.
+
+Answer these questions:
+
+1. Which pattern did you choose?
+2. Why does it fit this pipeline better than the alternatives?
+3. What is the main failure risk of your chosen pattern in this specific pipeline, and how would you mitigate it?
+
+Consider: does this pipeline benefit from parallel execution (Specialist A and B running simultaneously)? Does it require strict auditability? Do agents need to build incrementally on each other's partial results?
+
+## Task 3 — Identify two failure modes and add mitigations
+
+From the MAST taxonomy, identify two failure modes your pipeline is vulnerable to. For each:
+
+1. Name the failure mode (e.g., "memory poisoning", "coordination deadlock", "format mismatch")
+2. Describe specifically how it could occur in your pipeline
+3. Describe the mitigation you would add
+
+**Example format:**
+
+| Failure mode | How it occurs in this pipeline | Mitigation |
+|---|---|---|
+| Memory poisoning | Specialist A hallucinates a compression ratio and... | Structured output schema with `source_url` field required... |
+| Format mismatch | Specialist B returns markdown; Critic expects JSON... | Output contract defined in system prompt: all agents return... |
+
+## Task 4 — Write the orchestrator's synthesis prompt
+
+Write the prompt the orchestrator uses to synthesise the two specialists' outputs into a final answer. The synthesis prompt should:
+
+1. Accept two structured inputs (Specialist A output, Specialist B output) and the Critic's verdict
+2. Instruct the orchestrator to note where the two specialists agree and where they diverge
+3. Require the orchestrator to flag any claims the Critic marked as unverified
+4. Produce a final answer in a defined format (you choose the format)
+
+```
+[Synthesis prompt]
+You have received research from two specialists and a quality verdict from the Critic.
+Specialist A output: {specialist_a_output}
+Specialist B output: {specialist_b_output}
+Critic verdict: {critic_verdict}
+
+Your task:
+[Write your synthesis instructions here]
+```
+
+## Submission checklist
+
+<Checkpoint
+  moduleSlug="module-06-multi-agent-systems"
+  items={[
+    "I wrote system prompts for all four agents, each with explicit scope boundaries",
+    "Each system prompt defines the expected input format and output format",
+    "I chose a communication pattern and justified it against at least one alternative",
+    "I identified two specific failure modes and added concrete mitigations",
+    "My orchestrator synthesis prompt handles both specialist outputs and the critic's verdict",
+    "My synthesis prompt instructs the orchestrator to surface agreements and divergences"
+  ]}
+  next="/modules/module-06-multi-agent-systems"
+/>
+
+<Rubric
+  criteria={[
+    {
+      name: "System prompt quality",
+      levels: [
+        { score: 4, description: "All four system prompts include explicit role, input/output format, and scope boundaries. Specialist prompts include explicit refusals." },
+        { score: 3, description: "System prompts define role and scope clearly but lack explicit output format specification for one or more agents." },
+        { score: 2, description: "System prompts define the general role but are missing scope boundaries or format specifications." },
+        { score: 1, description: "System prompts are vague or missing key elements — agents would not know what to produce or refuse." }
+      ]
+    },
+    {
+      name: "Communication pattern justification",
+      levels: [
+        { score: 4, description: "Pattern choice is justified against the alternatives with reference to the specific requirements of this pipeline (parallelism, auditability, incremental build)." },
+        { score: 3, description: "Pattern choice is stated and one reason given, but alternatives are not considered." },
+        { score: 2, description: "Pattern is named but justification is generic rather than specific to this pipeline." },
+        { score: 1, description: "No pattern selected or no justification provided." }
+      ]
+    },
+    {
+      name: "Failure mode analysis",
+      levels: [
+        { score: 4, description: "Two specific failure modes identified with a concrete description of how each occurs in this pipeline and a specific mitigation (not a generic one)." },
+        { score: 3, description: "Two failure modes identified and mitigations provided, but either the failure description or the mitigation is generic rather than pipeline-specific." },
+        { score: 2, description: "One failure mode identified with a mitigation, or two identified without mitigations." },
+        { score: 1, description: "No failure modes identified or mitigations are not actionable." }
+      ]
+    },
+    {
+      name: "Synthesis prompt",
+      levels: [
+        { score: 4, description: "Synthesis prompt accepts all three inputs, instructs the orchestrator to surface agreements and divergences, flags unverified claims, and produces a defined output format." },
+        { score: 3, description: "Synthesis prompt accepts both specialist outputs and the critic verdict but does not explicitly handle unverified claims or divergences." },
+        { score: 2, description: "Synthesis prompt exists but ignores the critic's verdict or produces unstructured output." },
+        { score: 1, description: "No synthesis prompt or it does not distinguish between the three inputs." }
+      ]
+    }
+  ]}
+/>
