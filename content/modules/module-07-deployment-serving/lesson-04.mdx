@@ -1,0 +1,143 @@
+---
+title: "Scaling & Reliability Under Load"
+module: "module-07-deployment-serving"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Scaling & Reliability Under Load
+
+A stateless agent service can run in many copies — but copies alone don't make it reliable. Under load, the failures move *upstream*: the model API rate-limits you, slow runs pile up, the network drops a call. This lesson covers the four things that keep an agent service standing when real traffic arrives: respecting upstream limits, controlling concurrency, timing out, and retrying correctly.
+
+## The bottleneck is upstream, not your server
+
+A traditional web service scales by adding replicas: more copies, more throughput. An agent service hits a wall the web service doesn't — **the model API has its own rate limit**, shared across all your replicas. Adding a tenth replica doesn't buy you capacity if the model API caps you at, say, 50 requests per minute total.
+
+```
+  10 replicas  ──┐
+                 ├──▶  Model API  (rate limit: 50 req/min — for ALL replicas combined)
+  each sending ──┘
+```
+
+So scaling an agent is two problems, not one: scale *your* service for connection handling, but treat the model API quota as a fixed budget you must spend carefully. The practical consequences:
+
+- **Track the limit as a global budget**, not per-replica. Ten replicas each assuming "I can do 50/min" will collectively send 500/min and get throttled.
+- **Expect `429 Too Many Requests`** and handle it as a normal event, not a crash (see retries below).
+- **Batch or queue** when demand exceeds the budget, rather than firing everything and failing most of it. This is one more reason the async pattern from Lesson 2 exists.
+
+## Concurrency and backpressure
+
+Each agent run can hold a connection open for many seconds while it waits on the model. If 1,000 requests arrive and each takes 20 seconds, you cannot run all 1,000 at once — you'll exhaust memory, connections, and your model quota simultaneously. You need a **concurrency limit** and **backpressure**: a cap on in-flight work, and a clear response when that cap is reached.
+
+```python
+import asyncio
+from fastapi import HTTPException
+
+# cap concurrent agent runs — tune to memory and model quota
+AGENT_SEMAPHORE = asyncio.Semaphore(20)
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    if AGENT_SEMAPHORE.locked():
+        # already at capacity — shed load instead of queueing forever
+        raise HTTPException(status_code=503, detail="At capacity, retry shortly")
+    async with AGENT_SEMAPHORE:
+        return await run_agent_async(req.message, req.history, api_key)
+```
+
+Backpressure means saying "no, not now" *cleanly* — a fast `503` the client can retry — instead of accepting work you can't do and falling over. A service that sheds load gracefully under a spike recovers; one that accepts everything crashes and drops *all* of it, including the requests it could have served.
+
+<Callout type="key">
+Capacity is finite in three places at once: your memory, your connection pool, and the model's rate limit. A concurrency cap plus a fast `503` (backpressure) protects all three. Counterintuitively, refusing some requests is how you successfully serve the rest — accepting everything during a spike is how you serve nothing.
+</Callout>
+
+<Quiz
+  question="During a traffic spike, 1,000 requests arrive at your agent service in a few seconds. Each run takes ~20 seconds. What's the most reliable behaviour?"
+  options={[
+    {
+      label: "Accept all 1,000 and run them concurrently — more parallelism is faster",
+      correct: false,
+      explanation: "Running 1,000 × 20s runs at once exhausts memory, connections, and your model rate limit simultaneously. The service crashes and drops all 1,000, including ones it could have handled."
+    },
+    {
+      label: "Cap concurrency (e.g. 20 in-flight) and return a fast 503 to the overflow so clients can retry",
+      correct: true,
+      explanation: "Backpressure protects finite capacity. Serving 20 at a time reliably and shedding the rest with a retryable 503 means the service stays up and works through the spike, instead of collapsing under it."
+    },
+    {
+      label: "Accept all 1,000 but with no timeout, so none are dropped",
+      correct: false,
+      explanation: "Removing timeouts makes it worse: runs pile up unbounded, memory grows, and slow or hung calls are never reclaimed. Unbounded acceptance is exactly what causes the crash."
+    }
+  ]}
+/>
+
+## Timeouts: never wait forever
+
+Every call that crosses the network needs a deadline. A model API call that hangs will, without a timeout, hold a worker and a slot in your concurrency cap *forever* — and a handful of hung calls can lock up the whole service.
+
+```python
+client = anthropic.Anthropic(timeout=30.0)   # fail the call after 30s, don't hang
+
+# and an overall budget for the whole agent run, not just one model call
+async def run_agent_async(message, history, api_key):
+    try:
+        return await asyncio.wait_for(_agent_loop(message, history), timeout=120.0)
+    except asyncio.TimeoutError:
+        return {"error": "Agent exceeded its time budget", "partial": None}
+```
+
+Set timeouts at two levels: per model call (one slow call shouldn't hang) and per agent run (a loop that won't terminate shouldn't run forever — the same `max_iterations` instinct from Module 2, now with a wall-clock budget too).
+
+## Retries — with backoff and jitter
+
+Transient failures are normal at scale: a `429`, a `503` from the model, a dropped connection. The right response to a *transient* failure is to retry — but naively retrying immediately makes things worse, because every client retries at the same instant and you create a stampede. Retry with **exponential backoff and jitter**.
+
+```python
+import random, time
+
+def call_with_retry(fn, max_attempts=4):
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except (RateLimitError, APIConnectionError) as e:
+            if attempt == max_attempts - 1:
+                raise
+            # exponential backoff: 1s, 2s, 4s ... plus jitter to de-sync clients
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            time.sleep(delay)
+```
+
+Two rules that matter as much as the code:
+
+- **Only retry transient errors.** Retrying a `400 Bad Request` or a content-policy refusal just wastes quota — the input is wrong and will fail every time. Retry `429` and `5xx`; surface `4xx` (except 429) immediately.
+- **Jitter is not optional.** Without the random component, every client that failed at the same second retries at the same second, and the stampede repeats. Jitter spreads them out.
+
+<Callout type="warning">
+Retries multiply load. Four attempts per request means a struggling model API can receive up to 4× the traffic at the worst possible moment. Cap attempts, use backoff so retries thin out over time, and never retry non-transient errors. Retries are a safety valve, not a default for every failure.
+</Callout>
+
+<Quiz
+  question="Your agent gets a 429 (rate limited) from the model API under load. Which retry strategy is correct?"
+  options={[
+    {
+      label: "Retry immediately, as many times as needed, until it succeeds",
+      correct: false,
+      explanation: "Immediate unbounded retries create a stampede — every throttled client hammers the API at once, deepening the overload. And unbounded attempts can multiply load without limit."
+    },
+    {
+      label: "Retry a capped number of times with exponential backoff plus jitter",
+      correct: true,
+      explanation: "Backoff (1s, 2s, 4s…) thins retries over time, jitter de-synchronizes clients so they don't all retry on the same tick, and a cap prevents endless multiplication of load. This is the standard, safe pattern."
+    },
+    {
+      label: "Treat the 429 as fatal and return an error to the user immediately",
+      correct: false,
+      explanation: "A 429 is transient by definition — waiting briefly usually succeeds. Failing immediately turns a recoverable blip into a user-visible error. Retry it (with backoff); reserve immediate failure for non-transient 4xx errors."
+    }
+  ]}
+/>
+
+You can now keep the service up under load. The last piece is shipping it — packaging, configuring, and rolling out new versions without downtime. That's Lesson 5.
+
+[← Lesson 3](/modules/module-07-deployment-serving/lesson-03) · [Lesson 5: Packaging, config & rollout →](/modules/module-07-deployment-serving/lesson-05)

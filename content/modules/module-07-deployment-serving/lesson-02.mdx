@@ -1,0 +1,124 @@
+---
+title: "Serving Patterns: Sync, Streaming, and Async"
+module: "module-07-deployment-serving"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Serving Patterns: Sync, Streaming, and Async
+
+An agent can take 200 milliseconds or two minutes to answer, and the right way to serve it depends entirely on which. This lesson covers the three serving patterns — synchronous, streaming, and async/queue — and how to pick one from the task's latency profile. Get this wrong and you'll either freeze the user's browser or build a queue you didn't need.
+
+## Synchronous: one request, one response, wait for it
+
+The simplest pattern: the client sends a request and blocks until the full answer comes back. This is what you built in Lesson 1.
+
+```python
+@app.post("/chat")
+def chat(req: ChatRequest):
+    answer, history = run_agent(req.message, req.history, api_key)
+    return {"answer": answer, "history": history}   # client waits for the whole thing
+```
+
+Synchronous serving is correct when the agent finishes fast — roughly under 10 seconds — and the caller can wait. It's the easiest to build, test, and reason about. Its weakness is the wait: if the agent makes five tool calls and takes 40 seconds, the user stares at a spinner with no sign of progress, and any proxy or load balancer with a 30-second timeout will sever the connection first.
+
+## Streaming: send the answer as it's generated
+
+Agents *feel* slow because the full answer arrives at once after a long pause. Streaming fixes the feel without making the agent faster: send tokens as the model produces them. The standard transport is **Server-Sent Events (SSE)** — a long-lived HTTP response that emits chunks.
+
+```python
+from fastapi.responses import StreamingResponse
+
+@app.post("/chat/stream")
+def chat_stream(req: ChatRequest):
+    def event_stream():
+        for chunk in run_agent_streaming(req.message, req.history, api_key):
+            # each yield is flushed to the client immediately
+            yield f"data: {chunk}\n\n"
+        yield "data: [DONE]\n\n"
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+```
+
+Streaming keeps the connection productive: the user sees words appear within a second, the connection stays active so timeouts don't fire, and they can read while the agent is still working. The cost is complexity — partial output means partial errors. If the agent fails on tool call three, you've already sent two paragraphs. You need a way to signal an error *mid-stream* (a dedicated event type), because you can't just return HTTP 500 after streaming a `200 OK`.
+
+<Callout type="key">
+Streaming changes the latency the user *perceives*, not the latency the agent *has*. The agent still takes 40 seconds — but time-to-first-token drops to ~1 second, which is what makes the difference between "broken" and "thinking." Reach for streaming whenever the agent produces visible text and the run is longer than a couple of seconds.
+</Callout>
+
+<Quiz
+  question="Your agent streams its answer over SSE. On the third tool call it hits an unrecoverable error — but you've already streamed two paragraphs to the client. How do you report the failure?"
+  options={[
+    {
+      label: "Return HTTP 500 so the client knows it failed",
+      correct: false,
+      explanation: "You can't. The HTTP status (200) was sent the moment streaming began. Headers are already on the wire — you cannot change the status code mid-stream."
+    },
+    {
+      label: "Emit a distinct error event in the stream (e.g. `event: error`) and close the connection",
+      correct: true,
+      explanation: "Once streaming starts the status is fixed at 200, so errors must travel as in-band events. Define an error event type the client watches for, alongside your data and [DONE] events."
+    },
+    {
+      label: "Silently stop sending data and let the client time out",
+      correct: false,
+      explanation: "A silent stop is indistinguishable from a slow agent or a network blip. The client can't tell success-in-progress from failure. Always send an explicit terminal event."
+    }
+  ]}
+/>
+
+## Async / queue: accept now, answer later
+
+Some agent runs are genuinely long — minutes of multi-step research, a batch over 500 documents, a workflow that calls other agents. Holding an HTTP connection open for that is fragile: a dropped connection loses the whole run, and a deploy that restarts the worker kills it. The fix is to **decouple accepting the work from doing it**.
+
+```python
+# 1. Accept the job, return immediately with an id
+@app.post("/jobs")
+def create_job(req: ChatRequest):
+    job_id = enqueue(run_agent, req.message, req.history)   # push to a queue
+    return {"job_id": job_id, "status": "queued"}           # responds in milliseconds
+
+# 2. A separate worker process pulls from the queue and runs the agent
+#    (it writes the result to a store keyed by job_id)
+
+# 3. Client polls — or is notified by webhook — for the result
+@app.get("/jobs/{job_id}")
+def get_job(job_id: str):
+    return load_result(job_id)   # {"status": "running" | "done", "answer": ...}
+```
+
+Now the request that accepts work returns in milliseconds, the actual agent run happens in a worker you can scale, restart, and retry independently, and a deploy no longer kills in-flight work — the job sits safely in the queue. The cost is real infrastructure: a queue, a worker pool, a result store, and a client that polls or listens for a webhook instead of just awaiting a response.
+
+## Choosing a pattern
+
+| Pattern | Use when | Cost |
+|---|---|---|
+| **Synchronous** | Agent finishes in under ~10s; caller can block | None — simplest possible |
+| **Streaming (SSE)** | Agent produces visible text; run is a few seconds to a minute | Mid-stream error handling; connection stays open |
+| **Async / queue** | Run is minutes long, or batched, or must survive deploys | Queue + workers + result store + polling/webhooks |
+
+The patterns also **compose**: a chat UI often streams short answers *and* hands long jobs to a queue, then streams the result when it's ready. Start with the simplest pattern the latency profile allows; add the others only when a real run forces you to.
+
+<Quiz
+  question="An agent summarizes a 500-page document set. A run takes 4–6 minutes. Which serving pattern fits best?"
+  options={[
+    {
+      label: "Synchronous — return the summary in the response",
+      correct: false,
+      explanation: "A 4–6 minute synchronous request will be cut off by load-balancer and proxy timeouts (often 30–60s), and any dropped connection loses the entire run."
+    },
+    {
+      label: "Streaming — keep the connection open and stream the summary",
+      correct: false,
+      explanation: "Streaming helps perceived latency, but holding one connection open for 6 minutes is still fragile: a deploy or network blip kills the whole run with no recovery. There's also little to stream until the end."
+    },
+    {
+      label: "Async/queue — accept the job, run it in a worker, deliver the result via polling or webhook",
+      correct: true,
+      explanation: "Multi-minute, batch-style work should be decoupled from the request. The job survives connection drops and deploys, and the worker pool can be scaled and retried independently."
+    }
+  ]}
+/>
+
+All three patterns share one assumption from Lesson 1: the server holds no state between calls. That assumption is what makes scaling possible — and it's the subject of Lesson 3.
+
+[← Lesson 1](/modules/module-07-deployment-serving/lesson-01) · [Lesson 3: State & session management →](/modules/module-07-deployment-serving/lesson-03)

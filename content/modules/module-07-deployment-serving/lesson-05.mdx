@@ -1,0 +1,152 @@
+---
+title: "Packaging, Config & Rollout"
+module: "module-07-deployment-serving"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · Packaging, Config & Rollout
+
+The agent works, stays stateless, and survives load. The last gap is getting it onto a server — reliably, repeatably, and without taking the service down each time you ship. This lesson covers packaging the agent as a container, configuring it without baking secrets in, proving it's healthy, shutting it down cleanly, and rolling out new versions safely.
+
+## Package once, run anywhere: the container
+
+"It works on my machine" fails because your machine has a specific Python version, installed packages, and environment that the server doesn't. A **container** bundles all of it — code, dependencies, runtime — into one image that runs identically on your laptop, in CI, and in production.
+
+```dockerfile
+# Dockerfile — one artifact that runs the same everywhere
+FROM python:3.12-slim
+
+# install deps first so this layer caches when only code changes
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# run as a non-root user — never run a public service as root
+RUN useradd --create-home appuser
+USER appuser
+
+COPY . .
+
+# config comes from the environment at runtime, NOT baked into the image
+ENV PORT=8080
+EXPOSE 8080
+CMD ["uvicorn", "service:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+Three details that separate a real image from a toy one: dependencies are installed in their own layer so rebuilds are fast, the service runs as a **non-root** user so a compromise is contained, and **no secrets or config are copied into the image** — the image is the same in every environment; only the environment differs.
+
+<Callout type="warning">
+Never `COPY` a `.env` file or hardcode an API key into the image. The image is a build artifact that gets pushed to registries, cached in layers, and shared — a baked-in secret leaks to everyone who can pull it, and it can't be rotated without a rebuild. Secrets enter at *runtime*, through the environment.
+</Callout>
+
+## Configuration: 12-factor, from the environment
+
+The same image must run as your dev service, your staging service, and production — differing only in configuration. The rule (from the "12-factor app" guidelines) is: **config lives in the environment, code reads it at startup.**
+
+```python
+# config.py — read everything from the environment, fail fast if a required value is missing
+import os
+
+class Config:
+    ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]   # required — crash at boot if absent
+    MODEL = os.environ.get("MODEL", "claude-opus-4-8")     # versioned, overridable per env
+    MODEL_TIMEOUT = float(os.environ.get("MODEL_TIMEOUT", "30"))
+    MAX_CONCURRENCY = int(os.environ.get("MAX_CONCURRENCY", "20"))
+
+config = Config()
+```
+
+Two things to notice. Required secrets use `os.environ[...]` so a misconfigured deploy **fails loudly at boot** rather than 404-ing in production an hour later. And the **model name is config, not a constant** — promoting a new model or rolling one back becomes an environment change, not a code change and redeploy. The same logic applies to prompt versions: treat the active prompt/model pair as configuration you can change and, critically, roll back.
+
+<Quiz
+  question="Why read the model name from an environment variable instead of hardcoding it as a string constant in the agent?"
+  options={[
+    {
+      label: "Hardcoding a string is a syntax error in Python",
+      correct: false,
+      explanation: "It's valid Python. The reason is operational, not syntactic — hardcoding couples a model change to a code change and redeploy."
+    },
+    {
+      label: "So you can promote, A/B, or roll back the model via config — without changing and redeploying code",
+      correct: true,
+      explanation: "Treating the model (and prompt version) as configuration lets you change or revert it through an environment update. If a new model regresses, rollback is an env change, not an emergency code deploy."
+    },
+    {
+      label: "Environment variables make the model run faster",
+      correct: false,
+      explanation: "Where the model name is stored has no effect on inference speed. The benefit is operational flexibility — changing the model without touching code."
+    }
+  ]}
+/>
+
+## Health checks and graceful shutdown
+
+A platform that runs your container needs two things from it: a way to ask "are you alive and ready?" and a promise that it will "finish what you're doing before you exit."
+
+**Health and readiness probes** are tiny endpoints the platform polls. *Liveness* says the process is alive; *readiness* says it can serve traffic (dependencies reachable). A replica that fails readiness is taken out of rotation instead of receiving requests it can't serve.
+
+```python
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}            # liveness: the process is running
+
+@app.get("/readyz")
+def readyz():
+    # readiness: can we actually serve? check the things a request needs.
+    if not config.ANTHROPIC_API_KEY:
+        raise HTTPException(503, "not ready")
+    return {"status": "ready"}
+```
+
+**Graceful shutdown** matters because deploys happen *while requests are in flight*. When the platform ships a new version it sends the old container a `SIGTERM`. If the process dies instantly, every in-progress agent run is severed mid-answer. Instead, stop accepting new requests, let the in-flight ones finish (within a grace window), then exit.
+
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app):
+    yield                              # ── app runs ──
+    # SIGTERM received: drain in-flight requests before the process exits
+    await drain_in_flight(timeout=30)
+
+app = FastAPI(lifespan=lifespan)
+```
+
+<Callout type="key">
+Health checks let the platform route traffic only to replicas that can serve it; graceful shutdown lets you deploy without severing live conversations. Together they're what make a deploy a non-event for users instead of a burst of errors. Without them, every release drops the requests that happened to be mid-flight.
+</Callout>
+
+## Rollout: ship new versions without downtime
+
+Replacing every replica at once means any bug in the new version takes down 100% of traffic instantly. Two standard strategies avoid that:
+
+- **Blue-green:** run the new version (green) alongside the old (blue) at full size, shift all traffic over at once, and keep blue ready for an instant rollback. Fast and reversible; costs double the resources during the switch.
+- **Canary:** route a small slice of traffic (say 5%) to the new version, watch your metrics and **the Module 4 eval suite** against real responses, and ramp up only if it holds. Catches regressions with minimal blast radius; takes longer to fully roll out.
+
+Either way, the eval harness you built in Module 4 is the gate: a deploy should not proceed if the new version fails its evals, and a canary should auto-roll-back if quality metrics drop. This is where "evaluation comes early" pays off — the same suite that tested the agent in development now guards every production release.
+
+<Quiz
+  question="You're deploying a new agent version with a changed system prompt. What's the safest rollout?"
+  options={[
+    {
+      label: "Replace all replicas at once — it's the fastest way to ship",
+      correct: false,
+      explanation: "Replacing everything at once gives any regression in the new prompt 100% blast radius immediately, with no easy way back. Speed isn't worth taking the whole service down if it's wrong."
+    },
+    {
+      label: "Canary: route a small slice of traffic to the new version, watch metrics and evals, and ramp up only if quality holds",
+      correct: true,
+      explanation: "A canary limits the blast radius to a few percent and uses the Module 4 eval suite plus live metrics as the gate to ramp or auto-roll-back. Regressions are caught small instead of shipping to everyone."
+    },
+    {
+      label: "Deploy on a Friday evening so fewer users are affected by any issues",
+      correct: false,
+      explanation: "Timing the deploy doesn't reduce blast radius — a bad prompt still affects 100% of whoever is using it, now with fewer engineers around to respond. Use a progressive rollout with eval gates instead."
+    }
+  ]}
+/>
+
+You now have every piece: a bounded service, the right serving pattern, stateless handling, load survival, and a safe rollout. The lab puts them together into one deployable artifact.
+
+[← Lesson 4](/modules/module-07-deployment-serving/lesson-04) · [Lab: deploy the research agent →](/modules/module-07-deployment-serving/lesson-06-lab)
