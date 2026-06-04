@@ -60,7 +60,7 @@ config = Config()
 Two things to notice. Required secrets use `os.environ[...]` so a misconfigured deploy **fails loudly at boot** rather than 404-ing in production an hour later. And the **model name is config, not a constant** — promoting a new model or rolling one back becomes an environment change, not a code change and redeploy. The same logic applies to prompt versions: treat the active prompt/model pair as configuration you can change and, critically, roll back.
 
 <Quiz
-  question="Why read the model name from an environment variable instead of hardcoding `model=\"claude-opus-4-8\"` in the agent?"
+  question="Why read the model name from an environment variable instead of hardcoding it as a string constant in the agent?"
   options={[
     {
       label: "Hardcoding a string is a syntax error in Python",

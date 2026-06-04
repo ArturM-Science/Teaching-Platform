@@ -66,7 +66,7 @@ The server stays stateless; the *state* moves to a store every replica can reach
 </Callout>
 
 <Quiz
-  question="You store conversation history in a Python dict keyed by session_id at module scope: `SESSIONS = {}`. It works in testing. You deploy with 3 replicas behind a load balancer. What happens?"
+  question="You keep conversation history in a module-level Python dict keyed by session_id. It works in testing. You deploy with 3 replicas behind a load balancer. What happens?"
   options={[
     {
       label: "It works — the session_id makes it correct",
