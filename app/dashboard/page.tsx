@@ -55,7 +55,7 @@ export default async function DashboardPage() {
 
   const completedSlugs = new Set<string>(
     (progressRows ?? [])
-      .map((r: { modules: { slug: string } | null }) => r.modules?.slug)
+      .map((r: { modules: { slug: string } | { slug: string }[] | null }) => Array.isArray(r.modules) ? r.modules[0]?.slug : r.modules?.slug)
       .filter(Boolean) as string[]
   )
 
