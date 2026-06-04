@@ -1,0 +1,43 @@
+---
+title: "Deployment & Serving"
+module: "module-07-deployment-serving"
+part: 4
+slug: "module-07-deployment-serving"
+---
+
+# Module 7 · Deployment & Serving
+
+**Part 4 — Production** · 5 lessons + lab · ~6 hours total
+
+<LearningObjectives>
+- Explain why a notebook agent is not a product, and draw the request/response boundary that turns agent logic into a service
+- Choose between synchronous, streaming (SSE), and async/queue serving patterns based on the task's latency profile
+- Keep the serving layer stateless so it can scale horizontally — and place conversation state where it actually belongs
+- Make an agent service survive load: upstream rate limits, concurrency control, backpressure, timeouts, and retries with backoff
+- Package an agent as a container, configure it the 12-factor way, add health checks and graceful shutdown, and roll it out without downtime
+</LearningObjectives>
+
+## What you'll build
+
+A production-ready service wrapping the Module 3 research agent: a containerized FastAPI app exposing a synchronous endpoint and a streaming (SSE) endpoint, with stateless request handling, health/readiness probes, graceful shutdown, env-based config, and retries around the model call. The Module 4 eval suite gates the build — the image only ships if the agent still passes its evals.
+
+## Why deployment is its own discipline
+
+The agent that works in your notebook works because *you* are the runtime: you hold the API key, you wait for it to finish, you re-run the cell when it errors, and only one request exists at a time. Production removes all four of those crutches at once. Many requests arrive concurrently, the network fails, the model rate-limits you, the process gets killed mid-request during a deploy, and the secret can't live in the source. This module is about the engineering that stands between "it runs on my machine" and "it serves thousands of users without you watching."
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [From notebook to service](/modules/module-07-deployment-serving/lesson-01) | ~45 min |
+| 2 | [Serving patterns: sync, streaming, and async](/modules/module-07-deployment-serving/lesson-02) | ~45 min |
+| 3 | [State & session management](/modules/module-07-deployment-serving/lesson-03) | ~45 min |
+| 4 | [Scaling & reliability under load](/modules/module-07-deployment-serving/lesson-04) | ~45 min |
+| 5 | [Packaging, config & rollout](/modules/module-07-deployment-serving/lesson-05) | ~45 min |
+| 6 | [Lab: deploy the research agent as a production service](/modules/module-07-deployment-serving/lesson-06-lab) | ~2–3 hrs |
+
+<Callout type="tip">
+Lesson 3 (state) is the one teams skip and regret. Putting conversation state in a module-level variable works perfectly on one machine and fails silently the moment a second replica starts. Read it before you write any `/chat` handler.
+</Callout>
+
+[**Start Lesson 1 →**](/modules/module-07-deployment-serving/lesson-01)

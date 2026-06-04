@@ -1,0 +1,260 @@
+---
+title: "Lab: Deploy the Research Agent as a Production Service"
+module: "module-07-deployment-serving"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab · Deploy the Research Agent as a Production Service
+
+<LabBrief title="Deploy the Research Agent as a Production Service" time="2–3 hours">
+
+#### Objective
+
+Take the Module 3 research agent — currently a notebook artifact — and turn it into a deployable, production-grade service. The finished service is a single container image that runs identically anywhere, exposes a synchronous and a streaming endpoint, handles state and load correctly, and only ships if the Module 4 eval suite passes.
+
+This is platform-agnostic: the deliverable is a container you can run on any host. You do not need to deploy to a specific cloud to complete the lab.
+
+#### Setup
+
+```bash
+# From a copy of your Module 3 agent project
+pip install "fastapi[standard]" uvicorn anthropic
+export ANTHROPIC_API_KEY="sk-ant-..."   # never hardcode this
+mkdir -p deploy
+```
+
+#### Deliverables
+
+- `service.py` — FastAPI app: `POST /chat` (sync) and `POST /chat/stream` (SSE), plus `/healthz` and `/readyz`
+- `config.py` — all config read from the environment; required secrets fail fast at boot
+- `agent.py` — your Module 3 agent loop, imported by `service.py` and importing no web framework
+- `Dockerfile` — slim base, non-root user, no secrets baked in, runs uvicorn
+- `ci.sh` — runs the Module 4 eval suite and exits non-zero on failure, gating the image build
+- `README_DEPLOY.md` — run command, required env vars, and the rollout strategy you'd use (blue-green or canary) with one sentence of justification
+
+#### Hard constraints
+
+- **No hardcoded secrets.** `ANTHROPIC_API_KEY` is read from the environment; the value must never appear in source or the image.
+- **Stateless server.** The handler holds no conversation state in process memory — history is either client-supplied or read from a session-keyed store.
+- **Streaming reports mid-stream errors** via a distinct event, not an HTTP status code.
+- **Timeouts and retries:** every model call has a timeout; transient errors retry with exponential backoff + jitter; non-transient errors are not retried.
+- **Backpressure:** a concurrency cap with a fast `503` when full — no unbounded acceptance.
+- **Graceful shutdown:** `SIGTERM` drains in-flight requests before exit.
+- **Eval gate:** `ci.sh` runs the Module 4 suite and exits non-zero if any regression case fails, blocking the build.
+
+</LabBrief>
+
+## The service boundary
+
+Keep the agent loop in `agent.py`, importing no web framework, and put everything HTTP in `service.py`. The agent takes plain arguments and returns plain values.
+
+```python
+# service.py
+import asyncio
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from contextlib import asynccontextmanager
+
+from config import config
+from agent import run_agent, run_agent_streaming
+
+SEM = asyncio.Semaphore(config.MAX_CONCURRENCY)   # backpressure (Lesson 4)
+
+@asynccontextmanager
+async def lifespan(app):
+    yield
+    await drain_in_flight(timeout=30)             # graceful shutdown (Lesson 5)
+
+app = FastAPI(lifespan=lifespan)
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []      # stateless: client supplies prior turns (Lesson 3)
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    if SEM.locked():
+        raise HTTPException(503, "At capacity, retry shortly")
+    async with SEM:
+        answer, history = await run_agent(req.message, req.history)
+        return {"answer": answer, "history": history}
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest):
+    async def events():
+        try:
+            async for chunk in run_agent_streaming(req.message, req.history):
+                yield f"data: {chunk}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            # mid-stream error travels as an event, not an HTTP status (Lesson 2)
+            yield f"event: error\ndata: {str(e)}\n\n"
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok"}
+
+@app.get("/readyz")
+def readyz():
+    if not config.ANTHROPIC_API_KEY:
+        raise HTTPException(503, "not ready")
+    return {"status": "ready"}
+```
+
+## Config from the environment
+
+```python
+# config.py
+import os
+
+class Config:
+    ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]   # fail fast if missing
+    MODEL = os.environ.get("MODEL", "claude-opus-4-8")
+    MODEL_TIMEOUT = float(os.environ.get("MODEL_TIMEOUT", "30"))
+    MAX_CONCURRENCY = int(os.environ.get("MAX_CONCURRENCY", "20"))
+
+config = Config()
+```
+
+## Reliability around the model call
+
+Every model call inside `agent.py` must have a timeout and a bounded, jittered retry on transient errors only.
+
+```python
+# agent.py (reliability helper)
+import random, asyncio
+from anthropic import RateLimitError, APIConnectionError, APIStatusError
+
+async def call_with_retry(coro_factory, max_attempts=4):
+    for attempt in range(max_attempts):
+        try:
+            return await coro_factory()
+        except (RateLimitError, APIConnectionError) as e:
+            if attempt == max_attempts - 1:
+                raise
+            await asyncio.sleep((2 ** attempt) + random.uniform(0, 1))  # backoff + jitter
+        except APIStatusError as e:
+            if e.status_code == 429:        # transient — retry
+                if attempt == max_attempts - 1:
+                    raise
+                await asyncio.sleep((2 ** attempt) + random.uniform(0, 1))
+            else:
+                raise                       # non-transient 4xx — do not retry
+```
+
+## Dockerfile
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN useradd --create-home appuser
+USER appuser
+COPY . .
+ENV PORT=8080
+EXPOSE 8080
+CMD ["uvicorn", "service:app", "--host", "0.0.0.0", "--port", "8080"]
+```
+
+## The eval gate
+
+The build must run the Module 4 eval suite first and refuse to produce an image if the agent regressed.
+
+```bash
+#!/usr/bin/env bash
+# ci.sh — eval gate before build
+set -euo pipefail
+
+echo "Running eval suite (Module 4)…"
+python -m eval.runner          # exits non-zero if any regression case fails
+
+echo "Evals passed — building image…"
+docker build -t research-agent:"${GIT_SHA:-local}" .
+```
+
+```bash
+# verify the gate actually blocks a bad build
+ANTHROPIC_API_KEY="" ./ci.sh   # should fail at the eval step, never reaching docker build
+```
+
+## Verify your service
+
+```bash
+# build and run locally
+docker build -t research-agent:local .
+docker run --rm -p 8080:8080 -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" research-agent:local
+
+# health and readiness
+curl -s localhost:8080/healthz   # {"status":"ok"}
+curl -s localhost:8080/readyz    # {"status":"ready"}
+
+# sync
+curl -s -X POST localhost:8080/chat \
+  -H 'content-type: application/json' \
+  -d '{"message":"What year was Anthropic founded?","history":[]}'
+
+# streaming
+curl -N -X POST localhost:8080/chat/stream \
+  -H 'content-type: application/json' \
+  -d '{"message":"Summarise the transformer architecture.","history":[]}'
+```
+
+<Rubric
+  threshold="Score 3 (Meets) or above on all criteria. A score of 1 (Below) on any criterion requires resubmission."
+  criteria={[
+    {
+      name: "Service correctness",
+      exceeds: "Sync and streaming endpoints both work; input is validated; errors map to correct HTTP codes; agent logic is cleanly separated from transport with no web imports in agent.py.",
+      meets: "POST /chat (sync) and POST /chat/stream (SSE) both work against the real agent, and the agent loop lives in its own module.",
+      approaching: "One endpoint works, or the agent logic and HTTP layer are entangled in one file.",
+      below: "Service does not run, or only exposes the agent as an un-deployable script."
+    },
+    {
+      name: "Statelessness & sessions",
+      exceeds: "Server holds zero conversation state; history is client-supplied or read from a session-keyed store; session ids are opaque and not used for auth.",
+      meets: "The handler keeps no per-process conversation state — history is passed in or fetched from a shared store.",
+      approaching: "State is kept in a process-level variable that happens to be keyed by session id.",
+      below: "Conversation state is a module-level global shared across all requests."
+    },
+    {
+      name: "Reliability under load",
+      exceeds: "Concurrency cap with fast 503 backpressure; per-call and per-run timeouts; retries with backoff + jitter on transient errors only; non-transient errors surfaced immediately.",
+      meets: "Model calls have timeouts and a bounded retry with backoff; a concurrency limit is enforced.",
+      approaching: "Some timeouts or retries exist but retries lack backoff/jitter, or there is no concurrency limit.",
+      below: "No timeouts and no retries — a hung or rate-limited call can stall the service."
+    },
+    {
+      name: "Packaging & config",
+      exceeds: "Slim image, non-root user, layer-cached deps, no secrets baked in; all config from env with required values failing fast; model name is configurable.",
+      meets: "Dockerfile builds and runs the service as non-root with config (including the API key) read from the environment.",
+      approaching: "Image builds but runs as root, or some config is hardcoded.",
+      below: "No working container, or a secret is baked into the image or source."
+    },
+    {
+      name: "Health, shutdown & eval gate",
+      exceeds: "Liveness and readiness probes; SIGTERM drains in-flight requests; ci.sh runs the Module 4 suite, exits non-zero on regression, and blocks the build — demonstrated with a failing run.",
+      meets: "Has /healthz and /readyz, graceful shutdown on SIGTERM, and a CI script that runs the eval suite and blocks the build on failure.",
+      approaching: "Has health checks but no graceful shutdown, or the eval gate exists but doesn't actually block the build.",
+      below: "No health checks and no eval gate — the service can ship a regressed agent silently."
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-07-deployment-serving"
+  items={[
+    "I can explain why a notebook agent isn't a service, and I keep agent logic and transport in separate files",
+    "I can pick sync vs streaming vs async/queue from a task's latency profile, and I report streaming errors as in-band events",
+    "My service is stateless — conversation state is client-supplied or in a session-keyed shared store, never a process global",
+    "My service survives load: concurrency cap with backpressure, timeouts on every call, and retries with backoff + jitter on transient errors only",
+    "My agent ships as a non-root container with config from the environment, health/readiness probes, graceful shutdown, and the Module 4 eval suite gating the build",
+    "Judgment gate: a teammate proposes deploying a new system prompt by replacing all replicas at once on Friday. I can explain what's wrong and describe the canary rollout I'd use instead"
+  ]}
+  next="Module 7 complete — move on to Module 8: Security & Safety →"
+/>
+
+[← Lesson 5](/modules/module-07-deployment-serving/lesson-05)

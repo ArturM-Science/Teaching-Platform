@@ -1,0 +1,119 @@
+---
+title: "State & Session Management"
+module: "module-07-deployment-serving"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · State & Session Management
+
+An agent conversation has memory: turn five depends on turns one through four. But the server that handles turn five might not be the same machine that handled turn one. This lesson is about where conversation state lives so that the serving layer can stay stateless — the property that lets you run more than one copy of your service.
+
+## Why the server must stay stateless
+
+"Stateless" doesn't mean the conversation has no memory. It means **the server process holds no memory between requests** — every request carries or fetches everything it needs. The reason is scaling: production runs multiple replicas of your service behind a load balancer, and any replica might handle any request.
+
+```
+                    ┌─────────────┐
+   request 1  ─────▶│  replica A  │   (holds messages in a global)
+                    └─────────────┘
+                    ┌─────────────┐
+   request 2  ─────▶│  replica B  │   ← never saw request 1's messages
+                    └─────────────┘
+```
+
+If replica A stored the conversation in a module-level variable, replica B has no idea it exists. The user's second message lands on B and the agent has amnesia. This is the single most common deployment bug for chat agents, and it's invisible in development because your laptop runs exactly one replica.
+
+<Callout type="warning">
+"It works locally" is the trap. One replica makes a stateful server look correct. The bug appears only under the thing you can't easily reproduce on a laptop: a second replica. Assume from the first line of code that another copy of your process exists and shares nothing with you.
+</Callout>
+
+## Where conversation state can live
+
+If not in the server, then where? There are three honest answers, each with a different trade-off.
+
+**1. In the client.** The browser (or calling service) holds the history and sends it with every request — exactly the `history: list[dict]` field from Lesson 1.
+
+```python
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []   # client owns the conversation, replays it each turn
+```
+
+Simple and perfectly stateless — the server stores nothing. The downsides: the payload grows every turn (a long chat means a large request), and you trust the client not to tamper with history. Good for short conversations and prototypes.
+
+**2. In a shared store, keyed by session id.** The client holds only a `session_id`; the server reads and writes the history in a database or cache that all replicas share.
+
+```python
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str            # client holds only the key
+
+@app.post("/chat")
+def chat(req: ChatRequest):
+    history = store.get(req.session_id)        # any replica can read it
+    answer, history = run_agent(req.message, history, api_key)
+    store.put(req.session_id, history)         # any replica can write it
+    return {"answer": answer, "session_id": req.session_id}
+```
+
+The server is still stateless — it owns no memory of its own; it just borrows from the store. This is the standard production pattern. The history can grow without bloating requests, and the data outlives any single replica. The cost is the store itself: a Postgres table or a Redis instance, plus the latency of a read and write per turn.
+
+**3. Split: durable history in a database, hot context in a cache.** The full transcript lives in Postgres (durable, queryable); the recent window the agent actually needs each turn lives in Redis (fast). This is what high-traffic systems do, and it connects directly to the memory architecture from Module 3 — short-term working memory versus long-term storage, now as an infrastructure decision.
+
+<Callout type="key">
+The server stays stateless; the *state* moves to a store every replica can reach. Client-held history is the simplest stateless option; a session-keyed shared store is the production default. Either way, no conversation lives inside a single server process — because that process can be replaced, restarted, or joined by a sibling at any moment.
+</Callout>
+
+<Quiz
+  question="You store conversation history in a Python dict keyed by session_id at module scope: `SESSIONS = {}`. It works in testing. You deploy with 3 replicas behind a load balancer. What happens?"
+  options={[
+    {
+      label: "It works — the session_id makes it correct",
+      correct: false,
+      explanation: "The session_id correctly separates users, but `SESSIONS` is a per-process dict. Each of the 3 replicas has its own. A user's turns only stay coherent if every request happens to hit the same replica."
+    },
+    {
+      label: "A user's conversation breaks whenever the load balancer routes their next turn to a different replica",
+      correct: true,
+      explanation: "Each replica has its own `SESSIONS` dict. Turn 1 writes to replica A's dict; turn 2 routed to replica B finds an empty dict and the agent loses all context. The store must be shared across replicas (Redis/Postgres), not in-process."
+    },
+    {
+      label: "All three replicas automatically share the same dict",
+      correct: false,
+      explanation: "Separate processes — often on separate machines — do not share Python memory. Each has its own `SESSIONS`. Sharing requires an external store."
+    }
+  ]}
+/>
+
+## Session ids, identity, and cleanup
+
+A session is just a key the client carries — usually a UUID minted on the first request and returned to the client to send back. Two practical rules:
+
+- **Don't put anything secret in the session id itself.** It's an opaque lookup key, not an auth token. Authorize the *user* separately (the auth from Module 3's deployment story), then check that the user owns the session.
+- **Expire sessions.** Conversation state accumulates forever if you let it. Set a TTL in the cache and an archival/cleanup policy in the database, or your store grows without bound and your costs follow.
+
+<Quiz
+  question="Where should a long-lived production chat agent keep conversation state, given it runs multiple replicas?"
+  options={[
+    {
+      label: "In a module-level global on each server for speed",
+      correct: false,
+      explanation: "Per-process globals aren't shared across replicas and vanish on restart or deploy. This is the classic stateful-server bug."
+    },
+    {
+      label: "In a shared store (DB and/or cache) keyed by session id, with the server holding nothing between requests",
+      correct: true,
+      explanation: "A shared, session-keyed store keeps the server stateless while giving every replica access to the same history — and it survives restarts. Optionally split durable history (DB) from hot context (cache)."
+    },
+    {
+      label: "Only in the client, no matter how long the conversation gets",
+      correct: false,
+      explanation: "Client-held history is fine for short chats, but it grows the request every turn and trusts the client. Long conversations belong in a server-side shared store keyed by session id."
+    }
+  ]}
+/>
+
+A stateless service keyed to a shared store is what makes the next problem tractable: running many copies under heavy load without them stepping on each other. That's Lesson 4.
+
+[← Lesson 2](/modules/module-07-deployment-serving/lesson-02) · [Lesson 4: Scaling & reliability under load →](/modules/module-07-deployment-serving/lesson-04)

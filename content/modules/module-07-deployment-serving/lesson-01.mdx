@@ -1,0 +1,133 @@
+---
+title: "From Notebook to Service"
+module: "module-07-deployment-serving"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · From Notebook to Service
+
+In a notebook, you are the runtime. You hold the API key, you wait for the cell to finish, you re-run it when it errors, and only one request ever exists at a time. Deploying an agent means handing those four jobs to a machine that does them for many users at once. This lesson draws the boundary between *agent logic* and *the service that hosts it* — the single most important separation in this whole module.
+
+## A notebook agent is not a product
+
+Here is a perfectly good Module 3 research agent. It works. It is also undeployable as written.
+
+```python
+# notebook cell — works, but is not a service
+import anthropic
+client = anthropic.Anthropic(api_key="sk-ant-hardcoded")  # secret in source
+
+messages = []  # global state — one conversation for the whole process
+
+def ask(question):
+    messages.append({"role": "user", "content": question})
+    # ... agent loop: model call, tool calls, append results ...
+    return final_answer
+
+ask("What was Anthropic's last funding round?")
+```
+
+Three things make this a notebook artifact, not a service:
+
+1. **The secret is in the source.** Anyone with the file has your key. It can't be rotated without a code change.
+2. **State is a global.** `messages` is shared by every caller. Two users would see each other's conversation.
+3. **There is no boundary.** The function *is* the interface. There's no way to call it over a network, no way to validate input, no way to return a structured error.
+
+The fix is not to rewrite the agent. The agent loop is fine. The fix is to wrap it in a **service boundary**.
+
+## The request/response boundary
+
+A service is a function with a contract: a request comes in over the network, a response goes out, and **nothing is remembered between calls** unless you deliberately store it somewhere. Drawing this boundary is what makes an agent deployable.
+
+```python
+# service — the agent logic is unchanged, but it's now behind a boundary
+import os
+from fastapi import FastAPI
+from pydantic import BaseModel
+from agent import run_agent          # your Module 3 agent, imported as-is
+
+app = FastAPI()
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []         # caller supplies prior turns — server holds nothing
+
+class ChatResponse(BaseModel):
+    answer: str
+    history: list[dict]
+
+@app.post("/chat", response_model=ChatResponse)
+def chat(req: ChatRequest):
+    api_key = os.environ["ANTHROPIC_API_KEY"]   # secret from the environment, not source
+    answer, new_history = run_agent(req.message, req.history, api_key)
+    return ChatResponse(answer=answer, history=new_history)
+```
+
+Notice what changed and what didn't. `run_agent` — the perceive-reason-act loop you built in Module 3 — is imported untouched. Everything new is at the *boundary*: input validation (`ChatRequest`), the secret pulled from `os.environ`, and conversation history passed **in and out** rather than held in a global. The server itself remembers nothing.
+
+<Callout type="key">
+Deployment is not about changing your agent. It's about wrapping the agent in a boundary that handles three things the notebook handled implicitly: where the request comes from, where secrets come from, and where state lives. Keep the agent logic and the serving logic in separate files — you will swap serving strategies several times, and you never want to touch the agent to do it.
+</Callout>
+
+<Quiz
+  question="You move your notebook agent behind a FastAPI endpoint but keep `messages = []` as a module-level global that the handler appends to. What breaks first in production?"
+  options={[
+    {
+      label: "Nothing — a global list is a fine place to keep conversation state",
+      correct: false,
+      explanation: "It works only because your notebook had exactly one user. A module-level global is shared by every request the process handles."
+    },
+    {
+      label: "Concurrent users see each other's conversation, because they share the one global list",
+      correct: true,
+      explanation: "The global is process-wide. Two users hitting the same worker append to the same list and read each other's turns. State must be per-request (passed in) or per-session (stored with a session key)."
+    },
+    {
+      label: "The API key leaks to the client",
+      correct: false,
+      explanation: "The key leaking is a real and separate problem (hardcoded secrets), but the shared-global bug bites first and corrupts every multi-user conversation."
+    }
+  ]}
+/>
+
+## Separating agent logic from transport
+
+The same agent should be reachable in more than one way without rewriting it. Over the next lessons you'll serve it synchronously, as a token stream, and through a job queue. That's only painless if the agent doesn't know *how* it's being called.
+
+```
+agent.py        ← the loop: takes a message + history, returns an answer. Knows nothing about HTTP.
+service.py      ← the boundary: HTTP routes, validation, auth, error mapping. Knows nothing about prompts.
+config.py       ← reads env: API keys, model name, timeouts. Imported by service, not agent.
+```
+
+This is the same separation a web app makes between business logic and controllers. For agents it matters more, because the serving strategy changes often (a streaming UI, a batch job, a Slack bot) while the agent loop stays stable.
+
+<Callout type="warning">
+A common anti-pattern: importing `fastapi` or reading `request.headers` from inside the agent loop "just to log the user." Now the agent can't run in a batch script or a test without a fake HTTP request. Pass what the agent needs as plain arguments; let the boundary do the HTTP.
+</Callout>
+
+<Quiz
+  question="Why keep `run_agent` in a separate file that imports no web framework?"
+  options={[
+    {
+      label: "It makes the import statements shorter",
+      correct: false,
+      explanation: "Import tidiness is not the point — the point is decoupling the agent from any one way of calling it."
+    },
+    {
+      label: "So the same agent can be served sync, streamed, queued, or run in a test with no changes to its code",
+      correct: true,
+      explanation: "Decoupling the agent from transport lets you swap serving strategies — and test the loop directly — without ever editing the agent."
+    },
+    {
+      label: "Because FastAPI cannot import from other files",
+      correct: false,
+      explanation: "FastAPI imports from anywhere. The separation is a design choice for flexibility and testability, not a framework limitation."
+    }
+  ]}
+/>
+
+You now have the boundary. The next question is *how* the response crosses it — all at once, token by token, or later. That's Lesson 2.
+
+[← Module overview](/modules/module-07-deployment-serving) · [Lesson 2: Serving patterns →](/modules/module-07-deployment-serving/lesson-02)
