@@ -117,6 +117,8 @@ Two rules that matter as much as the code:
 Retries multiply load. Four attempts per request means a struggling model API can receive up to 4× the traffic at the worst possible moment. Cap attempts, use backoff so retries thin out over time, and never retry non-transient errors. Retries are a safety valve, not a default for every failure.
 </Callout>
 
+<RetryBackoffSim />
+
 <Quiz
   question="Your agent gets a 429 (rate limited) from the model API under load. Which retry strategy is correct?"
   options={[
