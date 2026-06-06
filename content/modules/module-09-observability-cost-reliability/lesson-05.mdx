@@ -1,0 +1,167 @@
+---
+title: "SLOs, Alerting & Production Readiness"
+module: "module-09-observability-cost-reliability"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · SLOs, Alerting & Production Readiness
+
+Lessons 1–4 covered what to measure and how to make your agent more resilient. This lesson covers how to formalise those measurements into commitments (SLOs), wire them to alerts, and verify that your system is ready for production before your users discover it is not.
+
+## SLIs, SLOs, SLAs
+
+**Service Level Indicator (SLI):** a measured metric. Examples: `p95_ttft_ms`, `error_rate_28d`, `quality_score_7d_avg`, `cost_per_query_usd`.
+
+**Service Level Objective (SLO):** an internal target for an SLI. Example: "p95 TTFT < 1,200ms over a 28-day rolling window." SLOs are operational commitments — if you breach them, you burn error budget. They are not contractual.
+
+**Service Level Agreement (SLA):** an external contractual commitment, typically 10–20% looser than the SLO to create a buffer. If your SLO is 99.5% availability, your SLA might be 99.0%.
+
+AI-specific SLIs not found in standard web services:
+
+| SLI | What it measures |
+|---|---|
+| TTFT p95 | Stream start latency — user-perceived responsiveness |
+| Total latency p95 | Full response latency — governs batch pipelines |
+| Quality score (7d avg) | LLM-judge score sampled from production traces |
+| Guardrail hit rate | Fraction intercepted by safety layer |
+| Cost per query | USD per request, derived from token counts |
+
+## Why TTFT and total latency need separate SLOs
+
+A streaming LLM agent has two distinct latency phases:
+
+1. **TTFT (time to first token):** from request sent to first character appearing on screen. Governs user-perceived responsiveness. A user sees the answer start immediately; they do not care about total generation time for short completions.
+
+2. **Total latency:** from request sent to final character. Governs tool call completion, batch pipelines, and any downstream work that waits for the full response.
+
+A model can have excellent TTFT (fast start, 400ms) but terrible total latency (long generation for complex queries, 12s). If you only measure total latency, you will miss streaming UX regressions. If you only measure TTFT, you will miss pipeline bottlenecks.
+
+Recommended starting SLOs:
+- TTFT p95 < 800ms (streaming interfaces)
+- Total latency p95 < 8,000ms (multi-tool agent completions)
+- Error rate < 0.5% (HTTP 5xx + timeouts, 28-day window)
+- Quality score 7-day rolling average ≥ 4.0/5.0
+
+## Quality SLOs
+
+A quality SLO uses automated LLM-judge scoring as a reliability signal:
+
+```yaml
+# Example SLO definition
+name: helpfulness_quality
+sli: rolling_7d_avg(langfuse_score["helpfulness"])
+objective: >= 4.0
+window: 7d
+sample_rate: 0.10   # score 10% of production traces
+alert:
+  warning:  rolling_7d_avg < 3.5  # early signal
+  critical: rolling_7d_avg < 3.0  # SLO breach
+  channel: slack:#ai-oncall
+```
+
+Quality SLOs catch regressions that infrastructure metrics miss: a model update that changes tone, a prompt change that increases hallucination rate, or retrieved context that has started returning stale information.
+
+## Error budgets and burn rate alerting
+
+An error budget is the allowed amount of SLO violation over the measurement window. For a 99.5% availability SLO over 28 days:
+
+```
+Error budget = 0.5% × 28 days × 24 hours × 60 min = 201.6 minutes of downtime
+```
+
+**Burn rate** measures how fast you are consuming the budget. A burn rate of 1× means you are using the budget at exactly the rate that would exhaust it in one window. A burn rate of 14.4× means you would exhaust it in 1/14.4 of the window = ~2 days.
+
+The Google SRE Workbook recommends two complementary alerts:
+
+| Alert | Window | Burn rate threshold | Action |
+|---|---|---|---|
+| Fast burn | 1 hour | > 14.4× (exhausts 5% of budget in 1h) | Page on-call immediately |
+| Slow burn | 6 hours | > 6× (exhausts 10% of budget in 6h) | Slack ticket, investigate within 2h |
+
+The fast-burn alert catches catastrophic failures quickly. The slow-burn alert catches gradual degradation that would miss the fast threshold but still exhaust the budget within the window.
+
+## On-call dashboard design
+
+Five core panels for an AI agent on-call dashboard:
+
+**Panel 1 — TTFT p95** (1h window, 24h trend line): horizontal threshold line at SLO. Any bar touching or exceeding the line is a potential SLO event.
+
+**Panel 2 — Cost per hour** (current vs. 7-day average band): alert on >2× the 7-day average — this catches runaway loops or prompt injection attacks that generate unusually long outputs.
+
+**Panel 3 — Error rate** (5-minute windows, 28-day rolling): 5xx + timeouts. Alert at >1% (fast burn signal) and >0.5% for 30+ minutes (slow burn).
+
+**Panel 4 — Quality score** (7-day rolling, sampled): show the SLO threshold line and the rolling average. A sustained downward trend is a signal to investigate prompt or model changes.
+
+**Panel 5 — Circuit breaker states** (real-time): one indicator per tier — Closed (green), Open (red), Half-Open (amber). Any Open breaker means a tier is failing; two Open breakers means you are running on the tertiary (Ollama or equivalent).
+
+Supporting panels (secondary row): token usage breakdown (input vs. output vs. cached), guardrail hit rate, model routing distribution (% to primary vs. secondary).
+
+## 12-item production readiness checklist
+
+Before your agent handles production traffic, verify each item:
+
+| # | Check | Why |
+|---|---|---|
+| 1 | All LLM calls emit `gen_ai.*` OTel spans with `input_tokens` and `output_tokens` | Cost tracking and capacity planning |
+| 2 | Every log entry contains `trace_id` and `span_id` | Cross-system debugging |
+| 3 | TTFT p95 SLO defined and alert configured | Streaming UX regression detection |
+| 4 | Total latency p95 SLO defined and alert configured | Pipeline SLO coverage |
+| 5 | Quality SLO defined; LLM-judge scoring ≥ 5% of traces | Semantic regression detection |
+| 6 | Cost per query tracked; monthly projection documented | Budget awareness |
+| 7 | Prompt caching enabled for system prompts ≥ 1,024 tokens | Cost optimisation |
+| 8 | Retry-with-jitter on all LLM calls (max 3 retries) | Rate limit resilience |
+| 9 | Fallback chain configured (≥ 2 tiers, different providers) | Provider outage resilience |
+| 10 | Circuit breaker protecting primary tier | Fast failover |
+| 11 | Graceful degradation response defined for total pipeline failure | User experience under failure |
+| 12 | On-call runbook with alert → diagnosis → remediation for each alert | Incident response |
+
+<Callout type="key">
+Items 1–6 are about observability and cost. Items 7–11 are about reliability. Item 12 is the bridge between them: the runbook tells your on-call engineer what a given alert means and what to do about it. An unacknowledged alert without a runbook is noise; an alert with a runbook is a tool.
+</Callout>
+
+<Quiz
+  question="The fast-burn error budget alert fires when burn rate exceeds 14.4x normal over a 1-hour window. How quickly would this consume the full 28-day error budget if sustained?"
+  options={[
+    {
+      label: "Approximately 2 days",
+      correct: true,
+      explanation: "14.4x burn rate over a 1-hour window means you consume 14.4 hours worth of budget per hour, exhausting a 28-day budget in 28/14.4 ≈ 1.94 days. This is why it warrants immediate paging — sustained, it collapses the entire month's budget in two days."
+    },
+    {
+      label: "Approximately 1 hour",
+      correct: false,
+      explanation: "1 hour would imply a burn rate of 28 × 24 = 672x (consuming the entire month in one hour). A 14.4x burn rate is serious but not that extreme — it exhausts the budget in roughly 2 days."
+    },
+    {
+      label: "Approximately 2 weeks",
+      correct: false,
+      explanation: "2 weeks would be a burn rate of 2x (consuming a 4-week budget in 2 weeks). The 14.4x threshold is much more severe — it would exhaust the budget in about 2 days."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Which combination correctly represents two separate SLOs for an LLM streaming assistant?"
+  options={[
+    {
+      label: "TTFT p95 < 800ms AND total latency p95 < 8s",
+      correct: true,
+      explanation: "TTFT and total latency measure different user experiences and require separate thresholds. TTFT governs streaming UX (when does text start appearing?); total latency governs pipeline completion and is naturally higher due to generation length variability."
+    },
+    {
+      label: "Mean latency < 2s",
+      correct: false,
+      explanation: "A single mean latency SLO ignores both the streaming dimension (TTFT) and tail latency (p99). Mean metrics are poor SLO choices because they hide outliers — a p99 of 20s is invisible in a mean of 2s."
+    },
+    {
+      label: "p99 latency < 10s",
+      correct: false,
+      explanation: "A single p99 total latency SLO does not capture TTFT — the streaming UX signal. A user might tolerate 10s total if the first token appears in 400ms (streaming), but not if they wait 10s for anything to appear."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 4](/modules/module-09-observability-cost-reliability/lesson-04) · [Lab →](/modules/module-09-observability-cost-reliability/lesson-06-lab)
