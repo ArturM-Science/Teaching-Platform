@@ -37,6 +37,9 @@ import { OWASPThreatMap } from './OWASPThreatMap'
 import { PromptInjectionSim } from './PromptInjectionSim'
 import { AgentPermissionAudit } from './AgentPermissionAudit'
 import { proseComponents } from './prose'
+import { AgentTraceViz } from './AgentTraceViz'
+import { TokenCostCalculator } from './TokenCostCalculator'
+import { FallbackChainSim } from './FallbackChainSim'
 
 export const mdxComponents = {
   ...proseComponents,
@@ -78,4 +81,7 @@ export const mdxComponents = {
   OWASPThreatMap,
   PromptInjectionSim,
   AgentPermissionAudit,
+  AgentTraceViz,
+  TokenCostCalculator,
+  FallbackChainSim,
 }
