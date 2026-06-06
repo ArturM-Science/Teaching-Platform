@@ -28,6 +28,8 @@ If replica A stored the conversation in a module-level variable, replica B has n
 "It works locally" is the trap. One replica makes a stateful server look correct. The bug appears only under the thing you can't easily reproduce on a laptop: a second replica. Assume from the first line of code that another copy of your process exists and shares nothing with you.
 </Callout>
 
+<StatefulReplicaSim />
+
 ## Where conversation state can live
 
 If not in the server, then where? There are three honest answers, each with a different trade-off.
