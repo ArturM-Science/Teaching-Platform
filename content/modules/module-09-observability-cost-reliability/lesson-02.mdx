@@ -1,0 +1,234 @@
+---
+title: "Instrumenting an Agent"
+module: "module-09-observability-cost-reliability"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Instrumenting an Agent
+
+Lesson 1 described what to observe. This lesson shows how to observe it — specifically, how to add Langfuse v3 instrumentation to a Python agent in three lines, extend it with manual spans for tool calls, and integrate structured logging that links every log entry to its trace.
+
+## Langfuse v3 three-line integration
+
+Start with the OpenAI drop-in wrapper. Replace one import and every subsequent OpenAI call is automatically captured as a Langfuse span:
+
+```python
+# Before
+import openai
+
+# After — one line change, full automatic tracing
+from langfuse.openai import openai
+```
+
+Then decorate your main agent function with `@observe`:
+
+```python
+from langfuse.decorators import observe, langfuse_context
+
+@observe()
+def run_agent(user_message: str, user_id: str) -> str:
+    langfuse_context.update_current_trace(
+        name="customer_support_agent",
+        user_id=user_id,
+        tags=["production"]
+    )
+    response = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system",  "content": SYSTEM_PROMPT},
+            {"role": "user",    "content": user_message},
+        ]
+    )
+    return response.choices[0].message.content
+```
+
+That is the complete integration for a single-LLM agent. Langfuse captures: function name, inputs and outputs (truncated at 50k characters by default), timing, token counts from the OpenAI response, and computed cost. Everything appears as a trace in the Langfuse UI without further configuration.
+
+## Manual spans for tool calls
+
+When your agent calls tools outside of the OpenAI SDK — web search, database queries, file operations — those calls are invisible to the automatic wrapper. Wrap them with `@observe`:
+
+```python
+from langfuse.decorators import observe, langfuse_context
+
+@observe(name="tool:web_search", as_type="tool")
+def web_search(query: str) -> str:
+    langfuse_context.update_current_observation(
+        input={"query": query},
+        metadata={"engine": "serper", "region": "uk"}
+    )
+    result = serper_api_call(query)
+    langfuse_context.update_current_observation(
+        output={"results": result[:500]},
+        level="DEFAULT"
+    )
+    return result
+```
+
+The `as_type="tool"` argument tags the span as a tool invocation in the Langfuse UI, which groups it visually separately from LLM spans.
+
+## What to capture per LLM span
+
+The `from langfuse.openai import openai` wrapper captures most attributes automatically. For full production observability, ensure each LLM span includes:
+
+| Attribute | Source | Notes |
+|---|---|---|
+| `model` | response object | Use the responded model, not the requested one |
+| `prompt_tokens` | `response.usage.prompt_tokens` | Auto-captured by Langfuse wrapper |
+| `completion_tokens` | `response.usage.completion_tokens` | Auto-captured |
+| `cost_usd` | derived | `(prompt_tokens/1e6 × input_price) + (completion_tokens/1e6 × output_price)` |
+| `latency_ms` | wall clock | Auto-captured |
+| `ttft_ms` | stream first event | Only for streaming; measure from request start to first token |
+| `status` | exception handling | `"success"`, `"rate_limited"`, `"timeout"`, `"context_overflow"` |
+
+For streaming responses, measure TTFT explicitly:
+
+```python
+import time
+
+start = time.perf_counter()
+ttft_ms = None
+full_response = ""
+
+stream = openai.chat.completions.create(
+    model="gpt-4o", messages=[...], stream=True
+)
+for chunk in stream:
+    if ttft_ms is None and chunk.choices[0].delta.content:
+        ttft_ms = round((time.perf_counter() - start) * 1000)
+    full_response += chunk.choices[0].delta.content or ""
+
+langfuse_context.update_current_observation(
+    metadata={"ttft_ms": ttft_ms}
+)
+```
+
+## PII handling — what must not go into spans
+
+Span attributes are stored in your observability backend and may be retained for months. Do not capture user email addresses, names, phone numbers, authentication tokens, or payment card data. Sanitise before logging:
+
+```python
+import re
+
+def sanitise(text: str) -> str:
+    text = re.sub(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", "[EMAIL]", text)
+    return text
+
+@observe()
+def run_agent(user_message: str) -> str:
+    langfuse_context.update_current_trace(input=sanitise(user_message))
+    ...
+```
+
+## Structured logging with trace linkage
+
+Every log entry should include the current `trace_id` and `span_id` so you can pivot from a Langfuse trace into your log aggregator:
+
+```python
+import logging, json, time
+from langfuse.decorators import langfuse_context
+
+def log(level: str, message: str, **fields) -> None:
+    entry = {
+        "ts":       time.time(),
+        "level":    level,
+        "msg":      message,
+        "trace_id": langfuse_context.get_current_trace_id(),
+        "span_id":  langfuse_context.get_current_observation_id(),
+        **fields
+    }
+    logging.info(json.dumps(entry))
+
+@observe()
+def run_agent(user_message: str) -> str:
+    log("INFO", "agent_started", intent_length=len(user_message))
+    result = call_llm(user_message)
+    log("INFO", "agent_finished", output_length=len(result))
+    return result
+```
+
+When this agent produces an error, copy the `trace_id` from Langfuse and search CloudWatch Logs / Loki / Datadog for it to see every log line from that conversation in order.
+
+## LLM-as-judge quality SLO
+
+Content classifiers catch safety issues, but they do not measure helpfulness. For that you need an LLM judge — a second model call that scores the agent's response:
+
+```python
+from langfuse import Langfuse
+client = Langfuse()
+
+def score_response(trace_id: str, user_message: str, agent_response: str) -> None:
+    judge_prompt = (
+        "Rate the following response on helpfulness from 1 (not helpful) to 5 (excellent).\n"
+        f"User question: {user_message}\n"
+        f"Agent response: {agent_response}\n"
+        "Output a single integer only."
+    )
+    score_str = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": judge_prompt}],
+        max_tokens=5
+    ).choices[0].message.content.strip()
+
+    try:
+        client.create_score(
+            trace_id=trace_id,
+            name="helpfulness",
+            value=float(score_str),
+        )
+    except ValueError:
+        pass
+```
+
+In Langfuse UI → Settings → Alerts: create an alert that fires when the 7-day rolling average of `helpfulness` drops below 3.5. Connect it to a Slack webhook or PagerDuty. This is your quality SLO in production.
+
+<Callout type="tip">
+Score only a sample of production traces — 5–10% is typical. Scoring every response doubles your LLM cost for a marginal improvement in signal. Use reservoir sampling to ensure the sample is representative.
+</Callout>
+
+<Quiz
+  question="What does langfuse_context.get_current_trace_id() return when called outside of an @observe-decorated function?"
+  options={[
+    {
+      label: "None",
+      correct: true,
+      explanation: "Outside an @observe context, there is no active trace. The function returns None silently. This means log entries outside @observe contexts will have null trace_id fields — a common bug to watch for."
+    },
+    {
+      label: "Raises a RuntimeError",
+      correct: false,
+      explanation: "Langfuse does not raise an exception here — it returns None. Always call it from within an @observe-decorated function or a function called by one."
+    },
+    {
+      label: "Returns a new auto-generated UUID",
+      correct: false,
+      explanation: "Langfuse does not auto-generate trace IDs outside @observe contexts. The function returns None."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Which of these should NOT be stored in a Langfuse span attribute?"
+  options={[
+    {
+      label: "The user's email address",
+      correct: true,
+      explanation: "PII must not go into observability backends. Span data is retained for long periods and may be visible to engineers and support staff. Sanitise inputs before storing them in spans."
+    },
+    {
+      label: "The model name used for the response",
+      correct: false,
+      explanation: "Model name is essential operational metadata — you need it to understand which model produced which output and to track cost accurately."
+    },
+    {
+      label: "The number of completion tokens",
+      correct: false,
+      explanation: "Token counts are required for cost calculation and capacity planning. They contain no PII."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 1](/modules/module-09-observability-cost-reliability/lesson-01) · [Lesson 3: The Economics of LLM APIs →](/modules/module-09-observability-cost-reliability/lesson-03)
