@@ -31,6 +31,8 @@ import { AgentVsWorkflow } from './AgentVsWorkflow'
 import { AgentRoleExplorer } from './AgentRoleExplorer'
 import { CommunicationPatternSim } from './CommunicationPatternSim'
 import { FailureCascadeSim } from './FailureCascadeSim'
+import { StatefulReplicaSim } from './StatefulReplicaSim'
+import { RetryBackoffSim } from './RetryBackoffSim'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -68,4 +70,6 @@ export const mdxComponents = {
   AgentRoleExplorer,
   CommunicationPatternSim,
   FailureCascadeSim,
+  StatefulReplicaSim,
+  RetryBackoffSim,
 }
