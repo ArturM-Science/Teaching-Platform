@@ -1,0 +1,209 @@
+---
+title: "The Economics of LLM APIs"
+module: "module-09-observability-cost-reliability"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · The Economics of LLM APIs
+
+Most engineering teams add cost monitoring after they get a surprise bill. This lesson helps you avoid that pattern by understanding token economics before you scale, and by giving you concrete optimisations you can apply today.
+
+## Input vs output: why output costs more
+
+Every major frontier model prices input and output tokens separately, with output consistently 4–6× more expensive:
+
+| Model | Input (per 1M) | Output (per 1M) | Ratio |
+|---|---|---|---|
+| GPT-4o | $2.50 | $10.00 | 4× |
+| GPT-4o-mini | $0.15 | $0.60 | 4× |
+| Claude Sonnet 3.7 | $3.00 | $15.00 | 5× |
+| Claude Haiku 3.5 | $0.80 | $4.00 | 5× |
+| Gemini 1.5 Flash | $0.075 | $0.30 | 4× |
+
+The reason: input tokens are processed in parallel (one forward pass reads all input simultaneously), while output tokens are generated autoregressively — each token requires a full forward pass that depends on all previous tokens. More compute per output token → higher price.
+
+The implication: verbose completions are expensive. Chain-of-thought reasoning in the completion costs 5× more per token than the same tokens in the input. If you have a reasoning model generating long scratchpads, track that output token count carefully.
+
+## Where cost actually goes in a RAG agent call
+
+A typical RAG customer support query:
+
+```
+System prompt:       600 tokens  (instructions, persona, safety rules)
+User message:        150 tokens  (the question)
+Retrieved context:   750 tokens  (3 chunks × 250 tokens)
+Total input:       1,500 tokens
+
+Agent completion:    280 tokens  (the answer)
+```
+
+On GPT-4o:
+```
+Input cost:  1,500 / 1,000,000 × $2.50 = $0.00375
+Output cost:   280 / 1,000,000 × $10.00 = $0.00280
+Total per query:                          $0.00655
+```
+
+At 10,000 queries/day: $65.50/day → **$1,965/month**.
+
+The system prompt (600 tokens) is paid on every single request. If it never changes, you pay for it millions of times. This is the highest-leverage caching target.
+
+## Prompt caching (Anthropic)
+
+Anthropic's prompt caching discounts tokens in a repeated prefix — the system prompt, a large knowledge base, or a long document shared across many requests:
+
+```python
+response = client.messages.create(
+    model="claude-sonnet-4-5",
+    system=[{
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"}  # mark for caching
+    }],
+    messages=[{"role": "user", "content": user_message}],
+    max_tokens=512
+)
+
+# Inspect cache usage in the response:
+print(response.usage.cache_read_input_tokens)     # tokens served from cache (0.10× price)
+print(response.usage.cache_creation_input_tokens)  # tokens written to cache (1.25× price)
+```
+
+Cache economics:
+- **Minimum eligible block**: 1,024 tokens
+- **Cache hit cost**: 10% of normal input token price
+- **Cache write cost**: 125% of normal (one-time cost to populate the cache)
+- **TTL**: 5 minutes, reset on each hit
+
+For our example: 600-token system prompt cached at 10% → $0.000375 instead of $0.00150 per query — 75% saving on that segment. At 10,000 queries/day that is $11.25/day saved from caching one system prompt.
+
+Google Gemini has a similar mechanism (minimum 32,768 tokens, configurable TTL up to 1 hour) for large context caching.
+
+<Callout type="tip">
+The system prompt is the highest-value caching target because it is identical across all requests. After that, consider caching large retrieved documents that appear in many queries — a legal contract or product specification referenced repeatedly is a good candidate.
+</Callout>
+
+## Batch API (50% discount, async)
+
+For workloads that do not need real-time responses, the Anthropic Batch API cuts all token prices in half:
+
+```python
+response = client.messages.batches.create(
+    requests=[
+        {
+            "custom_id": f"doc_{i}",
+            "params": {
+                "model": "claude-sonnet-4-5",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": doc}]
+            }
+        }
+        for i, doc in enumerate(documents)
+    ]
+)
+batch_id = response.id
+
+# Poll for completion (typically 1–4 hours, max 24 hours)
+import time
+while True:
+    batch = client.messages.batches.retrieve(batch_id)
+    if batch.processing_status == "ended":
+        break
+    time.sleep(60)
+
+for result in client.messages.batches.results(batch_id):
+    print(result.custom_id, result.result.message.content)
+```
+
+Use Batch API for: nightly eval runs, bulk document summarisation, generating training data, offline enrichment pipelines. Do **not** use it for user-facing real-time responses.
+
+## Model routing
+
+Route requests to an appropriate model tier based on task complexity:
+
+```python
+ROUTING_PROMPT = (
+    "Classify this query as 'simple' (factual lookup, yes/no, status check) "
+    "or 'complex' (multi-step reasoning, explanation, comparison, analysis). "
+    "Output one word only.\n\nQuery: {query}"
+)
+
+def route_and_call(user_message: str) -> str:
+    route = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": ROUTING_PROMPT.format(query=user_message)}],
+        max_tokens=5
+    ).choices[0].message.content.strip().lower()
+
+    model = "gpt-4o" if route == "complex" else "gpt-4o-mini"
+    return openai.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system",  "content": SYSTEM_PROMPT},
+            {"role": "user",    "content": user_message}
+        ]
+    ).choices[0].message.content
+```
+
+If 70% of queries route to GPT-4o-mini and 30% to GPT-4o, the blended cost per query drops from $0.00655 to roughly $0.0027 — a 59% reduction with no change in quality on complex queries. The routing classifier costs roughly $0.0001 per call, which is negligible.
+
+## Semantic caching
+
+Semantic caching stores previous LLM responses indexed by the embedding of the query. On a cache hit (cosine similarity above threshold), return the cached answer without calling the LLM.
+
+Works well: high-traffic FAQ bots, dashboards with a small set of common queries, translation services with repetitive source texts.
+
+Works poorly: agents processing unique user-provided documents, creative writing, search with diverse queries — cache hit rate will be too low to justify the overhead.
+
+## Interactive cost explorer
+
+The calculator below lets you pick a model, set your traffic volume, and toggle each optimisation strategy to see the monetary impact in real time.
+
+<TokenCostCalculator />
+
+<Quiz
+  question="What is the minimum number of tokens a message block must contain to be eligible for Anthropic prompt caching?"
+  options={[
+    {
+      label: "1,024 tokens",
+      correct: true,
+      explanation: "Anthropic's prompt caching requires the cached block to be at least 1,024 tokens. Shorter system prompts are not eligible and will be charged at the normal input rate regardless of the cache_control setting."
+    },
+    {
+      label: "512 tokens",
+      correct: false,
+      explanation: "The minimum is 1,024 tokens, not 512. A 512-token system prompt is a common length but falls below the caching threshold."
+    },
+    {
+      label: "4,096 tokens",
+      correct: false,
+      explanation: "Such a block would be cacheable, but the minimum threshold is 1,024, not 4,096."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Which workload is LEAST suitable for the Anthropic Batch API?"
+  options={[
+    {
+      label: "Real-time customer support responses",
+      correct: true,
+      explanation: "The Batch API has a maximum turnaround of 24 hours. This is completely incompatible with real-time support where users expect a response in seconds."
+    },
+    {
+      label: "Nightly document summarisation pipeline",
+      correct: false,
+      explanation: "Nightly batch jobs are exactly what the Batch API is designed for. 24-hour turnaround is acceptable when results are ready by the next morning."
+    },
+    {
+      label: "Offline evaluation dataset scoring",
+      correct: false,
+      explanation: "Scoring an eval dataset is a classic offline workload. The 50% discount makes the Batch API the right choice here."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 2](/modules/module-09-observability-cost-reliability/lesson-02) · [Lesson 4: Reliability Patterns →](/modules/module-09-observability-cost-reliability/lesson-04)
