@@ -1,0 +1,115 @@
+---
+title: "The LLM Threat Model"
+module: "module-08-security-safety"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · The LLM Threat Model
+
+Traditional software has a clear attack surface: inputs flow through code, and code either validates them or it doesn't. LLMs break this model. The same natural-language input that asks a helpful question can also be a weapon — and the model has no native way to tell the difference. This lesson gives you the vocabulary and framework to reason about that problem systematically.
+
+## What makes LLMs a distinct attack surface
+
+Three properties make LLMs different from any software target you have secured before.
+
+**Non-determinism.** The same input doesn't always produce the same output. Defences that rely on pattern matching — blocklists of known attack strings — are trivially evaded by paraphrase. You cannot enumerate the malicious input space.
+
+**Natural language as code.** In traditional software, data and instructions live in separate channels: an HTTP request body is data, your application code is instructions. In an LLM, both arrive as text in the same context window. The model learns to interpret some text as instructions (system prompt) and other text as data (user input), but this distinction is a soft heuristic, not a hard boundary. An attacker who can inject text into the context window can potentially inject instructions.
+
+**Emergent capabilities.** LLMs can perform tasks their designers didn't anticipate. A model trained on text can follow complex multi-step instructions, reason about its own outputs, and chain tool calls — all of which expand the attack surface beyond what was explicitly designed.
+
+<Callout type="key">
+The fundamental vulnerability: LLMs have no hardware or protocol-level boundary between "system instructions" and "user data." Everything is tokens. An attacker who can inject tokens into the context window can potentially inject instructions.
+</Callout>
+
+## OWASP LLM Top 10 — 2025 edition
+
+The Open Worldwide Application Security Project publishes a Top 10 list specifically for LLM applications. The 2025 edition was updated to reflect the shift to agentic AI and RAG systems.
+
+<OWASPThreatMap />
+
+Two entries are **new in 2025**:
+
+- **LLM07 — System Prompt Leakage**: attackers extract the system prompt to learn operational logic, API keys, or prompt-engineering patterns — enabling more targeted follow-on attacks.
+- **LLM08 — Vector and Embedding Weaknesses**: RAG systems introduce a new attack surface. Poisoned vector databases, adversarial embeddings, and retrieval manipulation are real attack vectors discovered at scale in 2024–2025.
+
+**LLM06 — Excessive Agency** was elevated in prominence following incidents where agents with broad tool permissions caused irreversible harm through chained tool calls. We cover it in depth in Lesson 3.
+
+## AI security vs AI safety
+
+These terms are often conflated, but they describe different threat models requiring different defences.
+
+| | AI Security | AI Safety |
+|---|---|---|
+| **Threat actor** | Adversary with intent | No attacker required |
+| **Example failure** | Prompt injection leaks user data | Model optimises proxy metric, generates addictive content |
+| **Testing approach** | Red-teaming, penetration testing | Behavioural evaluation, interpretability |
+| **Primary defence** | Input validation, guardrails, sandboxing | RLHF, constitutional AI, alignment research |
+
+A system can be **secure but unsafe** (no attacker can break it, but it quietly optimises the wrong objective) or **safe but insecure** (well-aligned model, no guardrails). Production systems need both, and they require different testing regimes.
+
+## Threat modelling for AI applications
+
+STRIDE — a standard framework for software threat modelling — applies to LLM pipelines with AI-specific extensions:
+
+| STRIDE category | AI-specific example |
+|---|---|
+| **Spoofing** | Attacker impersonates a trusted sub-agent in a multi-agent system |
+| **Tampering** | Training data poisoning corrupts model behaviour at inference time |
+| **Repudiation** | Non-deterministic outputs make it hard to prove what the model said |
+| **Information disclosure** | Model leaks training data, system prompt, or other users' sessions |
+| **Denial of service** | LLM10: Unbounded token consumption via adversarial long inputs |
+| **Elevation of privilege** | LLM06: Agent uses tool permissions beyond its intended role |
+
+When designing your AI system, walk through each STRIDE category for every trust boundary in your architecture: user ↔ agent, agent ↔ tools, agent ↔ retrieval store, agent ↔ model API.
+
+<Callout type="tip">
+Draw your architecture before you write code. Mark every trust boundary. STRIDE each one. Threats found at design time cost 10× less to fix than threats found after deployment.
+</Callout>
+
+<Quiz
+  question="A developer notices their agent occasionally outputs users' email addresses from unrelated sessions. Which OWASP LLM category and threat model applies?"
+  options={[
+    {
+      label: "LLM02 Sensitive Information Disclosure — AI security",
+      correct: true,
+      explanation: "An adversarial or crafted input caused the model to disclose sensitive data across sessions. This is a concrete security failure. LLM02 covers information leakage including training data and cross-session data."
+    },
+    {
+      label: "LLM09 Misinformation — AI safety",
+      correct: false,
+      explanation: "Misinformation (LLM09) is about generating false content, not leaking real data. Disclosing real email addresses from another user's session is an information disclosure security failure."
+    },
+    {
+      label: "LLM10 Unbounded Consumption — AI security",
+      correct: false,
+      explanation: "LLM10 covers resource exhaustion (tokens, compute). Email leakage is an information disclosure issue, not a resource consumption one."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Which property of LLMs makes pattern-matching defences (e.g., blocklists of known attack strings) fundamentally insufficient?"
+  options={[
+    {
+      label: "Non-determinism and the effectively infinite paraphrase space of natural language",
+      correct: true,
+      explanation: "Any attack string can be rewritten in thousands of semantically equivalent ways. A blocklist can be evaded by synonym replacement, language switching, encoding tricks, or embedding the attack in retrieved content rather than user input — where the blocklist never sees it."
+    },
+    {
+      label: "LLMs are too slow to run blocklists in real time",
+      correct: false,
+      explanation: "Latency isn't the issue. The problem is coverage: the malicious input space is effectively infinite and blocklists will always have gaps that sophisticated attackers can find."
+    },
+    {
+      label: "OWASP doesn't recommend blocklists for any software",
+      correct: false,
+      explanation: "OWASP recommends input validation broadly. The issue specific to LLMs is that pattern-based validation is insufficient because the attack surface is the semantic meaning of the input, not its literal form."
+    }
+  ]}
+/>
+
+---
+
+[← Module overview](/modules/module-08-security-safety) · [Lesson 2 →](/modules/module-08-security-safety/lesson-02)
