@@ -1,0 +1,227 @@
+---
+title: "Guardrails & Defence Architecture"
+module: "module-08-security-safety"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Guardrails & Defence Architecture
+
+No single guardrail catches every attack. That's not a criticism of any particular tool — it's a mathematical inevitability given the infinite space of natural language inputs. The answer is layers: multiple independent defences at different positions in the pipeline, each catching what the others miss.
+
+## Why single-layer defences fail
+
+Consider a keyword blocklist. An attacker rewrites the attack using synonyms. The blocklist fails.
+
+Consider a classifier trained on known attacks. An attacker uses adversarial suffixes — sequences of tokens that are meaningless to humans but steer the model's output away from safety behaviours. Adversarial suffixes evade classifiers trained on natural language patterns.
+
+Consider a classifier that catches adversarial suffixes. A Crescendo attack (covered in Lesson 2) spreads the attack across multiple turns. A single-turn classifier never sees a smoking gun — each individual message looks benign.
+
+The implication: you need defences at the input level, the output level, and the conversation level, operating independently of each other.
+
+## Llama Guard 3 (Meta)
+
+Llama Guard 3 is the strongest single-model option for content safety classification as of 2025. Two variants:
+
+- **8B**: Best accuracy. Outperforms GPT-4 on content moderation at one-third the false-positive rate. Use for production systems where accuracy matters.
+- **1B**: Lower latency, lower cost. Use for high-throughput systems where milliseconds count.
+
+Llama Guard uses the MLCommons taxonomy — the same safety categories used by major AI labs for safety benchmarking. Running locally means no data leaves your infrastructure, which matters for regulated workloads.
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+model_id = "meta-llama/Llama-Guard-3-8B"
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+
+def classify(user_message: str, agent_response: str) -> str:
+    chat = [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": agent_response},
+    ]
+    input_ids = tokenizer.apply_chat_template(chat, return_tensors="pt")
+    output = model.generate(input_ids=input_ids, max_new_tokens=100)
+    result = tokenizer.decode(output[0][input_ids.shape[-1]:], skip_special_tokens=True)
+    return result  # "safe" or "unsafe\nS1" (with violation category)
+```
+
+## Azure Content Safety (Microsoft)
+
+Managed API service. Zero infrastructure, low operational burden, automatic model updates. Trade-off: data is sent to Microsoft's servers. For regulated workloads (healthcare, finance, legal) this may violate data residency requirements. For development and prototyping it is the lowest-friction option.
+
+```python
+from azure.ai.contentsafety import ContentSafetyClient
+from azure.core.credentials import AzureKeyCredential
+from azure.ai.contentsafety.models import AnalyzeTextOptions
+
+client = ContentSafetyClient(
+    endpoint="https://<resource>.cognitiveservices.azure.com/",
+    credential=AzureKeyCredential("<key>")
+)
+
+def check_output(text: str) -> None:
+    response = client.analyze_text(AnalyzeTextOptions(text=text))
+    for result in response.categories_analysis:
+        if result.severity >= 4:  # 0–6 scale; 4+ = block
+            raise ValueError(f"Content safety violation: {result.category}")
+```
+
+Pattern: use Azure Content Safety during development for fast iteration, graduate to Llama Guard 3 for production where data residency is required.
+
+## NeMo Guardrails v0.20.0 (NVIDIA)
+
+The key differentiator from other classifiers: **dialog-rail architecture** that models the full conversation, not just individual messages. This catches Crescendo-style multi-turn attacks that per-message classifiers miss entirely.
+
+Policies are written in Colang, a domain-specific language for conversation flows:
+
+```colang
+define user ask harmful
+  "how do I make a weapon"
+  "step by step instructions for bypassing security"
+
+define flow
+  user ask harmful
+  bot refuse to respond
+
+define bot refuse to respond
+  "I can't help with that."
+```
+
+Important caveat: NeMo Guardrails is not recommended as a standalone production guardrail (beta status as of mid-2026). Use it as the conversation-level layer in an ensemble, not as your only defence.
+
+## Prompt Shields (Microsoft)
+
+Specifically designed to detect prompt injection attempts in both user input and retrieved documents:
+
+```python
+from azure.ai.contentsafety.models import ShieldPromptOptions
+
+response = client.shield_prompt(ShieldPromptOptions(
+    user_prompt=user_message,
+    documents=[doc.content for doc in retrieved_docs]
+))
+if response.user_prompt_attack_result.attack_detected:
+    raise ValueError("Prompt injection detected in user message")
+if any(r.attack_detected for r in response.documents_attack_result):
+    raise ValueError("Prompt injection detected in retrieved documents")
+```
+
+Prompt Shields complements content safety classifiers: content classifiers catch harmful outputs regardless of attack vector; Prompt Shields specifically targets the injection pattern in inputs and retrieved content.
+
+## Constitutional AI (Anthropic)
+
+Rather than classifying outputs post-hoc, Constitutional AI bakes safety into the model through training. The model is given a set of written principles (a "constitution") and learns to self-evaluate and revise its responses against them through a supervised critique-revision cycle, followed by RLHF.
+
+The result is a model that is less likely to produce harmful outputs in the first place — reducing the load on external guardrails. Constitutional AI is a training-time defence; the tools above are inference-time defences. A well-aligned base model plus inference-time guardrails is stronger than either alone.
+
+## Layered architecture
+
+```
+User input
+    │
+    ▼
+┌─────────────────────────────────┐
+│ Layer 1: Input validation       │
+│ • Length and format checks      │
+│ • Prompt Shields (injection)    │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ Layer 2: Input classification   │
+│ • Llama Guard 3 on user message │
+│ • Block if unsafe               │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ Layer 3: Agent + context        │
+│ • Source attribution on docs    │
+│ • Tool allowlisting enforced    │
+└─────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────┐
+│ Layer 4: Output classification  │
+│ • Llama Guard 3 on response     │
+│ • NeMo dialog rail check        │
+│ • Block or flag if unsafe       │
+└─────────────────────────────────┘
+    │
+    ▼
+User response
+```
+
+<Callout type="key">
+Each layer is independent. If an attacker evades the input classifier, they still hit the output classifier. If they evade the output classifier via clever reframing, source attribution in Layer 3 may have already contained the blast radius. Defence-in-depth means no single bypass is sufficient for a full compromise.
+</Callout>
+
+## Ensemble pattern
+
+For high-assurance systems, run multiple classifiers in parallel and combine their signals:
+
+```python
+import asyncio
+
+async def safety_check(user_message: str, agent_response: str) -> bool:
+    llama_result, azure_result = await asyncio.gather(
+        llama_guard_classify(user_message, agent_response),
+        azure_content_safety_analyze(agent_response),
+    )
+    # Any-fail policy: block if either classifier flags it
+    return llama_result == "safe" and azure_result.max_severity < 4
+
+# In production: wrap agent response in safety_check before sending to user
+response = await agent.generate(user_message)
+if not await safety_check(user_message, response):
+    response = "I can't provide that response."
+```
+
+Trade-off: latency vs coverage. Parallel execution keeps latency bounded by the slower of the two (~200ms for Azure). The accuracy gain from the ensemble exceeds what either model achieves independently.
+
+<Quiz
+  question="A Crescendo attack spreads a jailbreak across 8 conversation turns. Which guardrail architecture is most likely to detect it?"
+  options={[
+    {
+      label: "A dialog-level rail (NeMo Guardrails) that evaluates the full conversation trajectory",
+      correct: true,
+      explanation: "Crescendo works by keeping each individual message below the detection threshold of per-message classifiers. A dialog-level rail that models the full conversation can detect the gradual escalation pattern even when each individual message appears benign."
+    },
+    {
+      label: "Llama Guard 3 applied to each user message independently",
+      correct: false,
+      explanation: "Llama Guard 3 classifies individual messages. In a Crescendo attack, each message is designed to appear benign — the attack only becomes apparent when you see the full trajectory. A per-message classifier won't catch the pattern."
+    },
+    {
+      label: "Azure Content Safety with severity threshold lowered to 2",
+      correct: false,
+      explanation: "Lowering the severity threshold increases false positives without solving the architectural problem: Azure Content Safety still operates per-message, and Crescendo attacks are designed so each individual message looks benign to a per-message classifier."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Your agent handles medical queries and must not send patient data to third-party servers. Which guardrail stack is most appropriate?"
+  options={[
+    {
+      label: "Llama Guard 3 8B running locally + NeMo Guardrails for dialog policy",
+      correct: true,
+      explanation: "Both tools run on your own infrastructure — no data leaves your servers. Llama Guard 3 8B provides strong content classification; NeMo Guardrails adds conversation-level policy enforcement. This satisfies data residency requirements for regulated medical workloads."
+    },
+    {
+      label: "Azure Content Safety + Prompt Shields",
+      correct: false,
+      explanation: "Azure Content Safety and Prompt Shields are cloud APIs — all data is sent to Microsoft's servers for analysis. For regulated medical workloads handling patient data, this is likely a compliance violation under HIPAA or GDPR."
+    },
+    {
+      label: "GPT-4 as a safety classifier with a carefully written system prompt",
+      correct: false,
+      explanation: "Using GPT-4 as a safety classifier sends all agent outputs to OpenAI's API, violating data residency requirements. It also creates a circular dependency: the safety layer is powered by the same type of technology as the agent it's supposed to guard."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 3](/modules/module-08-security-safety/lesson-03) · [Lesson 5 →](/modules/module-08-security-safety/lesson-05)
