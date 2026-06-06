@@ -33,6 +33,9 @@ import { CommunicationPatternSim } from './CommunicationPatternSim'
 import { FailureCascadeSim } from './FailureCascadeSim'
 import { StatefulReplicaSim } from './StatefulReplicaSim'
 import { RetryBackoffSim } from './RetryBackoffSim'
+import { OWASPThreatMap } from './OWASPThreatMap'
+import { PromptInjectionSim } from './PromptInjectionSim'
+import { AgentPermissionAudit } from './AgentPermissionAudit'
 import { proseComponents } from './prose'
 
 export const mdxComponents = {
@@ -72,4 +75,7 @@ export const mdxComponents = {
   FailureCascadeSim,
   StatefulReplicaSim,
   RetryBackoffSim,
+  OWASPThreatMap,
+  PromptInjectionSim,
+  AgentPermissionAudit,
 }
