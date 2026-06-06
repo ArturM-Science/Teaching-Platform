@@ -1,0 +1,309 @@
+---
+title: "Lab: Instrument, Cost-Audit & Harden Your Agent"
+module: "module-09-observability-cost-reliability"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab · Instrument, Cost-Audit & Harden Your Agent
+
+<LabBrief
+  title="Instrument, Cost-Audit & Harden Your Agent"
+  time="2–3 hours"
+>
+
+#### Objective
+
+Take a skeleton customer support agent with zero observability and bring it to production readiness. You will add Langfuse v3 tracing, run a cost audit, implement a two-tier fallback chain with a circuit breaker, write SLO definitions, and configure a quality alert.
+
+#### Setup
+
+```bash
+# Clone the sample agent
+git clone https://github.com/ArturM-Science/Teaching-Platform
+cd labs/module-09-observability-cost-reliability
+
+# Create virtual environment
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+# Includes: langfuse>=3.0.0, openai, anthropic, pybreaker, fastapi, uvicorn, httpx
+
+# Set credentials
+export OPENAI_API_KEY="sk-..."
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_HOST="https://cloud.langfuse.com"  # or your self-hosted URL
+```
+
+#### Deliverables
+
+- `instrumented_agent.py` — fully traced agent; all LLM and tool spans visible in Langfuse with required attributes; no PII in any span
+- `cost_audit.md` — current monthly cost projection, 3 highest-cost line items, revised projection after ≥ 30% reduction
+- `fallback_agent.py` — two-tier fallback chain with `pybreaker` circuit breaker
+- `slo_definitions.yaml` — two SLO definitions (TTFT p95 + quality score) with thresholds and alert conditions
+- `alert_screenshot.png` — Langfuse alert configured to fire when 7-day quality rolling average drops below 3.5
+- `readiness_checklist.md` — all 12 items from Lesson 5, each marked Pass / Fail / N-A with a one-sentence justification
+
+#### Hard constraints
+
+1. Must use Langfuse v3 SDK (`langfuse>=3.0.0`) — LangSmith or other backends are not accepted
+2. All LLM spans must include `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens` as attributes
+3. Circuit breaker must trip after ≤ 3 consecutive failures and reset after ≥ 30s (`fail_max=3, reset_timeout=30`)
+4. Cost reduction must document before/after token counts and prices — "it feels cheaper" is not accepted
+5. No PII (user emails, names, phone numbers) may appear in any span attribute or log entry
+6. The fallback chain must log which tier served each request as a Langfuse trace attribute
+
+</LabBrief>
+
+## Step 1 — Langfuse setup (~20 min)
+
+Create a free account at `cloud.langfuse.com` (or run the provided `docker-compose.yml` for self-hosted):
+
+```bash
+# Verify your credentials work
+python verify_langfuse.py
+# Expected: "Connected. Test trace ID: trace_xxxxxx"
+# Check the Langfuse UI to confirm the test trace appears.
+```
+
+If you see `AuthenticationError`, double-check that `LANGFUSE_PUBLIC_KEY` starts with `pk-lf-` and `LANGFUSE_SECRET_KEY` starts with `sk-lf-`. The public and secret keys are often swapped by mistake.
+
+## Step 2 — Add instrumentation (~45 min)
+
+Open `agent/agent.py`. The skeleton agent has a single `run()` function and a `web_search()` tool. Both have zero observability.
+
+**2a. Add the Langfuse OpenAI wrapper:**
+
+```python
+# Replace this line in agent.py:
+import openai
+# With:
+from langfuse.openai import openai
+from langfuse.decorators import observe, langfuse_context
+```
+
+**2b. Decorate the main function:**
+
+```python
+@observe()
+def run(user_message: str, user_id: str) -> str:
+    langfuse_context.update_current_trace(
+        name="customer_support",
+        user_id=user_id,
+        tags=["production", "lab"]
+    )
+    # existing agent code unchanged
+    ...
+```
+
+**2c. Decorate the tool:**
+
+```python
+@observe(name="tool:web_search", as_type="tool")
+def web_search(query: str) -> str:
+    langfuse_context.update_current_observation(
+        input={"query": query},
+        metadata={"engine": "serper"}
+    )
+    result = _serper_call(query)
+    langfuse_context.update_current_observation(output={"snippet": result[:300]})
+    return result
+```
+
+**2d. Add structured logging:**
+
+```python
+import logging, json, time
+
+def log(level: str, msg: str, **fields) -> None:
+    logging.info(json.dumps({
+        "ts": time.time(), "level": level, "msg": msg,
+        "trace_id": langfuse_context.get_current_trace_id(),
+        **fields
+    }))
+```
+
+Run 10 test queries and verify in the Langfuse UI that each trace shows:
+- A root `customer_support` span
+- A child `llm_call` span with `prompt_tokens`, `completion_tokens`, and `cost` populated
+- A child `tool:web_search` span (if the agent searched)
+
+## Step 3 — Run the cost audit (~30 min)
+
+Export the last 100 traces from Langfuse (Traces → Export CSV). Compute:
+
+```python
+import csv
+
+with open("langfuse_export.csv") as f:
+    rows = list(csv.DictReader(f))
+
+prompt_tokens    = sum(int(r["prompt_tokens"])    for r in rows if r["prompt_tokens"])
+completion_tokens = sum(int(r["completion_tokens"]) for r in rows if r["completion_tokens"])
+
+avg_prompt      = prompt_tokens / len(rows)
+avg_completion  = completion_tokens / len(rows)
+queries_per_day = 1000  # your estimated daily volume
+
+# GPT-4o pricing (adjust to your model)
+cost_per_query = (avg_prompt / 1e6 * 2.50) + (avg_completion / 1e6 * 10.00)
+monthly_cost   = cost_per_query * queries_per_day * 30
+print(f"Baseline monthly cost: ${monthly_cost:.2f}")
+```
+
+Identify the three highest-cost line items (usually: system prompt tokens, retrieved context tokens, completion tokens). Apply at least one optimisation from Lesson 3:
+- Enable prompt caching on the system prompt if it is ≥ 1,024 tokens
+- Route simple queries to GPT-4o-mini
+- Enable Batch API for the evaluation path
+
+Document the before/after token counts and prices in `cost_audit.md`. The reduction must be ≥ 30%.
+
+## Step 4 — Implement the fallback chain (~30 min)
+
+Create `fallback_agent.py` with a two-tier fallback chain:
+
+```python
+import pybreaker
+from langfuse.decorators import observe, langfuse_context
+from langfuse.openai import openai
+import anthropic
+
+openai_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30, name="gpt4o")
+
+@observe()
+def run_with_fallback(user_message: str) -> str:
+    tier = "primary"
+    try:
+        response = openai_breaker.call(
+            lambda: openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": user_message}]
+            ).choices[0].message.content
+        )
+    except (pybreaker.CircuitBreakerError, Exception):
+        tier = "secondary"
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-3-5-20251001",
+            max_tokens=512,
+            messages=[{"role": "user", "content": user_message}]
+        ).content[0].text
+
+    langfuse_context.update_current_trace(metadata={"tier_used": tier})
+    return response
+```
+
+Test the fallback by temporarily setting an invalid `OPENAI_API_KEY` environment variable and confirming:
+1. Three consecutive calls all fail on the primary
+2. The fourth call routes to the secondary (Anthropic) without attempting OpenAI
+3. All traces in Langfuse show `tier_used: secondary`
+
+## Step 5 — Configure alerting (~20 min)
+
+**5a. Set up the LLM-as-judge scorer:**
+
+In Langfuse UI → Evaluators → Create new:
+- Name: `helpfulness`
+- Model: `gpt-4o-mini`
+- Prompt: "Rate this response from 1 (not helpful) to 5 (excellent). Output a single integer only.\nUser: {{input}}\nAgent: {{output}}"
+- Target trace: `customer_support`
+- Sample rate: 10%
+
+**5b. Create the quality alert:**
+
+In Langfuse UI → Settings → Alerts → Create:
+- Condition: `rolling_7d_avg(score["helpfulness"]) < 3.5`
+- Delivery: webhook to the provided test endpoint `https://webhook.site/<your-id>`
+- Take a screenshot of the configured alert for `alert_screenshot.png`
+
+**5c. Write the SLO definitions:**
+
+```yaml
+# slo_definitions.yaml
+slos:
+  - name: ttft_p95
+    sli: p95(span_latency_ms["ttft_ms"])
+    objective: "< 800"
+    window: 28d
+    alert:
+      fast_burn:
+        window: 1h
+        burn_rate: 14.4
+        action: page_oncall
+      slow_burn:
+        window: 6h
+        burn_rate: 6
+        action: slack_ticket
+
+  - name: quality_score
+    sli: rolling_7d_avg(langfuse_score["helpfulness"])
+    objective: ">= 4.0"
+    window: 7d
+    alert:
+      warning:
+        threshold: "< 3.5"
+        action: slack_warning
+      critical:
+        threshold: "< 3.0"
+        action: page_oncall
+```
+
+<Rubric
+  threshold="Score 3+ on at least 4 of 5 criteria to pass"
+  criteria={[
+    {
+      name: "Instrumentation completeness",
+      exceeds: "All LLM and tool spans visible in Langfuse with all required attributes (model, prompt_tokens, completion_tokens, cost_usd, latency_ms, status); structured logs include trace_id; zero PII in any span",
+      meets: "All LLM and tool spans visible; prompt_tokens and completion_tokens present; no PII",
+      approaching: "LLM spans traced but tool spans missing, or PII found in span attributes",
+      below: "Agent not connected to Langfuse, or no spans visible in UI"
+    },
+    {
+      name: "Cost audit quality",
+      exceeds: "Before/after documented with actual token counts from Langfuse export; ≥ 30% reduction achieved; top 3 cost drivers clearly identified with specific token counts",
+      meets: "Before/after documented with actual token counts; ≥ 30% reduction achieved",
+      approaching: "Reduction estimated rather than measured from real token data, or reduction < 30%",
+      below: "No cost audit completed or no token count data used"
+    },
+    {
+      name: "Fallback and circuit breaker",
+      exceeds: "Two-tier fallback with correct pybreaker config; fallback activates on primary failure; tier_used logged in every trace; tested with forced primary failure",
+      meets: "Two-tier fallback with correct pybreaker config; fallback activates on primary failure; tier_used logged",
+      approaching: "Fallback implemented but circuit breaker config incorrect (wrong fail_max or reset_timeout), or tier_used not logged",
+      below: "No fallback chain implemented"
+    },
+    {
+      name: "SLO definitions",
+      exceeds: "Both SLOs defined with specific thresholds; both fast-burn and slow-burn alert conditions specified; Langfuse alert configured and screenshot provided",
+      meets: "Both SLOs defined with specific thresholds; Langfuse quality alert configured",
+      approaching: "SLOs defined but alert not configured in Langfuse, or thresholds missing",
+      below: "No SLO definitions completed"
+    },
+    {
+      name: "Production readiness audit",
+      exceeds: "All 12 checklist items addressed with Pass/Fail/N-A; every Fail has a specific remediation plan with an owner and date",
+      meets: "All 12 items addressed with Pass/Fail/N-A and one-sentence justification each",
+      approaching: "Fewer than 12 items addressed, or items marked Pass without justification",
+      below: "Checklist not completed"
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-09-observability-cost-reliability"
+  items={[
+    "I can read a Langfuse trace waterfall and identify which span caused a latency spike and whether it involved a retry",
+    "I have wrapped a multi-step agent with @observe decorators and verified that tool call spans appear as children of the root agent_run span in Langfuse",
+    "I have calculated my agent's cost-per-query from real token data and identified the single highest-value optimisation I can apply",
+    "I have implemented a fallback chain with a pybreaker circuit breaker and tested that it trips after 3 consecutive failures",
+    "I have written two SLO definitions — one for TTFT p95 and one for quality score — with specific thresholds and alert conditions",
+    "My agent passes all 12 items on the production readiness checklist, and I have a Langfuse dashboard showing live traces with cost and quality data"
+  ]}
+  next="Module 10"
+/>
+
+---
+
+[← Lesson 5](/modules/module-09-observability-cost-reliability/lesson-05)
