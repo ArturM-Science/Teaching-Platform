@@ -1,0 +1,319 @@
+---
+title: "Lab: Red-team and Harden Your Agent"
+module: "module-08-security-safety"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab · Red-team and Harden Your Agent
+
+<LabBrief
+  title="Red-team and Harden Your Agent"
+  time="2–3 hours"
+>
+
+#### Objective
+
+Apply the module's security framework to a real agent. You will scan for vulnerabilities with Garak, implement a Llama Guard 3 output filter, re-scan to verify mitigations, and produce a compliance posture document.
+
+#### Setup
+
+```bash
+# Clone the sample agent (customer support bot)
+git clone https://github.com/ArturM-Science/Teaching-Platform
+cd labs/module-08-security-safety
+
+# Create and activate a virtual environment
+python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+# Includes: garak, transformers, torch, fastapi, uvicorn, httpx
+
+# Set your API key
+export OPENAI_API_KEY="sk-..."
+```
+
+#### Deliverables
+
+- `scan_report_baseline.json` — Garak baseline scan output (unmodified agent)
+- `scan_report_hardened.json` — Garak re-scan after adding guardrail
+- `guardrail.py` — Llama Guard 3 output filter integrated into the agent
+- `permission_audit.md` — Tool permission review with OWASP LLM06 annotations
+- `compliance_posture.md` — One-page posture document mapped to EU AI Act and NIST AI RMF
+- `red_team_findings.md` — Three vulnerabilities found, severity, and proposed mitigations
+
+#### Hard constraints
+
+1. The guardrail must call Llama Guard 3 **locally** — no data may be sent to external APIs
+2. The guardrail must be applied to **every** agent response before it is returned to the caller
+3. The permission audit must cover **all** tools registered in `agent/tools.py`
+4. The re-scan must show at least one category where the hardened agent outperforms the baseline
+5. The compliance posture document must reference at least three NIST AI RMF functions (MAP, MEASURE, MANAGE, or GOVERN)
+6. No changes to the sample agent's core functionality — it must still pass the existing integration tests
+
+</LabBrief>
+
+## Step 1 — Run the baseline scan
+
+Start by establishing what vulnerabilities exist in the unmodified agent:
+
+```bash
+# Start the sample agent
+uvicorn agent.main:app --port 8080 &
+
+# Run Garak against it
+garak --model_type rest \
+  --model_name http://localhost:8080/chat \
+  --probes prompt_injection,jailbreak,leakage,continuation \
+  --report_prefix scan_report_baseline
+
+# View the summary
+cat scan_report_baseline.report.jsonl | python -m json.tool | head -100
+```
+
+**What to look for in the report:**
+
+- `probe_name` — which probe category found a vulnerability
+- `score` — 0.0 (fully robust) to 1.0 (fully vulnerable)
+- `passed` / `failed` counts — how many individual attack attempts succeeded
+- `examples` — concrete inputs that caused failures
+
+Record the top three vulnerabilities by score in `red_team_findings.md`. For each: probe name, score, one example input that triggered it, and your proposed mitigation.
+
+## Step 2 — Audit tool permissions
+
+Review `agent/tools.py` and produce `permission_audit.md` covering:
+
+```markdown
+# Tool Permission Audit — Module 08 Lab
+
+## Agent: Customer Support Bot
+## Date: [today]
+## Auditor: [your name]
+
+### Tools registered
+
+| Tool | Category | Risk weight | Justified? |
+|------|----------|-------------|------------|
+| read_order_status | Read | Low | Yes — core task |
+| search_catalog    | Read | Low | Yes — core task |
+| send_email        | Exfiltrate | High | ⚠ Not justified — remove |
+| ...               | ...  | ... | ... |
+
+### OWASP LLM06 findings
+
+[For each unjustified high-risk tool: describe the blast radius if
+the agent is compromised via prompt injection with this tool enabled]
+
+### Recommended permission set (least privilege)
+
+[List only the tools required for the agent's core function]
+```
+
+After documenting, **remove the unjustified tools** from `agent/tools.py`. The integration tests must still pass.
+
+## Step 3 — Implement the guardrail
+
+Add Llama Guard 3 as an output filter. Create `guardrail.py`:
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+
+MODEL_ID = "meta-llama/Llama-Guard-3-1B"  # 1B for lab; use 8B in production
+
+_tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+_model = AutoModelForCausalLM.from_pretrained(
+    MODEL_ID,
+    device_map="auto",
+    torch_dtype=torch.bfloat16,
+)
+
+def classify_response(user_message: str, agent_response: str) -> tuple[bool, str]:
+    """
+    Returns (is_safe, category).
+    category is '' if safe, or e.g. 'S1' (violent content) if unsafe.
+    """
+    chat = [
+        {"role": "user", "content": user_message},
+        {"role": "assistant", "content": agent_response},
+    ]
+    input_ids = _tokenizer.apply_chat_template(
+        chat, return_tensors="pt"
+    ).to(_model.device)
+    
+    with torch.inference_mode():
+        output = _model.generate(input_ids=input_ids, max_new_tokens=20, pad_token_id=0)
+    
+    result = _tokenizer.decode(
+        output[0][input_ids.shape[-1]:], skip_special_tokens=True
+    ).strip()
+    
+    if result.startswith("safe"):
+        return True, ""
+    parts = result.split("\n")
+    category = parts[1] if len(parts) > 1 else "unknown"
+    return False, category
+```
+
+Integrate into `agent/main.py`:
+
+```python
+from guardrail import classify_response
+
+@app.post("/chat")
+async def chat(request: ChatRequest):
+    response_text = await agent.generate(request.message)
+    
+    is_safe, category = classify_response(request.message, response_text)
+    if not is_safe:
+        return ChatResponse(
+            message="I can't provide that response.",
+            blocked=True,
+            category=category,
+        )
+    
+    return ChatResponse(message=response_text, blocked=False)
+```
+
+Run the integration tests to confirm the agent still functions correctly:
+
+```bash
+pytest tests/test_integration.py -v
+```
+
+## Step 4 — Re-scan and compare
+
+```bash
+# Re-start the hardened agent
+uvicorn agent.main:app --port 8080 &
+
+# Re-run the same probes
+garak --model_type rest \
+  --model_name http://localhost:8080/chat \
+  --probes prompt_injection,jailbreak,leakage,continuation \
+  --report_prefix scan_report_hardened
+```
+
+Compare baseline vs. hardened:
+
+```python
+import json
+
+with open("scan_report_baseline.report.jsonl") as f:
+    baseline = [json.loads(l) for l in f if l.strip()]
+
+with open("scan_report_hardened.report.jsonl") as f:
+    hardened = [json.loads(l) for l in f if l.strip()]
+
+for probe in set(r["probe_name"] for r in baseline):
+    b_score = next((r["score"] for r in baseline if r["probe_name"] == probe), None)
+    h_score = next((r["score"] for r in hardened if r["probe_name"] == probe), None)
+    if b_score is not None and h_score is not None:
+        delta = b_score - h_score
+        print(f"{probe}: {b_score:.2f} → {h_score:.2f} ({'+' if delta >= 0 else ''}{delta:.2f})")
+```
+
+Document the delta in `scan_report_hardened.json` (add a `comparison` key with your findings).
+
+## Step 5 — Write the compliance posture document
+
+Produce `compliance_posture.md`. Template:
+
+```markdown
+# AI Compliance Posture — Customer Support Agent
+## Date: [today]
+
+## System classification
+
+| Framework | Classification | Rationale |
+|-----------|---------------|-----------|
+| EU AI Act | [High-risk / Limited / Minimal] | [reason] |
+| NIST AI RMF | [tier 1–4] | [reason] |
+| ISO 42001 | [applicable / not yet certified] | [reason] |
+
+## NIST AI RMF mapping
+
+### MAP — Risks identified
+[List the three vulnerabilities from your Garak baseline scan]
+
+### MEASURE — How risks were assessed
+[Describe: Garak scan methodology, probes used, scoring interpretation]
+
+### MANAGE — Mitigations implemented
+[Describe: Llama Guard 3 output filter, tool permission reduction, source attribution]
+
+### GOVERN — Process controls
+[Describe: scheduled re-scan cadence, who owns security reviews, escalation path]
+
+## EU AI Act obligations (if high-risk)
+
+- [ ] Conformity assessment completed
+- [ ] Human oversight mechanism documented
+- [ ] Transparency notice for end users
+- [ ] Activity logging enabled
+- [ ] Registration in EU AI database (required before deployment)
+
+## Open risks
+
+[List any vulnerabilities that remain after hardening, with severity and planned remediation date]
+```
+
+<Rubric
+  threshold="Score 3+ on at least 4 of 5 criteria to pass"
+  criteria={[
+    {
+      name: "Vulnerability discovery",
+      exceeds: "Three vulnerabilities identified with correct OWASP category, accurate severity assessment, and concrete attack scenario demonstrated",
+      meets: "Three vulnerabilities identified with correct OWASP category and severity",
+      approaching: "Fewer than three vulnerabilities identified, or OWASP categorisation is incorrect",
+      below: "No structured vulnerability findings or Garak scan not completed"
+    },
+    {
+      name: "Guardrail implementation",
+      exceeds: "Llama Guard 3 integrated, all responses filtered, integration tests pass, and re-scan shows measurable improvement on at least two probe categories",
+      meets: "Llama Guard 3 integrated, all responses filtered, integration tests pass",
+      approaching: "Guardrail implemented but not applied to all responses, or integration tests failing",
+      below: "Guardrail not implemented or Llama Guard not used (e.g., replaced with API-based classifier)"
+    },
+    {
+      name: "Permission audit",
+      exceeds: "All tools audited, unjustified tools removed from code, blast radius analysis for each removed tool, and OWASP LLM06 principle correctly applied",
+      meets: "All tools audited, unjustified tools identified and removed, OWASP LLM06 referenced",
+      approaching: "Audit incomplete or unjustified tools identified but not removed from code",
+      below: "No structured permission audit completed"
+    },
+    {
+      name: "Compliance mapping",
+      exceeds: "All three NIST AI RMF functions mapped with specific evidence from the lab, EU AI Act classification justified with legal rationale, ISO 42001 applicability addressed",
+      meets: "Three NIST AI RMF functions mapped with lab evidence, EU AI Act classification correct",
+      approaching: "Fewer than three NIST functions mapped, or EU AI Act classification missing or incorrect",
+      below: "Compliance document not completed or contains no specific evidence from the lab work"
+    },
+    {
+      name: "Documentation quality",
+      exceeds: "All deliverables present, findings are actionable and specific, open risks have remediation dates and owners",
+      meets: "All six deliverables present and complete",
+      approaching: "One or two deliverables missing or substantially incomplete",
+      below: "Three or more deliverables missing"
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-08-security-safety"
+  items={[
+    "I can classify an AI system failure using the OWASP LLM Top 10 2025 and explain which category applies",
+    "I can explain why prompt injection is architecturally unfixable and describe at least three defence-in-depth mitigations",
+    "I can audit agent tool permissions and identify excessive agency violations with OWASP LLM06",
+    "I have integrated Llama Guard 3 as an output filter running entirely on local infrastructure",
+    "I can distinguish proxy misalignment from a security attack and explain which testing regime addresses each",
+    "I have produced a compliance posture document mapping to EU AI Act and NIST AI RMF"
+  ]}
+  next="Module 09"
+/>
+
+---
+
+[← Lesson 5](/modules/module-08-security-safety/lesson-05)
