@@ -1,0 +1,44 @@
+---
+title: "Observability, Cost & Reliability"
+module: "module-09-observability-cost-reliability"
+part: 4
+slug: "module-09-observability-cost-reliability"
+---
+
+# Module 09 · Observability, Cost & Reliability
+
+**Part 4 — Production** · 5 lessons + lab · ~6.5 hours total
+
+<LearningObjectives>
+- Read an OpenTelemetry distributed trace for a multi-step agent and identify latency bottlenecks and retry events
+- Instrument a Python agent with Langfuse v3, capturing all required span attributes without logging PII
+- Calculate per-query and per-month LLM API cost and apply at least one optimisation (prompt caching, model routing, or Batch API)
+- Design a three-tier model fallback chain with circuit breakers and explain the Closed / Open / Half-Open state transitions
+- Define SLOs for TTFT and output quality, configure alerts, and interpret error budget burn rates
+- Audit an agent system against a 12-item production readiness checklist
+</LearningObjectives>
+
+## What you'll build
+
+In the lab you will take a skeleton customer support agent with zero observability and bring it to production readiness: add Langfuse v3 tracing, run a cost audit, implement a two-tier fallback chain with a `pybreaker` circuit breaker, write SLO definitions, and configure a quality alert.
+
+## Why observability, cost, and reliability belong together
+
+A deployed agent costs money on every request, has latency on every call, and can fail in ways that return HTTP 200 — a hallucinated answer looks identical to a correct one at the network layer. Traditional APM tools miss all three dimensions: they track infrastructure signals, not token economics, semantic quality, or conversation-level traces. This module covers the tools, patterns, and practices that separate an agent that works in a demo from one that runs sustainably in production.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|---|---|
+| 1 | [Observability Foundations](/modules/module-09-observability-cost-reliability/lesson-01) | 45 min |
+| 2 | [Instrumenting an Agent](/modules/module-09-observability-cost-reliability/lesson-02) | 45 min |
+| 3 | [The Economics of LLM APIs](/modules/module-09-observability-cost-reliability/lesson-03) | 45 min |
+| 4 | [Reliability Patterns](/modules/module-09-observability-cost-reliability/lesson-04) | 45 min |
+| 5 | [SLOs, Alerting & Production Readiness](/modules/module-09-observability-cost-reliability/lesson-05) | 45 min |
+| 6 | [Lab: Instrument, Cost-Audit & Harden Your Agent](/modules/module-09-observability-cost-reliability/lesson-06-lab) | 2–3 hrs |
+
+<Callout type="warning">
+Lesson 4 references the **Retry Backoff Simulator** from earlier in the course. If you have not explored it yet, spend 5 minutes with it first — it shows exactly why full-jitter is essential when many clients retry simultaneously after a rate-limit event.
+</Callout>
+
+[Lesson 1: Observability Foundations →](/modules/module-09-observability-cost-reliability/lesson-01)
