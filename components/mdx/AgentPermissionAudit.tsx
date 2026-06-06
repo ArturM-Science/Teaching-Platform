@@ -110,8 +110,6 @@ export function AgentPermissionAudit() {
   const [simResult, setSimResult] = useState<SimResult | null>(null)
 
   const score = computeScore(enabled)
-  const severity = computeResult(enabled).severity
-  const styles = SEVERITY_STYLES[simResult ? simResult.severity : severity]
 
   function toggle(id: string) {
     setEnabled(prev => {
