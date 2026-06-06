@@ -1,0 +1,44 @@
+---
+title: "Security & Safety"
+module: "module-08-security-safety"
+part: 5
+slug: "module-08-security-safety"
+---
+
+# Module 8 · Security & Safety
+
+<LearningObjectives>
+- Classify AI system failures using the OWASP LLM Top 10 2025 framework and distinguish security from safety threat models
+- Explain why prompt injection is architecturally unfixable and apply defence-in-depth mitigations to a RAG pipeline
+- Audit agent tool permissions, identify excessive agency violations (OWASP LLM06), and apply the principle of least privilege
+- Build a layered guardrail stack using Llama Guard 3, Azure Content Safety, and NeMo Guardrails
+- Distinguish proxy misalignment from deceptive alignment and explain why behavioural testing alone is insufficient for safety
+- Run a baseline vulnerability scan with Garak and map findings to EU AI Act, NIST AI RMF, and ISO 42001
+</LearningObjectives>
+
+## What you'll build
+
+In the lab you will red-team a sample customer support agent using Garak, interpret the vulnerability report, add a Llama Guard 3 output filter, re-scan to confirm mitigations hold, and produce a one-page compliance posture document mapped to the EU AI Act and NIST AI RMF.
+
+## Why security is different for AI
+
+Traditional software fails when it encounters unexpected *inputs*. AI systems also fail when they encounter unexpected *intentions* — and the same input can be benign or malicious depending on what the attacker buries inside a retrieved document, a tool description, or a multi-turn conversation.
+
+The threat surface is not just the user-facing API. It includes the model weights, the training pipeline, the retrieval store, the tool registry, the session handling, and now — with the EU AI Act entering enforcement in August 2026 — the compliance posture. Security is not a feature you add at the end. Every architectural decision in this module is a security decision.
+
+## Lessons
+
+| # | Lesson | Time |
+|---|--------|------|
+| 1 | [The LLM Threat Model](/modules/module-08-security-safety/lesson-01) | 45 min |
+| 2 | [Prompt Injection — The Unsolvable Problem](/modules/module-08-security-safety/lesson-02) | 45 min |
+| 3 | [Agent Security & Excessive Agency](/modules/module-08-security-safety/lesson-03) | 45 min |
+| 4 | [Guardrails & Defence Architecture](/modules/module-08-security-safety/lesson-04) | 45 min |
+| 5 | [Safety, Alignment & Compliance](/modules/module-08-security-safety/lesson-05) | 45 min |
+| 6 | [Lab: Red-team and Harden Your Agent](/modules/module-08-security-safety/lesson-06-lab) | 2–3 hrs |
+
+<Callout type="warning">
+Security is not a feature you add at the end. Every architectural decision in this module — tool permissions, retrieval design, session handling, output handling — is a security decision. Make it deliberately.
+</Callout>
+
+[Start Lesson 1 →](/modules/module-08-security-safety/lesson-01)
