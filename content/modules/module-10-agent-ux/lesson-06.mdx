@@ -1,0 +1,122 @@
+---
+title: "Streaming and Progressive Disclosure"
+module: "module-10-agent-ux"
+lesson: 6
+slug: "lesson-06"
+---
+
+# Lesson 6 · Streaming and Progressive Disclosure
+
+Streaming does not make your agent faster. It makes users feel less impatient. These are different things with different engineering implications — and both matter.
+
+<LearningObjectives>
+- Distinguish Time To First Token (TTFT) from Time To Last Token (TTLT) and explain why TTFT governs perceived responsiveness
+- Explain why SSE is sufficient for agent streaming and when WebSockets are needed instead
+- Implement the three-event streaming protocol: token, tool_call, and done/error
+- Apply the progressive disclosure pattern to intermediate tool call steps
+</LearningObjectives>
+
+## Perceived latency vs. actual latency
+
+An agent call that takes 8 seconds total and starts streaming tokens at 1.2 seconds feels much faster than one that delivers the same output as a single batch after 8 seconds.
+
+Two latency metrics matter:
+
+**TTFT (Time To First Token)** — how long until the user sees the first character of output. This governs perceived responsiveness. Users experience TTFT as "how fast is this thing?" even if the total time is identical.
+
+**TTLT (Time To Last Token)** — how long until the full output is delivered. This is the actual latency. Streaming does not improve TTLT — the model still generates the same number of tokens in the same time.
+
+The implication: streaming is a UX investment, not a performance investment. It requires extra engineering (SSE infrastructure, streaming-aware UI) in exchange for better perceived responsiveness. That is a good trade for almost all agent products.
+
+<Callout type="key">
+Streaming does not make your agent faster. It makes users feel less impatient. These are different things with different engineering implications.
+</Callout>
+
+## SSE vs. WebSocket
+
+For agent output streaming, **Server-Sent Events (SSE)** is almost always the right choice:
+
+| | SSE | WebSocket |
+|--|-----|-----------|
+| Direction | Server → client only | Bidirectional |
+| Protocol | HTTP/1.1 | Custom WS protocol |
+| Reconnection | Built-in auto-reconnect | Manual |
+| Proxies/firewalls | Works through standard HTTP infrastructure | Often blocked |
+| Use case | Agent token stream | Real-time chat, game state |
+
+Agent output is unidirectional: the server streams tokens and events to the client. The client sends a single request and then listens. SSE is designed exactly for this. WebSockets add bidirectional complexity you do not need.
+
+The one case where WebSockets make sense for agents: a collaborative session where multiple users are simultaneously directing the same agent run, and each needs to see the others' inputs in real time.
+
+## The three-event streaming protocol
+
+A well-designed agent streaming API emits exactly three event types:
+
+**`token`** — append this text to the current output. Emitted for every generated token (or small batch of tokens). The UI buffers these and appends to the display surface.
+
+**`tool_call`** — the agent is invoking a tool. Payload: tool name, tool inputs. The UI renders a tool call card ("Searching Wikipedia for 'context window'…") above or inline with the token stream.
+
+**`done` / `error`** — the run has completed or failed. Payload for `done`: summary metadata (steps completed, total tokens, elapsed time). Payload for `error`: what failed, whether it is recoverable, suggested next action.
+
+<Callout type="tip">
+Expose tool call events in the stream, not just tokens. Seeing 'Searching Wikipedia…' appear as it happens makes 8 seconds feel like 3.
+</Callout>
+
+<StreamingOutputSim />
+
+Toggle streaming on and off. With streaming off, the 8-second wait is opaque. With it on, the TTFT drops to under 2 seconds and tool call cards give you a live progress signal.
+
+## Progressive disclosure of intermediate steps
+
+Token streaming handles the final answer. Tool call events handle the intermediate steps. Together, they implement progressive disclosure at the pipeline level:
+
+1. User submits query
+2. Status bar: "Planning…"
+3. Tool call card appears: "Searching Wikipedia for 'X'" (with tool input visible)
+4. Tool call card updates: "Found 3 results"
+5. Second tool card: "Reading source 1 of 3…"
+6. Token stream begins: first characters of the answer appear
+7. Token stream completes
+8. Summary bar: "Done — 3 sources searched, 12s"
+
+At each step, the user knows what is happening. The 12-second wait is experienced as a sequence of legible actions, not a single opaque block.
+
+## Skeleton loaders vs. streaming
+
+Skeleton loaders — grey placeholder shapes that appear before content loads — are the right pattern for batch responses with known structure: a card grid, a table, a fixed-layout dashboard. They signal "something will appear here in this shape."
+
+They are the wrong pattern for streaming agent output, because:
+- The output shape is unknown before it completes (variable length, variable structure)
+- A skeleton that persists for 10 seconds while the model generates becomes anxiety-inducing
+- The skeleton disappears all at once when the batch arrives, removing the perceived latency benefit
+
+Use streaming for agent responses. Use skeleton loaders for structured batch fetches.
+
+<Quiz
+  question="An agent call takes 8 seconds total. With streaming, the first token appears at 1.2 seconds. Which metric improved?"
+  options={[
+    { text: "TTLT (Time To Last Token) — total latency decreased", correct: false, explanation: "TTLT did not change. The agent still generates the same tokens in the same time. Streaming does not accelerate token generation." },
+    { text: "TTFT (Time To First Token) — perceived latency improved", correct: true, explanation: "Correct. Actual latency (TTLT) is unchanged at 8 seconds. But the user sees the first output at 1.2 seconds instead of 8 seconds, which dramatically improves perceived responsiveness." },
+    { text: "Both TTFT and TTLT improved", correct: false, explanation: "TTLT is unchanged. Streaming moves tokens from the model output buffer to the UI as they are generated — it does not generate them faster." },
+    { text: "Neither — streaming is purely cosmetic with no measurable improvement", correct: false, explanation: "TTFT is measurably improved, and TTFT has a measurable impact on user satisfaction and perceived quality. It is not purely cosmetic." }
+  ]}
+/>
+
+<Quiz
+  question="Server-Sent Events (SSE) are preferred over WebSockets for agent streaming because:"
+  options={[
+    { text: "SSE is faster than WebSockets", correct: false, explanation: "Raw throughput is similar. SSE is preferred for architecture reasons, not raw speed." },
+    { text: "Agent output is unidirectional, so WebSocket bidirectionality is unnecessary overhead", correct: true, explanation: "Correct. The agent streams tokens to the client; the client does not need to send data back on the same connection. SSE is designed for exactly this pattern and works through standard HTTP infrastructure without the complexity of WebSocket upgrades." },
+    { text: "WebSockets do not support JSON payloads", correct: false, explanation: "WebSockets support any binary or text payload, including JSON. This is not the reason SSE is preferred." },
+    { text: "SSE is supported in more browsers than WebSockets", correct: false, explanation: "Both are broadly supported in modern browsers. Browser support is not the differentiating factor." }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can explain the difference between TTFT and TTLT and why TTFT governs perceived responsiveness",
+    "I can describe when to use SSE vs. WebSocket for agent streaming",
+    "I can name the three event types in the agent streaming protocol (token, tool_call, done/error)",
+    "I can distinguish when to use streaming vs. skeleton loaders"
+  ]}
+/>

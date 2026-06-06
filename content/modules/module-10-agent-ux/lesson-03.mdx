@@ -1,0 +1,106 @@
+---
+title: "Human-in-the-Loop Patterns"
+module: "module-10-agent-ux"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 · Human-in-the-Loop Patterns
+
+Giving humans control over agents is not about distrust. It is about matching the level of autonomy to the level of risk. An approval gate on a routine query is friction. An approval gate before an irreversible action is safety.
+
+<LearningObjectives>
+- Name and distinguish the four HITL patterns: approval gate, interrupt, escalation, and handoff
+- Choose the correct pattern for a given risk level and task type
+- Design an approval gate that avoids the rubber-stamp failure mode
+- Explain why interrupt points belong at natural task boundaries
+</LearningObjectives>
+
+## The four HITL patterns
+
+**Approval gate** — the agent pauses before executing a high-risk or irreversible action and waits for explicit user confirmation. The user can approve, reject, or modify the proposed action. The agent resumes or aborts based on the response.
+
+**Interrupt** — the user pauses a running agent mid-execution. The agent must be designed with well-defined interrupt points — places where it can safely stop without leaving shared state inconsistent. After an interrupt, the user can redirect or resume.
+
+**Escalation** — the agent-initiated version of interrupt. When the agent encounters a situation outside its confidence range (ambiguous instruction, edge case, conflicting constraints), it pauses and transfers control to a human with a summary of what it knows so far.
+
+**Handoff** — the task is transferred to a human permanently. The agent composes a full context packet — what was done, what remains, what decisions need to be made — and passes it to a human queue or inbox.
+
+<Callout type="key">
+Design the interrupt point first, then the approval copy. If you cannot write the consequence in one sentence, your action scope is too large.
+</Callout>
+
+## The rubber-stamp problem
+
+The most common failure mode in approval gate design is the **rubber-stamp**: an approval dialog with insufficient context that users approve automatically without reading.
+
+A poorly designed gate shows: "Send email?" with Approve / Reject buttons.
+
+A well-designed gate shows:
+- **What**: "Send a marketing email"
+- **To whom**: "5,823 subscribers in the UK segment"
+- **Content preview**: subject line and first 100 characters of body
+- **Consequence**: "This action cannot be undone. Replies will go to your connected inbox."
+- **Alternatives**: "Edit email · Change segment · Schedule instead"
+
+The rule: if you cannot write the consequence in one sentence, the action scope is too large. Break it into smaller actions, each with a narrower gate.
+
+<ApprovalGateSim />
+
+Try all three scenarios. In the bad dialog, notice how easy it is to approve without understanding what you are approving.
+
+<Quiz
+  question="An agent is about to send an email to 5,000 customers. The approval dialog shows 'Send email?' with Approve/Reject buttons. What is the core failure?"
+  options={[
+    { text: "The buttons should say 'Confirm' and 'Cancel' instead", correct: false, explanation: "Button labels are a minor detail. The core failure is the absence of consequence context — recipient count, content preview, undo window. Without these, users cannot make an informed decision." },
+    { text: "The dialog lacks consequence context, causing rubber-stamping", correct: true, explanation: "Correct. Without showing who receives the email, what it contains, and that it cannot be undone, users will approve without understanding the action. This is the rubber-stamp failure mode." },
+    { text: "Approval gates should not be used for email sending", correct: false, explanation: "Approval gates are exactly right for irreversible mass actions like email sends. The issue is the quality of the gate, not its presence." },
+    { text: "The gate should require a typed confirmation instead of a button click", correct: false, explanation: "Typed confirmations are one mechanism to reduce rubber-stamping, but they do not fix the root problem — insufficient context. A user who types 'CONFIRM' without reading is still rubber-stamping." }
+  ]}
+/>
+
+## Interrupt design
+
+Interrupts must be planned at design time, not added as an afterthought. An agent that can be interrupted anywhere is an agent that may be interrupted in the middle of a multi-step database write, leaving state inconsistent.
+
+Well-designed interrupt points:
+- Fall at natural task boundaries: after a tool call completes, before the next one starts
+- Leave the agent state serialisable: everything the agent knows can be saved to a store
+- Are visible to the user: "Pause after this step" is a UI control, not a hidden capability
+
+Poorly-designed interrupt points:
+- Mid-tool-call (dangerous: partial side effects)
+- After a deadline-sensitive external API call (dangerous: resources held)
+- At no defined points at all (the interrupt button aborts the run instead of pausing it)
+
+**Escalation** is the agent's version of "I don't know how to proceed." It should include: what the agent has done, what the ambiguity is (in plain language), and what the human needs to decide. It is not an error — it is the agent correctly recognising the limits of its autonomy.
+
+<FailureMuseum
+  exhibits={[
+    {
+      title: "The Email Blast",
+      what: "A marketing automation agent was configured to send a re-engagement campaign. The approval gate checked whether the campaign was 'active', not whether it had already been sent. The gate fired after the send, not before.",
+      consequence: "51,000 emails sent twice. 2,300 unsubscribes in 48 hours.",
+      lesson: "Approval gates must check the correct pre-condition and fire before the irreversible action, not as a logging step after it. Audit your gate trigger logic, not just its UI."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Which HITL pattern is triggered by the agent, not the user?"
+  options={[
+    { text: "Approval gate", correct: false, explanation: "An approval gate is triggered by a predefined action condition — the agent pauses when it is about to do something risky. It is not triggered by the agent's own uncertainty assessment." },
+    { text: "Interrupt", correct: false, explanation: "An interrupt is triggered by the user, who decides mid-run to pause the agent." },
+    { text: "Escalation", correct: true, explanation: "Correct. Escalation is agent-initiated: the agent recognises that it has reached the edge of its confidence or capability and pauses to transfer the decision to a human. The agent triggers it, not a predefined action condition and not the user." },
+    { text: "Handoff", correct: false, explanation: "Handoff can be agent-initiated, but it is a permanent transfer of the task — not a pause-and-resume. Escalation is the pattern specifically for 'I need a human decision before I continue'." }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can name and distinguish approval gate, interrupt, escalation, and handoff",
+    "I can explain the rubber-stamp failure mode and the elements that prevent it",
+    "I know where interrupt points should and should not be placed",
+    "I can describe what a good escalation message includes"
+  ]}
+/>

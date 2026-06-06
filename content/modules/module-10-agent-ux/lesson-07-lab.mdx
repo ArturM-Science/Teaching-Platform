@@ -1,0 +1,223 @@
+---
+title: "Lab: Human-in-the-Loop Agent with Streaming UI"
+module: "module-10-agent-ux"
+lesson: 7
+slug: "lesson-07-lab"
+---
+
+# Lab · Human-in-the-Loop Agent with Streaming UI
+
+<LabBrief
+  duration="2.5–3 hours"
+  difficulty="Intermediate"
+  prerequisites={["Module 02 (Tools & Function Calling)", "Module 05 (Workflow Patterns)", "Module 09 (Observability)"]}
+  summary="Build a research agent with a streaming frontend, a human-in-the-loop approval gate for irreversible actions, and a feedback widget. Wire all three together so they reflect the module's transparency and graceful degradation principles."
+/>
+
+## What you will build
+
+A research agent that:
+1. Accepts a research query and searches 3 web sources
+2. Streams its reasoning and tool calls to a React frontend in real time
+3. Pauses before writing a final report to a file (irreversible) and waits for user approval with full consequence context
+4. Accepts a thumbs-down correction after the report is written and reruns the report with the corrected context
+5. Degrades gracefully if a source is unavailable — shows partial results with a clear note, does not abort
+
+## Part 1 — Streaming backend (FastAPI + SSE)
+
+Create a FastAPI endpoint that runs the agent and emits SSE events.
+
+### Endpoint
+
+```
+POST /api/research
+Content-Type: application/json
+Body: { "query": string }
+
+Response: text/event-stream
+```
+
+### Event format
+
+Each event is a JSON object on a `data:` line, followed by `\n\n`:
+
+```
+data: {"type": "token", "content": "The first result shows..."}
+
+data: {"type": "tool_call", "tool": "web_search", "input": {"query": "climate tipping points 2024"}}
+
+data: {"type": "tool_result", "tool": "web_search", "summary": "Found 3 results", "count": 3}
+
+data: {"type": "approval_required", "action": "write_report", "filename": "report.md", "preview": "# Research Report\n...", "consequence": "This will write a file to your workspace. This action can be undone by deleting the file."}
+
+data: {"type": "done", "steps_completed": 5, "elapsed_ms": 8400}
+
+data: {"type": "error", "message": "Source 2 timed out", "recoverable": true, "suggestion": "The partial report excludes source 2. You can retry with source 2 only."}
+```
+
+### Agent loop pseudocode
+
+```python
+async def research_agent(query: str, stream: AsyncGenerator):
+    await stream({"type": "token", "content": "Planning research..."})
+
+    sources = await search_web(query, count=3)          # tool_call + tool_result events
+    summaries = []
+
+    for i, source in enumerate(sources):
+        try:
+            summary = await read_source(source)         # tool_call + tool_result events
+            summaries.append(summary)
+        except TimeoutError:
+            await stream({"type": "error", "message": f"Source {i+1} timed out", "recoverable": True, ...})
+            # continue loop — graceful degradation
+
+    # Stream the report draft token by token
+    report = await compose_report(query, summaries, stream=stream)
+
+    # Pause for approval before writing to disk
+    await stream({
+        "type": "approval_required",
+        "action": "write_report",
+        "filename": f"{slugify(query)}.md",
+        "preview": report[:500],
+        "consequence": "This will write a Markdown file to your workspace."
+    })
+
+    # Wait for approval signal (use a queue or SSE + POST pattern)
+    approved = await wait_for_approval()
+
+    if approved:
+        write_file(report)
+        await stream({"type": "done", ...})
+    else:
+        await stream({"type": "token", "content": "Report cancelled. The draft is shown above."})
+        await stream({"type": "done", ...})
+```
+
+**Approval gate pattern:** The frontend sends a `POST /api/research/{run_id}/approve` or `/cancel` after the user responds to the approval dialog. The backend holds the run in a waiting state (use `asyncio.Event` or a Redis queue).
+
+## Part 2 — React streaming frontend
+
+### Component structure
+
+```
+<ResearchPage>
+  ├── <QueryInput />               query form
+  ├── <StatusBar status={...} />   current agent state
+  ├── <ToolCallFeed events={...} /> live tool call cards
+  ├── <TokenStream content={...} /> streaming answer text
+  ├── <ApprovalDialog />           shown when approval_required event arrives
+  └── <FeedbackBar />              thumbs up/down + correction input
+```
+
+### SSE client
+
+```typescript
+async function runResearch(query: string, handlers: StreamHandlers) {
+  const res = await fetch('/api/research', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    const lines = decoder.decode(value).split('\n\n')
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue
+      const event = JSON.parse(line.slice(5).trim())
+      handlers[event.type]?.(event)
+    }
+  }
+}
+```
+
+### Approval gate UX
+
+When the `approval_required` event arrives:
+- Render an `<ApprovalDialog>` overlay (not a modal that blocks the tool feed — overlay so the context is visible)
+- Show: action name, filename, full consequence text, a collapsible report preview (first 500 chars + "Show full report" expander)
+- Two buttons: "Write report" (primary) and "Cancel" (secondary)
+- No third button. No "Edit" for this lab.
+
+After the user responds, POST to `/api/research/{run_id}/approve` or `/cancel` and hide the dialog.
+
+## Part 3 — Feedback and correction
+
+After the run completes, show the feedback bar:
+
+```
+[👍] [👎]  Was this report useful?
+```
+
+On thumbs-down:
+1. Show an inline textarea: "What was wrong? (optional)"
+2. Submit button
+3. On submit: POST to `/api/research/{run_id}/feedback` with `{ "rating": -1, "correction": "..." }`
+4. If a correction was provided, offer a "Rerun with correction" button
+5. On "Rerun with correction": send a new research request with the original query + correction appended to context
+
+Rerunning with a correction is a new run, not a continuation. For this lab, appending "User correction: {text}" to the query context is sufficient.
+
+## Part 4 — Graceful degradation
+
+Your agent must not abort when a single source is unavailable. Test this by mocking a `TimeoutError` on source 2 in your source reader.
+
+Expected behaviour:
+- The tool call card for source 2 shows "Timed out — excluded from report"
+- The report is generated from sources 1 and 3
+- A banner above the report reads: "Note: source 2 was unavailable. This report covers 2 of 3 sources."
+- The approval gate still fires before writing
+- The final file includes a front-matter note: `sources_available: 2/3`
+
+## Rubric
+
+<Rubric
+  criteria={[
+    {
+      name: "Streaming implementation",
+      exceeds: "Token and tool_call events render in real time with < 100ms display lag. TTFT < 2s in local testing.",
+      meets: "Streaming renders correctly. Some buffering visible but no batch dump.",
+      approaching: "Streaming implemented but events render out of order or with perceptible delay.",
+      below: "No streaming — response delivered as a batch after completion."
+    },
+    {
+      name: "Approval gate",
+      exceeds: "Dialog shows action, filename, consequence, and full collapsible preview. Approve/Cancel correctly resume or abort the run.",
+      meets: "Dialog shows consequence and action. Approve/Cancel work.",
+      approaching: "Dialog exists but is missing consequence text or approval does not resume the run correctly.",
+      below: "No approval gate — file is written without user confirmation."
+    },
+    {
+      name: "Graceful degradation",
+      exceeds: "Source timeout handled with labelled tool card, partial report banner, and front-matter note. Report still written for the available sources.",
+      meets: "Source timeout handled gracefully. Report generated from available sources.",
+      approaching: "Timeout caught but error message is generic. Report may abort rather than continue.",
+      below: "Source timeout causes full run abort with no partial output."
+    },
+    {
+      name: "Feedback widget",
+      exceeds: "Thumbs up/down visible. Thumbs-down opens correction input. Rerun with correction works and produces a new, improved report.",
+      meets: "Thumbs up/down visible. Correction input appears on thumbs-down. Feedback POSTed to backend.",
+      approaching: "Feedback UI exists but correction does not trigger a rerun.",
+      below: "No feedback surface."
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-10-agent-ux"
+  items={[
+    "My agent streams token and tool_call events to the frontend in real time",
+    "The approval gate fires before writing and shows consequence context (not just 'Confirm?')",
+    "A source timeout produces a partial report with a clear banner, not a full abort",
+    "The feedback widget collects a thumbs-down correction and offers a rerun",
+    "No stack traces appear in the UI under any failure scenario"
+  ]}
+/>

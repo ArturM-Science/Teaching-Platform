@@ -1,0 +1,112 @@
+---
+title: "Feedback and Correction Loops"
+module: "module-10-agent-ux"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Feedback and Correction Loops
+
+The cheapest model improvement available is the corrections your real users are already making in their heads. Build the feedback surface on day one, and those corrections become signal.
+
+<LearningObjectives>
+- Implement in-context correction: redirecting the current agent run without restarting
+- Explain correction propagation: why correcting step N requires invalidating and rerunning steps N+1 onward
+- Distinguish explicit feedback (structured, high-quality, low-volume) from implicit feedback (unstructured, low-quality, high-volume)
+- Design a feedback widget that collects structured signal without adding friction
+</LearningObjectives>
+
+## Two types of feedback
+
+**In-context correction** — the user corrects the agent mid-run or after partial output. The agent incorporates the correction and continues (or reruns affected steps). Example: "That date is wrong — it should be 2023, not 2022." The agent updates its internal state and re-derives any downstream results that depended on the wrong date.
+
+**Training-time feedback** — signals collected over many runs that are used to improve the model or system. This includes thumbs up/down, freeform corrections, and structured rubrics. Individual signals are low-value; aggregated, they are the foundation of fine-tuning and RLHF.
+
+The UX for these two types looks similar — a correction widget — but the downstream pipelines are different.
+
+<Callout type="tip">
+Build the feedback surface on day one, not as a v2 feature. Users are already making corrections in their heads. The widget is what turns those corrections into signal.
+</Callout>
+
+## Correction propagation
+
+When a user corrects step 3 of a 6-step pipeline, steps 4, 5, and 6 may be based on the wrong value. They must be invalidated and rerun.
+
+The agent's responsibility:
+1. Accept the correction and update the context store for step 3
+2. Identify which downstream steps read from that context
+3. Mark those steps as stale
+4. Rerun them with the corrected context
+
+This is not trivial. In a naive implementation, the agent simply appends the correction to the context and reruns the full pipeline from the start — which is slow and may produce different results for steps that were correct. The correct approach is a dependency graph over steps, which makes invalidation surgical.
+
+For simpler systems, a reasonable heuristic is: always rerun from the corrected step to the end.
+
+<FeedbackCorrectionSim />
+
+Correct the wrong step and watch steps after it rerun. Notice that earlier steps are unaffected.
+
+<Quiz
+  question="A user corrects a fact at step 3 of a 6-step pipeline. What must happen to steps 4–6?"
+  options={[
+    { text: "Nothing — the final answer already incorporates the correction", correct: false, explanation: "Steps 4–6 were computed using the wrong value from step 3. If they depend on it, their results are also wrong. Simply noting the correction without rerunning produces an inconsistent output." },
+    { text: "They must be invalidated and rerun with the corrected context", correct: true, explanation: "Correct. Any step that reads from corrected context must be rerun. Steps that do not depend on the corrected value can be left unchanged. The minimum is to rerun from the corrected step to the end." },
+    { text: "The entire pipeline must restart from step 1", correct: false, explanation: "Rerunning from step 1 is the simplest implementation but also the most expensive. It is correct but suboptimal — steps 1 and 2 produced correct output and do not need to change." },
+    { text: "Ask the user to resubmit the full task with the corrected information", correct: false, explanation: "This pushes the complexity onto the user. Good agent UX absorbs the correction and handles the invalidation internally." }
+  ]}
+/>
+
+## Explicit vs. implicit feedback
+
+**Explicit signals** — the user actively provides structured input:
+- Thumbs up / thumbs down on an answer
+- Freeform correction text
+- Rubric rating (accuracy, relevance, tone on a 1–5 scale)
+- Inline correction on a specific claim
+
+Properties: high quality per signal, low volume. Users submit explicit feedback when they care enough to act, which skews toward strong reactions (very good or very bad).
+
+**Implicit signals** — inferred from user behaviour:
+- Session abandonment after seeing the result
+- Re-query with rephrased input (suggests the first answer was unsatisfactory)
+- Copy-paste of specific text (suggests that part was useful)
+- Time on page before abandonment
+
+Properties: low quality per signal (requires a model to interpret), high volume (every user produces implicit signals without any UI surface).
+
+<Callout type="info">
+Implicit signals are 10–100x more common than explicit feedback but require a model to interpret. Always collect both. Explicit signals train the quality model; implicit signals provide the density needed to detect regressions early.
+</Callout>
+
+## Feedback widget design
+
+The feedback widget needs to strike a balance: enough structure to produce useful signal, not so much friction that users skip it.
+
+A minimal, high-conversion feedback widget:
+1. Two-icon row: thumbs up / thumbs down (always visible, no click required to see)
+2. On thumbs-down: inline text input pre-prompted with "What was wrong?" — single line, optional
+3. On submit: "Thanks — your correction has been noted" toast, then dismiss
+
+What not to do:
+- A 5-question survey after every interaction (abandoned immediately)
+- A modal that blocks the interface until feedback is given (hostile)
+- No feedback surface at all (the most common choice, and the most expensive long-term)
+
+<Quiz
+  question="Which feedback signal type gives the highest quality per signal, but the lowest volume?"
+  options={[
+    { text: "Session abandonment", correct: false, explanation: "Session abandonment is an implicit signal — high volume, but requires interpretation. It does not directly tell you what was wrong, only that the user left." },
+    { text: "Re-query rate", correct: false, explanation: "Re-query is implicit signal. High volume, but the fact that a user asked again does not tell you specifically what was wrong with the first answer." },
+    { text: "Structured explicit correction with rubric", correct: true, explanation: "Correct. A user who fills in a rubric (accuracy 2/5, relevance 4/5, tone 3/5) with a freeform note is giving you a precise, actionable signal. But only a small fraction of users complete this — making it high quality, low volume." },
+    { text: "Thumbs up count", correct: false, explanation: "Thumbs up is explicit but binary — it confirms the answer was good, but tells you nothing about which aspect was good or why. Lower quality than structured rubric feedback." }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can explain the difference between in-context correction and training-time feedback",
+    "I can describe correction propagation and why downstream steps must be invalidated",
+    "I can distinguish explicit and implicit signals by their quality and volume tradeoffs",
+    "I can design a low-friction feedback widget that collects structured signal"
+  ]}
+/>

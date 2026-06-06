@@ -1,0 +1,114 @@
+---
+title: "Why Agent UX is Different"
+module: "module-10-agent-ux"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · Why Agent UX is Different
+
+Agents are not slow chatbots. They are pipelines that plan, call tools, handle errors, and compose results — and the UX patterns built for chat windows actively mislead users when applied to them.
+
+<LearningObjectives>
+- Name the three properties of agents that break chat-style UX assumptions
+- Describe the six states of the agent run state machine
+- Explain the expectation gap and its consequences for perceived reliability
+- Identify which UX anti-patterns (silence, spinners, immediate responses) harm agent products most
+</LearningObjectives>
+
+## The three properties that change everything
+
+A chatbot sends a message, receives a message. The interaction is synchronous, single-step, and the model always produces output. Agent UX breaks on three axes:
+
+**1. Asynchronous execution.** An agent run can take 2 seconds or 2 minutes. It may block on a tool call, wait for an API, or pause at a human-in-the-loop checkpoint. There is no natural "response time" to target.
+
+**2. Multi-step uncertainty.** The agent does not know how many steps it will take before it starts. Each tool call produces new information that changes the plan. The user has no idea whether they are at step 1 or step 8.
+
+**3. Non-deterministic output.** The same prompt can produce structurally different outputs across runs. The agent might search 3 sources one time and 7 another. It might choose a different tool. This is not a bug — it is the point — but it means the user cannot build a reliable mental model from a few interactions.
+
+<Callout type="key">
+An agent is not a slow chatbot. It is a system that runs a pipeline. The UX must expose the pipeline.
+</Callout>
+
+## The agent run state machine
+
+Every agent run passes through a defined set of states. Making these states visible is the core job of agent UX.
+
+| State | What is happening | What users see without good UX |
+|-------|------------------|-------------------------------|
+| `idle` | Waiting for input | Input field |
+| `planning` | LLM deciding which tools to call | Spinner or nothing |
+| `acting` | Executing a tool call | Spinner or nothing |
+| `waiting_for_tool` | Blocked on external API / DB | Spinner or nothing |
+| `composing` | LLM writing the final response | Spinner or nothing |
+| `done` | Run complete | Output appears |
+| `failed` | Unrecoverable error | Error message or nothing |
+
+The entire middle of the state machine — four distinct, meaningful states — collapses into a single undifferentiated spinner. Users cannot tell whether they are seconds away from a result or whether the agent has silently failed.
+
+<AgentStateTimeline />
+
+Step through both scenarios. Notice how a live status bar converts an opaque wait into a legible pipeline.
+
+<Quiz
+  question="A user submits a task to an agent. 45 seconds pass with no output. Which response is correct?"
+  options={[
+    { text: "Show an error — 45 seconds is too long", correct: false, explanation: "45 seconds is within normal range for a multi-tool agent run. Showing an error here would be wrong and erode trust in correct behaviour." },
+    { text: "Show a live status update with the current step name", correct: true, explanation: "Correct. The user needs to see that the agent is working, not that it has failed. A status update ('Searching 3 sources — step 2 of 5') converts the wait from anxiety to expectation." },
+    { text: "Do nothing — the result will appear when it is ready", correct: false, explanation: "Silence is the most common agent UX bug. Users interpret no feedback as failure and either retry (creating duplicate runs) or abandon." },
+    { text: "Show a progress bar filling from 0% to 100%", correct: false, explanation: "A deterministic progress bar implies known total duration. Agent runs have variable duration per step. A fake progress bar that stalls or resets destroys trust." }
+  ]}
+/>
+
+## The expectation gap
+
+Users arrive with a chatbot mental model: ask a question, get an answer in under 2 seconds. Agent runs regularly take 10–120 seconds. This gap has two consequences:
+
+**Perceived failures.** Users assume silence means failure. They re-submit the task, creating duplicate runs and compounding the load.
+
+**Trust erosion after correct results.** An agent that takes 40 seconds to return the right answer is rated less trustworthy than one that takes 2 seconds to return a wrong answer, if both present their output the same way. The wait itself becomes evidence of unreliability in the absence of progress signals.
+
+The fix is not to make agents faster. It is to close the expectation gap by making the pipeline legible.
+
+<Callout type="warning">
+Silence is the most common agent UX bug. If the user cannot see progress, they will assume failure.
+</Callout>
+
+## Three UX anti-patterns to avoid
+
+**The eternal spinner.** A single loading indicator for the entire run. Users have no idea what is happening or how long it will take. It is psychologically identical to a crashed application after about 8 seconds.
+
+**Immediate empty state.** The output area appears immediately but empty, then populates later. Users interpret the empty area as a result ("it returned nothing") and are confused when content appears after they have already acted on the empty result.
+
+**Fake confidence.** Returning the result with no indication of which steps completed, which failed, and what fallbacks were used. The agent may have searched 0 sources and retrieved a cached response — the user assumes it ran the full pipeline.
+
+<Quiz
+  question="Which property of agents most fundamentally breaks the 'loading spinner' UX pattern?"
+  options={[
+    { text: "Agents are slower than chatbots", correct: false, explanation: "Speed alone does not break the spinner pattern. A slow chatbot also uses a spinner. The problem is something structural about how agents execute." },
+    { text: "Multi-step execution with variable duration per step", correct: true, explanation: "Correct. A spinner implies 'one thing is happening, it will finish soon.' An agent has multiple discrete steps with different durations. A spinner gives users no signal about how many steps remain or how long each takes." },
+    { text: "Agents use tools that chatbots do not", correct: false, explanation: "Tool use is a mechanism, not the root cause. The UX problem is that users cannot see the tool calls as they happen, not that the calls exist." },
+    { text: "Agent output is non-deterministic", correct: false, explanation: "Non-determinism affects user expectations around output content but does not directly break the spinner. The spinner fails because it provides no progress signal, not because the output varies." }
+  ]}
+/>
+
+## What good agent UX looks like
+
+Good agent UX makes the state machine legible. Concretely:
+
+- A status line that updates as each state transitions: "Planning…" → "Searching Wikipedia (1 of 3 sources)…" → "Reading results…" → "Composing answer…"
+- Tool call cards that appear as each tool fires, showing name and input
+- Partial output that renders as the model streams tokens, not after the full response completes
+- An explicit completion signal: "Done — 4 sources searched, answer composed in 12s"
+- An explicit failure signal with next steps (not a generic error code)
+
+These are not polish features. They are the minimum viable interface for an agent product.
+
+<Checkpoint
+  items={[
+    "I can name the three agent properties that break chat UX (async, multi-step, non-deterministic)",
+    "I can describe all six states of the agent run state machine",
+    "I can explain why silence is interpreted as failure and what to show instead",
+    "I can identify the eternal spinner, immediate empty state, and fake confidence anti-patterns"
+  ]}
+/>

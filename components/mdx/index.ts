@@ -40,6 +40,11 @@ import { proseComponents } from './prose'
 import { AgentTraceViz } from './AgentTraceViz'
 import { TokenCostCalculator } from './TokenCostCalculator'
 import { FallbackChainSim } from './FallbackChainSim'
+import { AgentStateTimeline } from './AgentStateTimeline'
+import { TransparencyLevelSim } from './TransparencyLevelSim'
+import { ApprovalGateSim } from './ApprovalGateSim'
+import { FeedbackCorrectionSim } from './FeedbackCorrectionSim'
+import { StreamingOutputSim } from './StreamingOutputSim'
 
 export const mdxComponents = {
   ...proseComponents,
@@ -84,4 +89,9 @@ export const mdxComponents = {
   AgentTraceViz,
   TokenCostCalculator,
   FallbackChainSim,
+  AgentStateTimeline,
+  TransparencyLevelSim,
+  ApprovalGateSim,
+  FeedbackCorrectionSim,
+  StreamingOutputSim,
 }

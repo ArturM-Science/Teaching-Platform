@@ -1,0 +1,39 @@
+---
+title: "Agent UX & Human-Agent Interaction"
+module: "module-10-agent-ux"
+part: 4
+slug: "module-10-agent-ux"
+---
+
+# Module 10 · Agent UX & Human-Agent Interaction
+
+**Part 4 — Production** · 6 lessons + lab · ~7 hours total
+
+<LearningObjectives>
+- Explain why async, multi-step agents break chat-style UX assumptions and apply the agent run state machine to surface progress correctly
+- Design a transparency hierarchy that calibrates user trust without overwhelming them with reasoning dumps
+- Choose the right human-in-the-loop pattern (approval gate, interrupt, escalation, or handoff) for a given risk level and implement an approval gate that avoids rubber-stamping
+- Build an in-context correction flow that invalidates and reruns downstream steps when a user corrects a mid-pipeline result
+- Apply the graceful degradation hierarchy to agent failures and write error messages that tell users what happened, why, and what to do next
+- Implement streaming token output with progressive tool-call disclosure and explain why streaming reduces perceived latency without changing actual latency
+</LearningObjectives>
+
+## Why this module exists
+
+Modules 7–9 covered how to deploy, secure, and observe agents in production. But none of that infrastructure matters if users can't trust what they see — or can't see anything at all while the agent works.
+
+Agent UX is a distinct discipline from both chatbot UX and traditional software UX. Agents are asynchronous, multi-step, and non-deterministic. They take actions with real-world consequences. They fail in novel ways. The patterns that work for a search bar or a chat window actively mislead users when applied to agents.
+
+This module covers the full surface of agent UX: how to show state, how to build transparency, how to give users control, how to collect corrections, how to communicate failure, and how to stream output in a way that feels fast even when it isn't.
+
+## Module structure
+
+| # | Lesson | Duration |
+|---|--------|----------|
+| 1 | Why Agent UX is Different | ~45 min |
+| 2 | Transparency and Explainability | ~45 min |
+| 3 | Human-in-the-Loop Patterns | ~60 min |
+| 4 | Feedback and Correction Loops | ~45 min |
+| 5 | Designing for Failure | ~45 min |
+| 6 | Streaming and Progressive Disclosure | ~45 min |
+| Lab | Human-in-the-Loop Agent with Streaming UI | ~2.5–3 hrs |

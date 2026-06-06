@@ -1,0 +1,104 @@
+---
+title: "Transparency and Explainability"
+module: "module-10-agent-ux"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 · Transparency and Explainability
+
+Transparency is not the same as verbosity. Showing every token of reasoning can reduce trust as much as showing none of it. The goal is calibration: giving users enough to verify, not so much that they are paralysed.
+
+<LearningObjectives>
+- Distinguish the three transparency layers (action log, reasoning trace, confidence signal)
+- Apply the trust calibration principle to choose the right disclosure level for a given context
+- Design a progressive disclosure hierarchy: summary first, detail on demand
+- Explain why over-explaining can reduce trust as much as under-explaining
+</LearningObjectives>
+
+## Three transparency layers
+
+Every agent response has three layers of explainability you can expose, suppress, or surface on demand:
+
+**Layer 1 — Action log** (what the agent did): which tools were called, in what order, with what inputs. This is the minimum. It tells the user that something happened.
+
+**Layer 2 — Reasoning trace** (why it did it): the chain-of-thought steps that led to tool selection and output composition. This is powerful but dangerous — raw reasoning chains are long, noisy, and can contain contradictions that a working model correctly resolves but a human misreads as errors.
+
+**Layer 3 — Confidence signal** (how certain it is): explicit hedging language, numeric confidence scores, or "here are alternatives" patterns. This is the layer users most need and most often don't get.
+
+<Callout type="key">
+Transparency is not the same as verbosity. Showing every token of reasoning can reduce trust by overwhelming users.
+</Callout>
+
+## The trust calibration spectrum
+
+Imagine a dial from "black box" (answer only, no explanation) to "full dump" (every reasoning token, every tool call trace, every confidence score). Neither extreme works:
+
+- **Black box**: users cannot verify correctness. They either trust blindly or reject the answer. The agent cannot be audited when it is wrong.
+- **Full dump**: users are flooded with information they cannot process. They focus on surface-level artifacts (a confusing intermediate reasoning step) rather than the quality of the final output. Trust drops.
+
+The optimal zone is context-dependent but typically sits at **Layer 1 + selective Layer 3**: show the action log by default, surface the reasoning trace on demand, and always include appropriate confidence signals.
+
+<TransparencyLevelSim />
+
+Rate your trust at each level, then see how a simulated cohort responded. Notice that the middle level — answer plus tool calls — typically wins, but the optimal level shifts for high-stakes decisions.
+
+<Quiz
+  question="A user asks an agent to research a medical topic. The agent returns a confident answer with no citations and no hedging. What transparency mistake was made?"
+  options={[
+    { text: "The agent showed too much reasoning", correct: false, explanation: "The agent showed no reasoning at all. Showing too much reasoning would be a different failure mode — this is the opposite problem." },
+    { text: "The agent omitted confidence signals and source attribution", correct: true, explanation: "Correct. For a medical topic, the user needs to know where the information came from and how certain the agent is. Uniform high confidence without citation is a trust calibration failure — it prevents the user from verifying correctness on a topic where errors have real consequences." },
+    { text: "The agent should not have answered medical questions", correct: false, explanation: "Declining to answer is a policy choice, not a UX choice. The UX failure here is presenting an answer without the signals needed to verify it." },
+    { text: "The agent used too many tool calls", correct: false, explanation: "The number of tool calls is not the issue. The issue is that no transparency about what was searched, or how confident the result is, was surfaced to the user." }
+  ]}
+/>
+
+## Progressive disclosure
+
+Progressive disclosure is a pattern for presenting information at increasing levels of detail, triggered by user action. Applied to agent transparency:
+
+1. **Default view**: final answer + brief action summary ("Searched 3 sources, answer composed")
+2. **Expanded view** (user clicks "How did you get this?"): tool call log with inputs and outputs
+3. **Deep view** (user clicks "Show reasoning"): full chain-of-thought for the relevant steps
+
+This structure respects two different user types. Power users who want to audit the reasoning can drill down. Casual users who want the answer can ignore the disclosure controls entirely.
+
+<Callout type="info">
+HCI research (2024–2025) consistently finds that users rate agents as less trustworthy when expressed confidence is uniformly high regardless of topic difficulty. Calibrated hedging ("I am fairly confident about X, less certain about Y") increases both perceived accuracy and perceived honesty.
+</Callout>
+
+## Citations and source attribution
+
+When an agent uses retrieval — web search, RAG, database queries — every factual claim in the output should be attributable to a source. The minimum:
+
+- A numbered citation inline with the claim: "The API rate limit is 1,000 requests per minute [1]."
+- A sources panel below the answer listing [1] with title, URL, and access timestamp.
+
+This is not just good UX. It is the only mechanism by which a user can detect when the agent retrieved an outdated or incorrect source. Without citations, users cannot distinguish between a well-sourced correct answer and a hallucinated one.
+
+## When to hide the reasoning
+
+There are cases where surfacing the reasoning trace reduces the quality of the interaction:
+
+- **Performance tasks** (code generation, format conversion): the user cares about the output, not the process. A reasoning trace distracts from correctness verification.
+- **Simple factual lookups**: showing tool call overhead for a query the user treats as trivial signals unnecessary complexity.
+- **Emotionally sensitive contexts**: a detailed chain-of-thought for a health or grief-related query can feel clinical and cold.
+
+The rule: default to disclosing the action log (Layer 1), make reasoning available on demand (Layer 2), and always calibrate confidence signals (Layer 3).
+
+<Quiz
+  question="Progressive disclosure means showing the full reasoning chain by default. True or false?"
+  options={[
+    { text: "True — users should always see full reasoning", correct: false, explanation: "False. Progressive disclosure means showing the summary (answer + action log) by default, with deeper reasoning available on demand. Showing the full chain by default floods users and reduces trust." },
+    { text: "False — it means showing summary first, detail on demand", correct: true, explanation: "Correct. Progressive disclosure is specifically about layering information: the most actionable summary first, with deeper levels available through deliberate user actions like expanding a section or clicking 'Show reasoning'." }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can name and distinguish the three transparency layers (action log, reasoning trace, confidence signal)",
+    "I can describe the trust calibration spectrum from black box to full dump",
+    "I can design a three-level progressive disclosure hierarchy for an agent response",
+    "I know when hiding the reasoning trace is the right call"
+  ]}
+/>

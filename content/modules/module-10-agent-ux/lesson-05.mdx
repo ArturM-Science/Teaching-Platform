@@ -1,0 +1,118 @@
+---
+title: "Designing for Failure"
+module: "module-10-agent-ux"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 · Designing for Failure
+
+Users can tolerate failures. They cannot tolerate confusion. The goal is not to prevent every error — it is to make every error legible and recoverable.
+
+<LearningObjectives>
+- Apply the graceful degradation hierarchy to an agent failure
+- Write an error message that tells users what happened, why, and what to do next
+- Explain the blame-attribution problem and how to prevent it
+- Distinguish recoverable from unrecoverable failures and design the appropriate UX for each
+</LearningObjectives>
+
+## The graceful degradation hierarchy
+
+Not all failures are equal. An agent that fails on step 5 of 6 can still return four-fifths of a useful result. A hard abort that returns nothing is a failure of UX design, not just of the agent.
+
+The hierarchy (in order of preference):
+
+1. **Full output** — the run completes successfully
+2. **Partial output** — the run completes some steps; display what completed with a clear note about what did not
+3. **Explanation** — nothing useful was produced, but the agent can tell the user what it tried, what failed, and what the user can do differently
+4. **Escalation path** — the agent cannot even explain the failure clearly; surface a way to get human help or retry with different parameters
+
+Design the failure path before the success path. The success path is obvious. The failure path is where products diverge.
+
+<Callout type="key">
+Users can tolerate failures. They cannot tolerate confusion. Always tell them what happened and what to do next.
+</Callout>
+
+## Error message anatomy
+
+A good error message has three parts:
+
+**What went wrong** — in plain language, without internal jargon or stack traces. "One of the sources I searched is temporarily unavailable" is correct. "Error: HTTP 503 from search_api at step 3" is not for end users.
+
+**Temporary or permanent** — the user needs to know whether to wait and retry or change their approach. "This usually resolves in a few minutes" vs. "This document type is not supported."
+
+**What to do next** — a concrete next action. "Try again", "Try with a shorter document", "Contact support at [link]". Never leave users with a dead end.
+
+These three parts are mandatory. The error message is not done until all three are present.
+
+<Callout type="warning">
+Never show a raw exception or stack trace to end users. It reveals internal architecture, suggests the product is unfinished, and gives users no actionable information.
+</Callout>
+
+## The blame-attribution problem
+
+When an agent fails, users frequently interpret it as their own error. "I must have asked wrong." This causes them to rephrase and resubmit — which generates duplicate runs, wastes tokens, and compounds the failure if the root cause was not user input.
+
+The blame-attribution problem appears when:
+- The error message is vague ("Something went wrong")
+- There is no indication of which step failed
+- The input form is still active after the failure, implying the user should try again
+
+Preventing it:
+- Explicitly attribute the failure to the agent or system, not the user: "I hit an API limit — this is not related to your query."
+- Show the step that failed: "Step 3 — web search — encountered a rate limit."
+- Only show the retry button when retrying might actually help.
+
+## Partial output display
+
+When an agent fails mid-run, displaying what completed is almost always better than displaying nothing. The exception is when the partial output is misleading — e.g., a financial summary that is missing a category would be worse than no summary at all, because the user might act on an incomplete picture without noticing.
+
+The rule: display partial output when it is clearly labelled as partial, has no misleading omissions, and the omitted parts are named. "Here is what I found on the first 2 sources — the 3rd timed out and is missing from this summary."
+
+<FailureMuseum
+  exhibits={[
+    {
+      title: "The Silent Kill",
+      what: "A document analysis agent hit its context limit at step 5 of 6. The model returned an HTTP 200 with an empty string body. The API wrapper converted the empty string to null. The UI checked for null and displayed a blank result card with no error state.",
+      consequence: "Users saw a blank white card and assumed the document was empty. Many submitted support tickets saying 'the upload didn't work'. The agent was silently failing on ~12% of documents above 40,000 tokens.",
+      lesson: "Empty string is not the same as null, and neither is a success. Validate the shape of agent output before rendering. A blank card is not a valid state — it is a missing error handler."
+    }
+  ]}
+/>
+
+## Recoverable vs. unrecoverable failures
+
+**Recoverable failures** are transient: API timeout, rate limit, network blip. The right UX is: explain the failure, offer an automatic or manual retry, and preserve the user's input so they do not have to re-enter it.
+
+**Unrecoverable failures** are permanent for the current run: the document format is unsupported, the required data does not exist, the user's request is outside the agent's capability. The right UX is: explain what the agent cannot do and why, suggest an alternative approach or resource, and do not offer a retry that will fail again.
+
+Showing a retry button on an unrecoverable failure is a particularly damaging pattern. It implies the problem is transient when it is not, and erodes trust when the retry also fails.
+
+<Quiz
+  question="An agent fails on step 4 of 6 due to an API timeout. The best UX response is:"
+  options={[
+    { text: "Show a generic error and clear the results from steps 1–3", correct: false, explanation: "Clearing successful results and replacing with a generic error violates the graceful degradation hierarchy. Steps 1–3 completed successfully — show them. Label the failure clearly." },
+    { text: "Show results from steps 1–3 and explain the failure at step 4", correct: true, explanation: "Correct. Partial output with a clear failure explanation is the right response. The user gets partial value, understands what failed, and can decide whether to retry or take the partial result." },
+    { text: "Retry step 4 silently without informing the user", correct: false, explanation: "Silent retries remove user agency. The user cannot see that a retry is happening, cannot cancel it, and cannot make an informed decision about whether to wait. Always surface retries in the UI." },
+    { text: "Wait 30 seconds and show a timeout error", correct: false, explanation: "Waiting 30 seconds to show an error compounds the poor UX of the original failure. The partial results from steps 1–3 should be surfaced immediately, while step 4 is retried or marked as failed." }
+  ]}
+/>
+
+<Quiz
+  question="What is the blame-attribution problem in agent UX?"
+  options={[
+    { text: "The agent blames external APIs for its own logic errors", correct: false, explanation: "This is about attribution in error messages, not user perception. The blame-attribution problem is a user cognition issue, not a logging issue." },
+    { text: "Users interpret agent failures as their own input errors and over-correct", correct: true, explanation: "Correct. When an agent fails with a vague error message, users assume they asked wrong. They rephrase and resubmit, generating duplicate runs without fixing the root cause — which was often not user input at all." },
+    { text: "The agent fails to log which component caused the error", correct: false, explanation: "Logging is an observability concern (covered in Module 09). The blame-attribution problem is about how users perceive and respond to failures in the UI." },
+    { text: "Users blame the agent for slowness that is actually caused by their network", correct: false, explanation: "This is a separate (and real) UX problem around latency perception, but it is not the blame-attribution problem as defined in this module." }
+  ]}
+/>
+
+<Checkpoint
+  items={[
+    "I can apply the four-level graceful degradation hierarchy to a real failure scenario",
+    "I can write an error message with what-happened, temporary/permanent, and next-action parts",
+    "I can explain the blame-attribution problem and the UX patterns that prevent it",
+    "I can distinguish recoverable and unrecoverable failures and choose the right UX for each"
+  ]}
+/>
