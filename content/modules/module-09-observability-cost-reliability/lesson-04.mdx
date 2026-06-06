@@ -1,0 +1,207 @@
+---
+title: "Reliability Patterns"
+module: "module-09-observability-cost-reliability"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 · Reliability Patterns
+
+LLM APIs fail in ways that differ from standard web services. Rate limits, variable latency, and occasional provider outages require a different set of reliability patterns. This lesson covers the four failure modes specific to LLM consumers and the patterns that address each.
+
+## The four LLM-specific failure modes
+
+**Rate limits (HTTP 429).** Every provider enforces token-per-minute (TPM) and requests-per-minute (RPM) limits. Limits apply per model, per organisation, and sometimes per project. The response always includes a `Retry-After` header — honour it. Retrying before `Retry-After` elapses counts as another failed request against your rate limit.
+
+**Latency spikes (p99 >> p50).** Generation time is proportional to output tokens, and output length varies. A request that normally completes in 1.2s at p50 may take 8s at p99 if the model generates a long chain-of-thought. Streaming mitigates user-perceived latency (first token arrives quickly) but not total cost or throughput.
+
+**Model outages.** Provider APIs go down. OpenAI has had multiple incidents, Anthropic has had brief outages. Monitor the provider status pages (`status.openai.com`, `status.anthropic.com`) in your alerting pipeline. Build your system to survive a provider being unavailable for 15–30 minutes without manual intervention.
+
+**Context overflow (HTTP 400).** Agents accumulate conversation history until `prompt_tokens > context_limit`, then receive a `context_length_exceeded` error. Mitigation strategies: sliding window truncation (drop oldest turns), summarise old turns into a compressed summary, or offload long history to a vector store.
+
+## Retry with jitter
+
+The retry simulator from earlier in the course shows the essential pattern — without jitter, clients that hit a rate limit all retry simultaneously, causing a thundering herd that immediately re-triggers the same limit.
+
+<RetryBackoffSim />
+
+Core formula with full jitter and `Retry-After` awareness:
+
+```python
+import random, time
+
+def retry_with_jitter(fn, max_attempts: int = 4, base_delay: float = 1.0, max_delay: float = 60.0):
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except RateLimitError as e:
+            if attempt == max_attempts - 1:
+                raise
+            retry_after = getattr(e, "retry_after", None)
+            ceiling = retry_after if retry_after else min(max_delay, base_delay * (2 ** attempt))
+            time.sleep(random.uniform(0, ceiling))
+```
+
+When **not** to retry: if the tool call already executed a side effect (sent an email, charged a payment, wrote to a database), retrying duplicates the action. Design idempotency keys before adding retries to any write path.
+
+## Fallback chains
+
+A fallback chain routes requests through a hierarchy of model tiers. When the primary fails, the secondary tries next:
+
+```
+Primary   → GPT-4o (OpenAI)         — full capability
+Secondary → Claude Haiku 3.5 (Anthropic) — lower cost, different provider
+Tertiary  → Llama 3.1 8B via Ollama — local, zero API cost, no external dependency
+```
+
+Provider diversity is intentional. If both primary and secondary are OpenAI models, an OpenAI-wide regional outage takes both down simultaneously.
+
+```python
+import pybreaker
+
+openai_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30, name="openai_gpt4o")
+anthropic_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=30, name="anthropic_haiku")
+
+def call_with_fallback(prompt: str) -> tuple[str, str]:
+    for breaker, call_fn, tier in [
+        (openai_breaker,    call_openai_gpt4o,         "primary"),
+        (anthropic_breaker, call_anthropic_haiku,       "secondary"),
+        (None,              call_local_ollama,           "tertiary"),
+    ]:
+        try:
+            if breaker:
+                result = breaker.call(call_fn, prompt)
+            else:
+                result = call_fn(prompt)
+            return result, tier
+        except (pybreaker.CircuitBreakerError, Exception):
+            continue
+
+    raise RuntimeError("All tiers failed")
+```
+
+## Circuit breakers
+
+A circuit breaker tracks failures and stops forwarding requests to a failing dependency after a threshold is reached:
+
+```
+Closed   → normal operation; failures counted in rolling window
+Open     → threshold exceeded; requests immediately rejected/routed to fallback
+Half-Open → after reset_timeout, one probe request allowed
+           → if probe succeeds: back to Closed
+           → if probe fails: back to Open
+```
+
+Recommended thresholds for model APIs: trip to Open after 3 consecutive timeouts, or 5 rate-limit errors in 30 seconds. The Half-Open state prevents you from hammering a recovering service with all your traffic the instant it comes back.
+
+`pybreaker` (Python, Apache 2.0) implements this pattern:
+
+```python
+import pybreaker
+
+breaker = pybreaker.CircuitBreaker(
+    fail_max=3,          # trip after 3 failures
+    reset_timeout=30,    # try Half-Open after 30s
+    name="openai_gpt4o"
+)
+
+@breaker
+def call_primary(prompt: str) -> str:
+    return openai_client.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": prompt}]
+    ).choices[0].message.content
+```
+
+When the breaker is Open, `call_primary()` raises `pybreaker.CircuitBreakerError` immediately without making an HTTP request, so your fallback activates in microseconds rather than waiting for a timeout.
+
+## Request hedging
+
+For latency-sensitive paths where p99 is unacceptable, fire a second request to a different provider after a short delay and return whichever responds first:
+
+```python
+import asyncio
+
+async def hedged_call(prompt: str, hedge_after_ms: int = 800) -> str:
+    primary_task = asyncio.create_task(call_openai_async(prompt))
+    await asyncio.sleep(hedge_after_ms / 1000)
+
+    if primary_task.done():
+        return primary_task.result()
+
+    secondary_task = asyncio.create_task(call_anthropic_async(prompt))
+    done, pending = await asyncio.wait(
+        [primary_task, secondary_task],
+        return_when=asyncio.FIRST_COMPLETED
+    )
+    for task in pending:
+        task.cancel()
+    return done.pop().result()
+```
+
+Cost implication: on requests where the hedge fires (primary has not responded within `hedge_after_ms`), you pay for both the primary's eventual response and the secondary call. If 20% of requests trigger the hedge, your total cost increases by roughly 20% of the secondary model's price. Only use hedging for user-facing paths with strict latency SLOs.
+
+## Graceful degradation
+
+When the full pipeline fails, never return HTTP 500 or an empty response. Define a degradation hierarchy in advance:
+
+```
+1. Serve from semantic cache (similar query answered recently)
+2. Return the last-known-good cached answer for this user/context
+3. Return a simplified template answer ("I'm having trouble accessing that information right now…")
+4. Offer a human escalation path ("Let me connect you with a team member")
+```
+
+The user always gets something actionable, even when all model tiers are down.
+
+## Fallback chain simulator
+
+The component below walks through a request hitting all three tiers under three different failure scenarios. Watch the circuit breaker states update as each scenario plays out.
+
+<FallbackChainSim />
+
+<Quiz
+  question="A circuit breaker is in the Half-Open state. The probe request fails. What happens next?"
+  options={[
+    {
+      label: "The breaker transitions back to Open",
+      correct: true,
+      explanation: "A failed probe in Half-Open means the dependency is still unhealthy. The breaker returns to Open and the reset_timeout timer restarts. The next probe attempt will happen after another reset_timeout seconds."
+    },
+    {
+      label: "The breaker stays in Half-Open and allows more probe requests",
+      correct: false,
+      explanation: "Half-Open allows exactly one probe request. If it fails, the breaker immediately returns to Open — it does not allow further probes until the reset_timeout elapses again."
+    },
+    {
+      label: "The breaker transitions to Closed and allows all traffic through",
+      correct: false,
+      explanation: "Transitioning to Closed would expose all traffic to a still-failing dependency. Only a successful probe triggers the transition to Closed."
+    }
+  ]}
+/>
+
+<Quiz
+  question="Request hedging is most appropriate when:"
+  options={[
+    {
+      label: "p99 latency SLO is more important than cost, and the operation is idempotent",
+      correct: true,
+      explanation: "Hedging trades cost (you may pay for two model calls) for latency (you get the faster of two providers). It only makes sense when p99 latency matters more than the cost increase, and the operation must be idempotent since both requests may execute."
+    },
+    {
+      label: "Cost optimisation is the primary concern",
+      correct: false,
+      explanation: "Hedging increases cost — on requests where the hedge fires, you pay for both the primary and secondary calls. It is a latency optimisation, not a cost optimisation."
+    },
+    {
+      label: "The secondary provider is consistently faster than the primary",
+      correct: false,
+      explanation: "If the secondary is always faster, just route to the secondary directly. Hedging is useful when the primary is faster on average (p50) but has high tail latency (p99), so you want to race them."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 3](/modules/module-09-observability-cost-reliability/lesson-03) · [Lesson 5: SLOs, Alerting & Production Readiness →](/modules/module-09-observability-cost-reliability/lesson-05)
