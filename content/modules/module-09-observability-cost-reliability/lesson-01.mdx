@@ -1,0 +1,143 @@
+---
+title: "Observability Foundations"
+module: "module-09-observability-cost-reliability"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 · Observability Foundations
+
+Deploy a service and you can answer: is it up? How fast? How many errors? Deploy an LLM agent and those three metrics are insufficient. The agent can return HTTP 200 with a hallucinated answer. Its latency varies by hundreds of milliseconds depending on how many tokens it generates. Its cost fluctuates per request. Traditional APM tools — Datadog, New Relic, Prometheus — were built for stateless HTTP services. They have no concept of a token, a conversation turn, or a quality score. This lesson introduces the adapted observability model that covers what APM misses.
+
+## Why LLM observability is different
+
+Three properties make LLMs fundamentally harder to observe than standard services:
+
+**Non-determinism.** The same input can produce different outputs on consecutive calls. An error rate of 0% is compatible with an agent that hallucinates on 30% of requests, as long as it returns HTTP 200 each time. You need a quality signal, not just a status code.
+
+**Variable token economics.** Cost and latency are both functions of token count, which varies per request. A 100-token response costs one-eighth as much as an 800-token response. Aggregate latency averages mask this: a p50 of 1.2s and a p99 of 8s are both valid for the same model on the same endpoint, depending on output length. You need per-request token counts, not just endpoint averages.
+
+**Compound pipelines.** A single user turn can produce `agent_run` → `llm_call` → `tool:search` → `llm_call_2` → `tool:write`. The bottleneck might be in any segment. Without span-level tracing across the whole chain, you only know the wall-clock total.
+
+<Callout type="key">
+A metric like "error rate" is insufficient for LLM systems. An agent can return HTTP 200 with a hallucinated answer, a leaked system prompt, or an injected response from a poisoned document. You need a semantic quality signal in addition to infrastructure signals.
+</Callout>
+
+## The three pillars for AI systems
+
+### Traces
+
+In a distributed system, a trace is a tree of spans describing a single request as it flows through components. For an LLM agent, each span corresponds to a unit of work:
+
+- **`agent_run`** — the root span; represents the full user turn from input received to response sent
+- **`llm_call`** — a single call to a model API; captures model name, token counts, latency, temperature, status
+- **`tool:search`** — a tool invocation; captures tool name, input arguments, output, latency, status
+- **`tool:write`** — another tool; same structure
+
+The tree structure shows which spans are children of which, so you can read the trace as a waterfall: each span starts when it starts and lasts as long as it lasts. A 4-second `tool:search` span inside a 5-second `agent_run` tells you the retriever is the bottleneck.
+
+### Metrics
+
+Metrics are aggregated numbers sampled from your service over time. For LLM agents, the important ones differ from standard web services:
+
+| Metric | What it measures | Why it matters |
+|---|---|---|
+| **TTFT p95** | Time to first token — stream start latency | User-perceived responsiveness in streaming UIs |
+| **Total latency p95** | Wall clock from request to full response | End-to-end SLO; governs tool call pipelines |
+| **Cost per query** | USD derived from token counts × model price | Sustainability; budget alerts |
+| **Quality score** | LLM-judge score, sampled from production | The semantic signal APM cannot provide |
+| **Guardrail hit rate** | Fraction of requests intercepted by safety layer | Security signal; spike = active attack |
+| **Error rate** | HTTP 4xx/5xx + timeouts | Standard reliability signal |
+
+### Logs
+
+Structured logs — JSON, one object per log entry — link each entry to the trace it belongs to via `trace_id` and `span_id`. This allows you to pivot from a Langfuse trace view into your log aggregator (CloudWatch Logs, Loki, Datadog Logs) using the trace ID as the join key.
+
+Without `trace_id` in your logs, debugging a specific failed conversation means scanning logs by timestamp and hoping the context is obvious. With it, one click in Langfuse takes you to the relevant log lines.
+
+## OpenTelemetry LLM semantic conventions
+
+OpenTelemetry (OTel) is the standard for distributed tracing across languages and platforms. Version 1.26+ (2025) stabilised the `gen_ai.*` attribute namespace for LLM workloads. These attributes appear in every LLM span:
+
+| Attribute | Type | Example |
+|---|---|---|
+| `gen_ai.system` | string | `openai`, `anthropic`, `cohere` |
+| `gen_ai.request.model` | string | `gpt-4o-2024-08-06` |
+| `gen_ai.response.model` | string | `gpt-4o-2024-08-06` (may differ from requested) |
+| `gen_ai.usage.input_tokens` | int | `850` |
+| `gen_ai.usage.output_tokens` | int | `124` |
+| `gen_ai.operation.name` | string | `chat`, `embeddings`, `completions` |
+| `gen_ai.request.temperature` | float | `0.7` |
+| `gen_ai.request.max_tokens` | int | `512` |
+
+Prompt and completion content are stored as **span events** (not attributes) to avoid attribute size limits. An attribute has a 256-byte limit on most backends; a completion can be thousands of tokens.
+
+```python
+# Emit content as span events, not attributes
+span.add_event("gen_ai.content.prompt",     {"gen_ai.prompt": system_prompt})
+span.add_event("gen_ai.content.completion", {"gen_ai.completion": response_text})
+```
+
+Langfuse v3 emits OTel-compatible attributes automatically when you use its SDK.
+
+## The tool landscape
+
+**Langfuse v3** (open-source, Apache 2.0): self-hostable on Fly.io, Railway, or Docker Compose; hosted cloud at `cloud.langfuse.com`. Python SDK `langfuse>=3.0.0`. Key feature: `@observe` decorator automatically captures function inputs, outputs, and timing. Drop-in OpenAI wrapper replaces `import openai` with one line. Best overall choice for most teams.
+
+**Arize Phoenix**: ML-focused observability. Excels at embedding drift detection — it can show you that your retrieval embeddings started drifting from the query distribution after a model update, before you notice quality degradation in output metrics. Better choice when you need to monitor RAG quality at the embedding level.
+
+**Helicone**: proxy model. Requests route through Helicone's endpoint; the service adds tracking headers. Zero code changes required. Trade-off: adds one network hop (~5–15ms), and all prompts and completions transit Helicone's servers — a compliance concern for regulated workloads.
+
+Brief mentions: LangSmith (LangChain-native), Weights & Biases Weave (experiment-centric, good for fine-tuning feedback loops).
+
+## Exploring a trace
+
+The component below shows a simulated OpenTelemetry trace for a two-LLM-call, two-tool-call agent. Toggle between the happy path and a degraded scenario where a retrieval timeout and a rate-limit event add 4.6 seconds to the total. Click any span bar to expand its attributes.
+
+<AgentTraceViz />
+
+<Quiz
+  question="Which OpenTelemetry attribute stores the number of tokens in the model's response?"
+  options={[
+    {
+      label: "gen_ai.usage.output_tokens",
+      correct: true,
+      explanation: "The gen_ai.* namespace uses output_tokens for the completion side and input_tokens for the prompt side. These are stable attributes in OTel 1.26+."
+    },
+    {
+      label: "gen_ai.usage.total_tokens",
+      correct: false,
+      explanation: "There is no gen_ai.usage.total_tokens in the standard. You compute total yourself as input_tokens + output_tokens."
+    },
+    {
+      label: "llm.completion_tokens",
+      correct: false,
+      explanation: "This was an early pre-standard naming convention used by some SDKs before the gen_ai.* namespace was stabilised. It is not part of the OTel spec."
+    }
+  ]}
+/>
+
+<Quiz
+  question="A Helicone integration requires zero code changes because it uses which approach?"
+  options={[
+    {
+      label: "HTTP proxy interception — requests route through Helicone's endpoint",
+      correct: true,
+      explanation: "Helicone acts as a proxy. You point your OpenAI base URL at Helicone's endpoint and add an API key header. Every request passes through their servers, which record the trace data before forwarding to OpenAI."
+    },
+    {
+      label: "OpenTelemetry auto-instrumentation via a Python import hook",
+      correct: false,
+      explanation: "OTel auto-instrumentation does exist for some libraries, but Helicone specifically uses the proxy model — it intercepts at the network level, not the code level."
+    },
+    {
+      label: "eBPF kernel tracing that intercepts outbound system calls",
+      correct: false,
+      explanation: "eBPF observability tools exist but Helicone is not one of them. Helicone is a managed HTTP proxy service."
+    }
+  ]}
+/>
+
+---
+
+[← Module overview](/modules/module-09-observability-cost-reliability) · [Lesson 2: Instrumenting an Agent →](/modules/module-09-observability-cost-reliability/lesson-02)
