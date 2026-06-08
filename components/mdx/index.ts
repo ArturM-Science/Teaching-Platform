@@ -49,6 +49,8 @@ import { FrontierReadinessScorecard } from './FrontierReadinessScorecard'
 import { AutonomyRunSimulator } from './AutonomyRunSimulator'
 import { CapstoneProjectScoper } from './CapstoneProjectScoper'
 import { LaunchReadinessReview } from './LaunchReadinessReview'
+import { AgentProtocolComparison } from './AgentProtocolComparison'
+import { A2AProtocolMovie } from './A2AProtocolMovie'
 
 export const mdxComponents = {
   ...proseComponents,
@@ -102,4 +104,6 @@ export const mdxComponents = {
   AutonomyRunSimulator,
   CapstoneProjectScoper,
   LaunchReadinessReview,
+  AgentProtocolComparison,
+  A2AProtocolMovie,
 }

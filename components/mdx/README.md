@@ -422,6 +422,26 @@ No props. Self-contained. Used in Module 11, Lesson 6.
 <FrontierReadinessScorecard />
 ```
 
+### `<AgentProtocolComparison>`
+
+Interactive comparison of tool protocols, typed handoffs, and agent-to-agent protocols. Learners can switch between protocol types and inspect the flow, best-fit use case, risks, and audit fields.
+
+No props. Self-contained. Used in Module 11, Lesson 4.
+
+```mdx
+<AgentProtocolComparison />
+```
+
+### `<A2AProtocolMovie>`
+
+Animated step-through explainer for an agent-to-agent protocol exchange. Shows capability discovery, capability advert, task contract, authority check, status update, result return, and ownership closure.
+
+No props. Self-contained. Used in Module 11, Lesson 4.
+
+```mdx
+<A2AProtocolMovie />
+```
+
 ---
 
 ## Module 12 - Capstone Components

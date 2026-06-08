@@ -41,6 +41,16 @@ Good interoperability has least privilege, scoped credentials, capability manife
 
 Agent-to-agent handoff sounds elegant, but it is easy to lose accountability. A handoff should include task objective, current state, constraints, permissions, evidence gathered, open questions, stop condition, and owner of the final decision.
 
+## Agent-to-agent protocols vs tool protocols
+
+Tool protocols let an agent call capabilities. Typed handoffs let one system pass validated work to another. Agent-to-agent protocols go further: both sides may advertise capabilities, accept tasks, negotiate constraints, report state, and return results.
+
+That extra flexibility changes the trust problem. With tools, the main question is "may this agent call this capability?" With agent-to-agent systems, the questions become "who is this agent, what authority does it have, who owns the task now, and how do we audit the state transition?"
+
+<AgentProtocolComparison />
+
+<A2AProtocolMovie />
+
 Bad handoff:
 
 ```text
