@@ -7,7 +7,7 @@ slug: "module-06-multi-agent-systems"
 
 # Module 06 - Multi-Agent Systems
 
-**Part 3 — Orchestration & Multi-Agent** - 5 lessons + lab - ~5.5 hours total
+**Part 3 — Orchestration & Multi-Agent** - 5 lessons + core lab, plus optional framework labs - ~5.5 hours core / ~12 hours extended
 
 <LearningObjectives>
 - Explain the architectural difference between a parallel workflow and a true multi-agent system
@@ -21,7 +21,7 @@ slug: "module-06-multi-agent-systems"
 
 ## What you'll build
 
-You will design and implement a four-agent research pipeline in four different frameworks, then connect two independent multi-agent systems via a typed handoff schema. By the end you will have working code in LangGraph, the Claude Agent SDK, AutoGen, and CrewAI — and a cross-system pipeline showing agent-to-agent communication across a trust boundary.
+You will design a four-agent research pipeline, then implement it in at least one framework. The LangGraph, Claude Agent SDK, AutoGen, and CrewAI labs are extension tracks for comparing tradeoffs, not mandatory repetitions. Advanced learners can complete multiple tracks and finish with a cross-system pipeline showing agent-to-agent communication across a trust boundary.
 
 ## Lessons
 
@@ -38,6 +38,10 @@ You will design and implement a four-agent research pipeline in four different f
 | Lab | [Framework lab: AutoGen / AG2](/modules/module-06-multi-agent-systems/lesson-09-lab-autogen) | ~90 min |
 | Lab | [Framework lab: CrewAI](/modules/module-06-multi-agent-systems/lesson-10-lab-crewai) | ~90 min |
 | Lab 2 | [Cross-system agent communication](/modules/module-06-multi-agent-systems/lesson-11-lab-2) | ~2 hrs |
+
+<Callout type="tip">
+Core path: complete lessons 1-5 and the framework-agnostic design lab. Extension path: choose one framework lab that matches your stack. Comparison path: complete two or more framework labs and the cross-system communication lab.
+</Callout>
 
 <Callout type="key">
 Multi-agent complexity is not free. Add it only when the task genuinely requires dynamic coordination — independent roles, parallel context windows, or mid-task replanning. For most tasks, a well-designed workflow is enough.

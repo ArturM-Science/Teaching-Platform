@@ -1,0 +1,23 @@
+{
+  "run_id": "frontier-run-001",
+  "capability": "",
+  "status": "completed",
+  "steps": [
+    {
+      "step": 1,
+      "goal": "",
+      "observation": "",
+      "action": "",
+      "expected_result": "",
+      "actual_result": "",
+      "verified": false
+    }
+  ],
+  "cost": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "estimated_usd": 0
+  },
+  "decision": ""
+}
+

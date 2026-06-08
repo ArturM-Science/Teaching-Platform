@@ -93,8 +93,13 @@ Lab assignment header block. Use at the top of `lesson-XX-lab.mdx` files.
 | Prop | Type | Required | Description |
 |---|---|---|---|
 | `title` | `string` | Yes | Lab name shown in the dark header |
-| `time` | `string` | Yes | Estimated time (e.g. `"90 minutes"`) |
-| `children` | `ReactNode` | Yes | Lab body — objectives, deliverables, instructions |
+| `time` | `string` | No | Estimated time (e.g. `"90 minutes"`) |
+| `duration` | `string` | No | Alternate estimated time prop; used when `time` is omitted |
+| `difficulty` | `string` | No | Short difficulty label shown under the lab title |
+| `summary` | `string` | No | One-paragraph summary shown before the lab body |
+| `objective` | `string` | No | Objective block shown before the lab body |
+| `prerequisites` | `string[]` | No | Prerequisite list shown before the lab body |
+| `children` | `ReactNode` | No | Lab body - objectives, deliverables, instructions |
 
 Use `####` headings and `ul` lists inside the body; they're styled automatically.
 
@@ -109,6 +114,23 @@ Build a tool-calling agent that can answer questions about a local CSV file.
 - Short written reflection on where the agent surprised you
 
 </LabBrief>
+```
+
+Rich metadata form:
+
+```mdx
+<LabBrief
+  title="Launch Readiness Review"
+  duration="2-3 hours"
+  difficulty="Advanced"
+  summary="Review an agent project against production-readiness criteria."
+  objective="Produce a launch decision backed by evaluation, safety, and observability evidence."
+  prerequisites={[
+    "Completed evaluation report",
+    "Trace sample or log evidence",
+    "Safety review draft"
+  ]}
+/>
 ```
 
 ---
