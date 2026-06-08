@@ -9,6 +9,21 @@ All components are exported from `components/mdx/index.ts`.
 
 ---
 
+## MDX Authoring Gotchas
+
+MDX treats `{...}` as JavaScript expressions. Literal template placeholders such as `{{input}}`, `{{output}}`, or `{{user}}` must be placed in fenced code blocks:
+
+````mdx
+```text
+User: {{input}}
+Agent: {{output}}
+```
+````
+
+Do not place those placeholders inline in prose or quoted strings; they can render as `ReferenceError` at runtime.
+
+---
+
 ## Server-Safe Components
 
 These render as React Server Components. No `'use client'` needed.

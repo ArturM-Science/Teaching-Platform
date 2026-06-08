@@ -12,7 +12,11 @@ Course delivery platform for the AI Agents Course. Self-paced learning + live wo
 
 ## Getting Started
 
-1. Copy `.env.local.example` to `.env.local` and fill in values
+1. Create `.env.local` and fill in the Supabase public values:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=
+   ```
 2. Create a Supabase project at supabase.com
 3. Run the migration: paste `supabase/migrations/001_initial_schema.sql` into the Supabase SQL editor
 4. `npm install && npm run dev`
@@ -48,6 +52,8 @@ content/
 ## Content
 
 Module content is authored in the Obsidian vault and exported as MDX into `content/modules/`. Do not edit MDX files directly — edit the vault and re-export.
+
+MDX treats `{...}` as JavaScript. If lesson copy needs literal template placeholders such as `{{input}}` or `{{output}}`, put them in a fenced code block instead of inline prose so the page does not crash at render time.
 
 ## Architecture decisions
 
