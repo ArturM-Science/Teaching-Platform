@@ -1,0 +1,127 @@
+---
+title: "Lab: Final Capstone Submission"
+module: "module-12-capstone"
+lesson: 7
+slug: "lesson-07-lab"
+---
+
+# Lab - Final Capstone Submission
+
+<LabBrief
+  title="Final Capstone Submission"
+  time="4-6 hours"
+>
+
+#### Objective
+
+Ship a complete, reviewable agent project. Your submission should prove that the system works, that you know how to evaluate it, and that you understand what would be required before production launch.
+
+#### Deliverables
+
+- `README.md` - project overview, setup, and run instructions
+- `architecture.md` - diagram and explanation of control flow, tools, permissions, and data
+- `eval_report.md` - test set, rubric, results, and launch threshold
+- `safety_review.md` - threat model, permission boundaries, approval gates, and residual risks
+- `observability.md` - trace screenshot or sample logs, cost estimate, latency notes
+- `demo.md` or demo video - walkthrough of happy path and one failure/edge case
+- `launch_readiness.md` - final launch decision and next iteration plan
+
+</LabBrief>
+
+## Step 1 - Freeze scope
+
+Write:
+
+```md
+This capstone ships:
+- 
+- 
+-
+
+This capstone does not ship:
+- 
+- 
+-
+```
+
+Do not expand scope during the final lab. Fix quality before adding features.
+
+## Step 2 - Run the evaluation set
+
+Run your evaluation cases and report the number of cases, average score, pass/fail against launch threshold, top three failure modes, and changes made after evaluation.
+
+## Step 3 - Run the hardening checklist
+
+Mark each item Pass, Fail, or N/A. For every Fail, include impact, remediation, owner, and target date.
+
+## Step 4 - Prepare the demo
+
+Your demo must show input, agent run, output, trace or log evidence, one failure or edge case, and launch-readiness decision.
+
+## Step 5 - Submit the launch decision
+
+Use one of:
+
+- ready for limited production
+- ready for supervised pilot
+- internal demo only
+- not ready
+
+Justify the decision with evidence from evaluation, safety review, and observability.
+
+<Rubric
+  threshold="Score 3+ on all five criteria to pass"
+  criteria={[
+    {
+      name: "Working system",
+      exceeds: "End-to-end agent runs reliably, includes clear setup, and demonstrates happy path plus failure handling",
+      meets: "End-to-end agent runs with documented setup and at least one complete workflow",
+      approaching: "Partial workflow works but setup or behavior is unreliable",
+      below: "No working end-to-end system"
+    },
+    {
+      name: "Architecture",
+      exceeds: "Architecture clearly justifies pattern choice, tools, permissions, data flow, and failure handling",
+      meets: "Architecture documents core flow, tools, and permissions",
+      approaching: "Architecture is incomplete or mostly descriptive",
+      below: "No architecture documentation"
+    },
+    {
+      name: "Evaluation",
+      exceeds: "Evaluation set includes happy, edge, adversarial, and regression cases with a clear launch threshold and results",
+      meets: "Evaluation report includes test cases, rubric, and results",
+      approaching: "Evaluation exists but lacks rubric, threshold, or varied cases",
+      below: "No evaluation report"
+    },
+    {
+      name: "Production controls",
+      exceeds: "Security, safety, observability, cost, reliability, and UX controls are specific and evidenced",
+      meets: "Core controls are documented for the project risk level",
+      approaching: "Controls are generic or missing key risks",
+      below: "No hardening review"
+    },
+    {
+      name: "Readiness judgment",
+      exceeds: "Launch decision is evidence-based, honest, and includes a concrete next iteration plan",
+      meets: "Launch decision is stated and justified",
+      approaching: "Launch decision is vague or mostly aspirational",
+      below: "No launch decision"
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-12-capstone"
+  items={[
+    "My capstone runs end to end",
+    "I have an architecture document with tools, permissions, and failure modes",
+    "I have run an evaluation set with a rubric and launch threshold",
+    "I have documented security, safety, observability, cost, reliability, and UX controls",
+    "I can present an honest launch-readiness decision with evidence"
+  ]}
+  next="Core course complete"
+/>
+
+---
+
+[Previous: Lesson 6](/modules/module-12-capstone/lesson-06)

@@ -1,0 +1,73 @@
+---
+title: "Capstone Brief and Project Selection"
+module: "module-12-capstone"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 - Capstone Brief and Project Selection
+
+Your capstone is a production-style agent project. It does not need to be large. It does need to be real enough that the patterns from the course matter: tools, knowledge, evaluation, deployment, safety, observability, reliability, and UX.
+
+## Choose a narrow problem
+
+Good capstones have a specific user, a recurring job, constrained inputs, clear success criteria, limited tool permissions, and a visible failure mode.
+
+Weak capstones sound like "general assistant," "AI helper for everything," "research agent for any topic," or "company automation bot." Those are too broad. Scope is not a lack of ambition. Scope is how you make quality measurable.
+
+## Capstone project shapes
+
+| Shape | Example | Best course patterns |
+|---|---|---|
+| Research workflow | compare three vendor documents and produce a cited brief | RAG, evaluation, observability |
+| Support triage agent | classify tickets, retrieve policy, draft response | tools, memory, HITL, safety |
+| Document inspector | review contracts for renewal and risk clauses | document grounding, evaluation |
+| Internal ops assistant | summarize dashboards and create a ticket draft | browser/tools, approval gates |
+| Coding helper | inspect a repo and propose a small change | coding-agent workflow, review loops |
+| Learning coach | assess learner work and suggest next steps | UX, rubrics, feedback, safety |
+
+## Project selection template
+
+```md
+# Capstone project brief
+
+Project name:
+Target user:
+Job to be done:
+Current workflow:
+Agent value:
+
+Inputs:
+Outputs:
+Tools:
+Knowledge sources:
+
+Success metric:
+Failure metric:
+Out of scope:
+```
+
+## MVP rule
+
+Your MVP should complete one valuable workflow end to end. Avoid building many partial features.
+
+Good MVP:
+
+```text
+Given a support ticket, retrieve the relevant policy, draft a response, and require approval before sending.
+```
+
+Too broad:
+
+```text
+Build a full customer support platform with analytics, routing, chat, and autonomous resolution.
+```
+
+## Lesson exercise
+
+Draft three project ideas. Score each from 1 to 5 for user clarity, data availability, evaluation ease, safety risk, and build feasibility. Choose the highest-scoring idea unless you have a strong reason not to.
+
+---
+
+[Lesson 2: Architecture Design Review ->](/modules/module-12-capstone/lesson-02)
+

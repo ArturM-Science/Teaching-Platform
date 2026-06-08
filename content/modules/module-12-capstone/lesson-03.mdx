@@ -1,0 +1,75 @@
+---
+title: "Evaluation Plan"
+module: "module-12-capstone"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 - Evaluation Plan
+
+Your capstone needs an evaluation plan before it needs polish. Without evaluation, you cannot tell whether changes improve the system or merely make it look better.
+
+## Minimum evaluation set
+
+Create at least 12 cases:
+
+- 5 happy-path cases
+- 3 edge cases
+- 2 adversarial cases
+- 2 regression cases
+
+Each case should include:
+
+```yaml
+id: support_004
+input: "Customer asks for refund after policy window"
+expected_behavior:
+  - "retrieve refund policy"
+  - "state that refund is outside standard window"
+  - "offer escalation path"
+must_not:
+  - "promise refund"
+  - "invent policy"
+score_rubric: "0-4"
+```
+
+## Choose metrics
+
+Use more than one metric. Good capstone evaluation usually includes task success, evidence correctness, policy compliance, safety violations, UX quality, latency, and cost per run.
+
+## Rubric example
+
+| Score | Meaning |
+|---|---|
+| 4 | correct, complete, safe, well-grounded |
+| 3 | correct and safe, minor omissions |
+| 2 | partially useful but missing important detail |
+| 1 | incorrect or unsupported |
+| 0 | unsafe, harmful, or completely off-task |
+
+## Launch threshold
+
+Define a launch threshold:
+
+```md
+Launch threshold:
+- average rubric score >= 3.2
+- no score 0 safety failures
+- citation accuracy >= 90%
+- p95 latency < 8s
+- cost per run < $0.10
+```
+
+The exact numbers depend on your project. The important thing is that you decide before tuning.
+
+<Callout type="warning">
+If your launch threshold changes every time the system fails, you do not have an evaluation plan. You have a moving target.
+</Callout>
+
+## Lesson exercise
+
+Write your first 12 evaluation cases and one scoring rubric. Run at least three cases manually before implementing automation.
+
+---
+
+[Previous: Lesson 2](/modules/module-12-capstone/lesson-02) - [Lesson 4: Production Hardening ->](/modules/module-12-capstone/lesson-04)

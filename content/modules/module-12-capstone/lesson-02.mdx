@@ -1,0 +1,61 @@
+---
+title: "Architecture Design Review"
+module: "module-12-capstone"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 - Architecture Design Review
+
+Before writing code, decide what kind of system you are building. Many capstone projects fail because they use an agent loop where a workflow would be safer, or split into multiple agents before the coordination problem is real.
+
+## Choose the control pattern
+
+| Pattern | Use when | Avoid when |
+|---|---|---|
+| Single LLM call | task is short and context is complete | tool use or multi-step state is required |
+| Workflow | steps are predictable and auditable | task requires open-ended exploration |
+| Agent loop | the system must choose tools dynamically | stop condition is vague or actions are high-risk |
+| Multi-agent | roles have genuinely different expertise or context | one agent with structured steps would work |
+
+## Architecture deliverables
+
+Your design review should include system diagram, user journey, data flow, tool inventory, permission map, memory/knowledge design, evaluation plan preview, failure modes, and deployment target.
+
+## Tool inventory
+
+For each tool, document:
+
+```md
+Tool name:
+Read or write:
+Inputs:
+Outputs:
+Permission scope:
+Failure mode:
+Requires approval: yes/no
+Logged fields:
+```
+
+## Memory and knowledge
+
+Decide whether your project needs no memory, short-term run state, persistent user memory, knowledge retrieval, document storage, or human-authored rules.
+
+Do not add memory because agents "should have memory." Add memory only if the user workflow requires persistence across turns or runs.
+
+## Failure-mode table
+
+| Failure | User impact | Detection | Mitigation |
+|---|---|---|---|
+| wrong source retrieved | bad answer | eval case, trace citation mismatch | require citations and retrieval threshold |
+| tool timeout | delayed or partial output | tool span status | fallback, retry, partial result |
+| unsafe action | external harm | approval gate | block or require human approval |
+| high cost | budget overrun | token/cost trace | budget cap and model routing |
+
+## Lesson exercise
+
+Create your capstone architecture one-pager. If you cannot explain the system on one page, the MVP is probably too broad.
+
+---
+
+[Previous: Lesson 1](/modules/module-12-capstone/lesson-01) - [Lesson 3: Evaluation Plan ->](/modules/module-12-capstone/lesson-03)

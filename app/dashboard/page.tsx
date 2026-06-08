@@ -26,8 +26,8 @@ const modules = [
   { number: '08', slug: 'module-08-security-safety',                title: 'Security & Safety',                       part: 'Part 4 — Production',                   status: 'ready' },
   { number: '09', slug: 'module-09-observability-cost-reliability', title: 'Observability, Cost & Reliability',       part: 'Part 4 — Production',                   status: 'ready' },
   { number: '10', slug: 'module-10-agent-ux',                       title: 'Agent UX & Human-Agent Interaction',      part: 'Part 4 — Production',                   status: 'ready' },
-  { number: '11', slug: 'module-11-frontiers',                      title: 'Frontiers',                               part: 'Part 5 — Frontiers & Capstone',         status: 'locked' },
-  { number: '12', slug: 'module-12-capstone',                       title: 'Capstone',                                part: 'Part 5 — Frontiers & Capstone',         status: 'locked' },
+  { number: '11', slug: 'module-11-frontiers',                      title: 'Frontiers',                               part: 'Part 5 — Frontiers & Capstone',         status: 'ready' },
+  { number: '12', slug: 'module-12-capstone',                       title: 'Capstone',                                part: 'Part 5 — Frontiers & Capstone',         status: 'ready' },
   { number: '13', slug: 'module-13-openai-codex',                   title: 'OpenAI Codex: Agentic Software Engineering', part: 'Part 6 — Practitioner Tools',           status: 'ready' },
   { number: '14', slug: 'module-14-claude-code',                    title: 'Claude Code: Operating Agentic Coding Workflows', part: 'Part 6 — Practitioner Tools',          status: 'ready' },
 ]

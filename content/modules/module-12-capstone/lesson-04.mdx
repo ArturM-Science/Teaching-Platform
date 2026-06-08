@@ -1,0 +1,59 @@
+---
+title: "Production Hardening"
+module: "module-12-capstone"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 - Production Hardening
+
+Production hardening is the work that makes your capstone trustworthy under imperfect conditions. It includes security, safety, reliability, cost controls, and operational ownership.
+
+## Hardening checklist
+
+Your capstone should address:
+
+1. authentication or access control
+2. permission boundaries for every tool
+3. approval gates for high-impact actions
+4. prompt-injection defenses
+5. PII and sensitive-data handling
+6. rate limits or abuse controls
+7. retry and fallback behavior
+8. cost caps or model routing
+9. audit logs
+10. error handling and graceful degradation
+11. observability traces
+12. rollback or cancellation path
+
+## Threat model
+
+Write a lightweight threat model:
+
+```md
+Asset:
+Actor:
+Entry point:
+Misuse case:
+Impact:
+Mitigation:
+Residual risk:
+```
+
+You do not need a long security document. You need to prove you have thought about how the system can be misused.
+
+## Cost controls
+
+Track input tokens, output tokens, model used, tool calls, retries, cost per run, and projected monthly cost. Then set caps for runs per user, tokens per run, retries, tool calls, and spend.
+
+## Reliability controls
+
+Add timeout per external call, retry with backoff for transient failures, fallback or partial result behavior, clear failed state, user-visible explanation, and trace events for failures.
+
+## Lesson exercise
+
+Complete the hardening checklist for your capstone. For every unchecked item, write whether it is out of scope, deferred, or required before launch.
+
+---
+
+[Previous: Lesson 3](/modules/module-12-capstone/lesson-03) - [Lesson 5: Deployment, Observability, and UX ->](/modules/module-12-capstone/lesson-05)

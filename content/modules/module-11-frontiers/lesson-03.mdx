@@ -1,0 +1,52 @@
+---
+title: "Multimodal Agents"
+module: "module-11-frontiers"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Lesson 3 - Multimodal Agents
+
+Multimodal agents reason over more than text: screenshots, diagrams, PDFs, charts, audio, video, forms, images, and mixed media. They can inspect the world more like a person, but they also inherit new uncertainty: what they saw, what they missed, and whether the evidence supports the conclusion.
+
+## Multimodal is not magic vision
+
+A multimodal model can describe an image, but an agent system must decide what evidence to capture, what resolution or crop is needed, what context accompanies the artifact, which claims require citation, and when to ask a human to inspect the evidence.
+
+## Common multimodal patterns
+
+| Pattern | Example | Key risk |
+|---|---|---|
+| Visual QA | "What is wrong with this dashboard screenshot?" | model misses small details |
+| Document inspection | extract obligations from a contract | layout ambiguity and missing citations |
+| Chart reasoning | summarize a quarterly revenue chart | axis or legend misread |
+| UI state understanding | decide which form fields are incomplete | hidden or offscreen state |
+| Audio/video review | summarize a recorded meeting | speaker attribution and temporal grounding |
+
+## Grounding requirements
+
+For production work, every important multimodal claim should point back to evidence.
+
+```text
+Claim: The error rate doubled after 14:00.
+Evidence: dashboard screenshot, top-right chart, red series, x-axis range 13:00-15:00.
+Confidence: medium, because the y-axis labels are partially clipped.
+```
+
+Grounding lets a human or evaluator inspect whether the model inferred correctly.
+
+## Multimodal retrieval
+
+Text RAG is not enough for mixed-media knowledge. A multimodal retrieval system may need OCR text, layout metadata, image embeddings, page numbers, bounding boxes, screenshot timestamps, captions, and document section hierarchy.
+
+<Callout type="warning">
+Do not let generated captions become the only source of truth. Captions are model outputs, not evidence. Keep the original artifact linked to every derived summary.
+</Callout>
+
+## Lesson exercise
+
+Take a screenshot, chart, or PDF page. Write a multimodal evidence record with artifact type, source, version, claims the agent may make, evidence location for each claim, confidence, and review requirement.
+
+---
+
+[Previous: Lesson 2](/modules/module-11-frontiers/lesson-02) - [Lesson 4: Protocols and Interoperability ->](/modules/module-11-frontiers/lesson-04)

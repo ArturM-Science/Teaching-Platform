@@ -1,0 +1,71 @@
+---
+title: "The Frontier Map"
+module: "module-11-frontiers"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Lesson 1 - The Frontier Map
+
+Frontier agent systems are not one thing. They are a cluster of capabilities that stretch the patterns you already learned: tool use, memory, evaluation, workflow orchestration, safety, observability, and UX.
+
+The useful way to study the frontier is not by product category. It is by pressure point.
+
+## Five frontier pressure points
+
+| Pressure point | What changes | What becomes risky |
+|---|---|---|
+| Computer use | The agent operates software through screens, DOMs, or accessibility trees | brittle UI state, hidden side effects, poor replayability |
+| Multimodality | The agent reasons over images, documents, audio, or video | grounding errors, partial perception, hard-to-audit evidence |
+| Long horizon | The agent works across many steps, sessions, or hours | drift, stale plans, compounding mistakes |
+| Interoperability | The agent discovers tools, servers, or other agents dynamically | permission sprawl, confused authority, supply-chain risk |
+| Autonomy | The agent initiates or continues work without constant prompting | unclear ownership, runaway cost, missing approval gates |
+
+Each frontier capability increases agency. That is why Modules 7-10 matter here. Deployment, security, observability, reliability, and UX are not "after the frontier." They are the test that reveals whether a frontier idea is real.
+
+## The demo trap
+
+A strong demo often hides three things:
+
+1. The setup was curated.
+2. The failure cases were omitted.
+3. The human operator quietly supplied context, judgment, or recovery.
+
+In production, the system must survive uncurated inputs, ordinary latency, missing tools, strange user behavior, and ambiguous success criteria. A frontier agent should therefore be evaluated by its recovery behavior, not just its success behavior.
+
+<Callout type="warning">
+Do not ask "Can it do the task?" first. Ask "How will I know when it is doing the wrong task?"
+</Callout>
+
+## A simple frontier evaluation loop
+
+Use this loop whenever a new agent capability appears:
+
+1. Describe the new agency.
+2. Name the irreversible actions.
+3. List the new evidence sources.
+4. Define observable checkpoints.
+5. Choose a stop condition.
+6. Write the smallest realistic test.
+
+## What counts as frontier in this course
+
+For this module, "frontier" means any agent pattern that makes the system harder to inspect, harder to bound, or more autonomous than the previous modules. That includes browser agents, multimodal document inspectors, dynamic tool servers, long-running tasks, and agent-to-agent handoffs.
+
+<Quiz
+  question="Which question best reveals whether a frontier agent capability is production-ready?"
+  options={[
+    { label: "Can the model complete an impressive demo task?", correct: false, explanation: "A demo can be useful, but it rarely exposes recovery behavior, observability, or permission boundaries." },
+    { label: "Can the system explain, bound, observe, and recover from failures?", correct: true, explanation: "Production readiness depends on the system around the model: boundaries, traces, tests, and recovery." },
+    { label: "Does the capability use the newest model or protocol?", correct: false, explanation: "Newer capabilities can still be operationally fragile." }
+  ]}
+/>
+
+## Lesson checkpoint
+
+Before moving on, choose one frontier agent you have seen recently and write down the new agency it adds, the failure mode that worries you most, and the signal you would need to detect that failure.
+
+---
+
+[Lesson 2: Computer-Use and Browser Agents ->](/modules/module-11-frontiers/lesson-02)
+

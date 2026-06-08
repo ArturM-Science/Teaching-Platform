@@ -1,0 +1,128 @@
+---
+title: "Lab: Evaluate a Frontier Agent Capability"
+module: "module-11-frontiers"
+lesson: 7
+slug: "lesson-07-lab"
+---
+
+# Lab - Evaluate a Frontier Agent Capability
+
+<LabBrief
+  title="Evaluate a Frontier Agent Capability"
+  time="2-3 hours"
+>
+
+#### Objective
+
+Prototype one frontier agent capability in a constrained setting and produce a production-readiness memo. Your goal is not to prove the capability is amazing. Your goal is to discover what it can do, where it fails, and what controls would be required before using it with real users.
+
+#### Choose one track
+
+- Browser agent: automate a low-risk web workflow and verify each step
+- Multimodal agent: inspect a document, screenshot, chart, or image set with cited evidence
+- Protocol/tool agent: connect to a small tool server and evaluate tool discovery and permissions
+- Long-horizon agent: run a multi-step task with checkpoints, budgets, and pause/resume state
+
+#### Deliverables
+
+- `prototype/` - minimal working prototype or detailed runnable notebook
+- `readiness_memo.md` - completed readiness framework with scores and decision
+- `failure_log.md` - at least 10 trial runs with success/failure notes
+- `trace_sample.json` - one representative run log with observations, actions, and verification
+- `control_plan.md` - permission boundaries, approval gates, budgets, and escalation triggers
+
+</LabBrief>
+
+## Step 1 - Define the capability
+
+Write a one-paragraph task definition:
+
+```md
+Capability:
+Target user:
+Job to be done:
+Why this is not solved by a simpler tool:
+Irreversible or high-impact actions:
+```
+
+Keep the prototype small. A browser agent that fills a harmless local form is better than an ambitious agent that cannot be verified.
+
+## Step 2 - Build the smallest realistic prototype
+
+Your prototype must include at least three observable steps. For each step, log goal, observation, action, expected result, actual result, and status.
+
+## Step 3 - Run failure trials
+
+Run at least 10 trials:
+
+- 4 happy-path cases
+- 2 ambiguous cases
+- 2 missing-context cases
+- 2 adversarial or misleading cases
+
+Log failures plainly. A useful failure log is a successful lab.
+
+## Step 4 - Score readiness
+
+Score the prototype from 1 to 4 across task fit, reliability, observability, control, evaluation, UX, and maintainability. Then decide whether it is production-ready, pilot-only, experimental, or rejected for now.
+
+## Step 5 - Write the control plan
+
+Your control plan must include permission scope, approval gates, autonomy budget, observability events, cost budget, escalation condition, and rollback or cancellation path.
+
+<Rubric
+  threshold="Score 3+ on at least 4 of 5 criteria to pass"
+  criteria={[
+    {
+      name: "Prototype scope",
+      exceeds: "Prototype exercises a real frontier capability with clear observations, actions, and verification for each step",
+      meets: "Prototype demonstrates one frontier capability with at least three observable steps",
+      approaching: "Prototype is mostly conceptual or has fewer than three observable steps",
+      below: "No working prototype or runnable artifact"
+    },
+    {
+      name: "Failure analysis",
+      exceeds: "10+ trials include happy, ambiguous, missing-context, and adversarial cases with specific failure notes",
+      meets: "10 trials completed with clear success/failure outcomes",
+      approaching: "Fewer than 10 trials or failure notes are vague",
+      below: "No failure log"
+    },
+    {
+      name: "Readiness memo",
+      exceeds: "Scores are evidence-based, decision is justified, and production blockers are named with owners",
+      meets: "All seven readiness dimensions scored with a clear decision",
+      approaching: "Some dimensions missing or scores not justified",
+      below: "No readiness memo"
+    },
+    {
+      name: "Control plan",
+      exceeds: "Permissions, approval gates, budgets, traces, escalation, and rollback are all specific to the prototype",
+      meets: "Core controls are documented and match the prototype risk level",
+      approaching: "Controls are generic or miss approval/escalation",
+      below: "No control plan"
+    },
+    {
+      name: "Operational judgment",
+      exceeds: "Memo clearly distinguishes impressive behavior from production readiness",
+      meets: "Memo identifies at least one serious limitation before launch",
+      approaching: "Memo mostly celebrates the prototype without hard tradeoffs",
+      below: "No critical assessment"
+    }
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-11-frontiers"
+  items={[
+    "I can explain the new agency my prototype adds",
+    "I have run at least 10 trials and logged failures",
+    "I have scored the prototype across all seven readiness dimensions",
+    "I have written controls for permissions, budgets, approval, and escalation",
+    "I can decide whether the capability is production-ready, pilot-only, experimental, or rejected"
+  ]}
+  next="Module 12"
+/>
+
+---
+
+[Previous: Lesson 6](/modules/module-11-frontiers/lesson-06)

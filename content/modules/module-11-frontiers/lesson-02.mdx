@@ -1,0 +1,70 @@
+---
+title: "Computer-Use and Browser Agents"
+module: "module-11-frontiers"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Lesson 2 - Computer-Use and Browser Agents
+
+Computer-use agents act through interfaces that were designed for humans: browsers, desktop apps, forms, dashboards, and internal tools. This is powerful because it lets agents operate where no clean API exists. It is brittle because the interface is an indirect, stateful, and visually noisy control surface.
+
+## Three control surfaces
+
+| Surface | Agent sees | Agent acts by | Best use |
+|---|---|---|---|
+| Screenshot | pixels and visual layout | click coordinates, typing | visual inspection, simple UI tasks |
+| DOM | page structure and text | selectors, form values, navigation | browser automation, repeatable web flows |
+| Accessibility tree | semantic controls and labels | accessible roles and names | robust UI interaction when labels are reliable |
+
+A serious browser agent often uses more than one. Screenshots provide visual grounding. DOM and accessibility trees provide more stable action targets. Logs and network traces provide verification.
+
+## Why browser agents fail
+
+Browser agents fail through state drift, ambiguous targets, hidden consequences, visual mismatch, session expiry, and unverifiable success. The agent may click the right thing and still fail the task.
+
+<Callout type="key">
+Browser automation should not be trusted because the agent clicked the right thing. It should be trusted only when the system verifies the resulting state.
+</Callout>
+
+## Design pattern: observe, act, verify
+
+Every browser-agent step should have three records:
+
+1. Observation: screenshot, DOM excerpt, URL, focused element, and selected relevant text.
+2. Action: click target, typed value, navigation, uploaded file, or keyboard shortcut.
+3. Verification: the expected postcondition and the evidence that it happened.
+
+```json
+{
+  "step": 4,
+  "goal": "submit support ticket",
+  "observation": {
+    "url": "https://example.com/support",
+    "visible_text": ["Subject", "Message", "Submit ticket"]
+  },
+  "action": {
+    "type": "click",
+    "target": "button[name='Submit ticket']"
+  },
+  "verification": {
+    "expected": "confirmation page shows ticket id",
+    "actual": "Ticket #1842 created",
+    "status": "pass"
+  }
+}
+```
+
+## When to use a browser agent
+
+Use browser agents when no API exists, the task is low volume, the action can be verified, the flow changes often enough that hand-coded automation is too expensive, and a human can review high-impact steps.
+
+Avoid browser agents when a stable API exists, the task is high volume, the action is irreversible without approval, the page contains unnecessary sensitive data, or success cannot be independently verified.
+
+## Lesson exercise
+
+Pick one browser workflow from your own work. Write a five-step `observe -> act -> verify` trace for it. Mark which steps require approval and which can be fully automated.
+
+---
+
+[Previous: Lesson 1](/modules/module-11-frontiers/lesson-01) - [Lesson 3: Multimodal Agents ->](/modules/module-11-frontiers/lesson-03)

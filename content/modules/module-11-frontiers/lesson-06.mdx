@@ -1,0 +1,51 @@
+---
+title: "The Frontier Readiness Framework"
+module: "module-11-frontiers"
+lesson: 6
+slug: "lesson-06"
+---
+
+# Lesson 6 - The Frontier Readiness Framework
+
+Frontier capabilities need a launch filter. This framework helps you decide whether a technique is ready for production, ready for a supervised pilot, or still a research toy.
+
+## The seven readiness dimensions
+
+Score each dimension from 1 to 4.
+
+| Dimension | Question |
+|---|---|
+| Task fit | Does the capability solve a real user problem better than simpler alternatives? |
+| Reliability | Does it work across varied inputs, not just curated demos? |
+| Observability | Can you trace decisions, tool calls, costs, and failure points? |
+| Control | Are permissions, budgets, and approval gates explicit? |
+| Evaluation | Do you have test cases and rubrics that catch regressions? |
+| UX | Can users understand state, uncertainty, and next actions? |
+| Maintainability | Can the team debug, update, and operate it over time? |
+
+## Readiness score
+
+| Average score | Interpretation |
+|---|---|
+| 3.5-4.0 | Candidate for production with monitoring |
+| 2.8-3.4 | Supervised pilot only |
+| 2.0-2.7 | Internal experiment |
+| below 2.0 | Demo or research only |
+
+Do not average away a critical failure. If control or observability is 1, the system is not production-ready no matter how impressive the task fit is.
+
+## Minimum evidence package
+
+Before adopting a frontier capability, collect task definition, architecture sketch, permission map, evaluation set, failure log, traces, cost projection, human review points, and rollback or cancellation plan.
+
+<Callout type="warning">
+If the only evidence is "it worked in a demo," the readiness score is unknown, not high.
+</Callout>
+
+## Lesson exercise
+
+Score one frontier capability you might prototype in the lab. Be honest: the value of the framework is in finding what is not ready yet.
+
+---
+
+[Previous: Lesson 5](/modules/module-11-frontiers/lesson-05) - [Lab: Evaluate a Frontier Agent Capability ->](/modules/module-11-frontiers/lesson-07-lab)

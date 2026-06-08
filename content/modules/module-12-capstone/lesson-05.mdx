@@ -1,0 +1,60 @@
+---
+title: "Deployment, Observability, and UX"
+module: "module-12-capstone"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 - Deployment, Observability, and UX
+
+The capstone should be usable by someone other than you. That means deployment or a reliable local runbook, traces for debugging, and a user experience that reveals what the agent is doing.
+
+## Deployment target
+
+Choose one:
+
+- deployed web app
+- deployed API
+- local app with clear run instructions
+- notebook with deterministic setup
+
+Deployment is not just hosting. It includes environment variables, secrets, auth, logs, and a way to reproduce failures.
+
+## Observability minimum
+
+Capture run id, user id or anonymous session id, model calls, tool calls, retrieved sources, token counts, latency, errors, retries, and final scores if evaluation runs.
+
+You should be able to answer:
+
+- Which step failed?
+- How much did it cost?
+- Which source or tool influenced the output?
+- Was a human approval required?
+- Did the user receive a complete, partial, or failed result?
+
+## UX minimum
+
+Your interface or run output should show current state, progress through major steps, user-safe tool/source activity, uncertainty or missing context, final answer, next action, and failure messages.
+
+If your capstone is CLI-only, the same principles apply. A CLI can still show state, progress, and errors clearly.
+
+## Demo script
+
+```md
+1. Start with the user problem.
+2. Show the input.
+3. Run the agent.
+4. Point out state/progress visibility.
+5. Show the output.
+6. Show trace/eval/cost evidence.
+7. Trigger one failure or edge case.
+8. Explain what you would improve next.
+```
+
+## Lesson exercise
+
+Run your capstone once as a user, not as the builder. Write down every moment where the user might wonder "what is happening?" Fix the top two.
+
+---
+
+[Previous: Lesson 4](/modules/module-12-capstone/lesson-04) - [Lesson 6: Demo and Launch Readiness ->](/modules/module-12-capstone/lesson-06)

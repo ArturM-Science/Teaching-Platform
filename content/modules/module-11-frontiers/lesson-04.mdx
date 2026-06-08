@@ -1,0 +1,66 @@
+---
+title: "Protocols, Tool Discovery, and Interoperability"
+module: "module-11-frontiers"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Lesson 4 - Protocols, Tool Discovery, and Interoperability
+
+As agent systems mature, tools and context stop being hard-coded into one app. Agents discover tools from servers, connect to external systems, and may hand work to other agents. Protocols make this possible. They also make authority more complicated.
+
+## What protocols change
+
+Without protocols, the agent developer wires every tool manually:
+
+```text
+agent -> known tool list -> fixed schemas -> fixed permissions
+```
+
+With protocols, the agent may connect to a tool server:
+
+```text
+agent -> tool server -> discovered tools -> dynamic schemas -> negotiated permissions
+```
+
+This improves composability. It also means the agent can encounter tools the original prompt author did not enumerate.
+
+## Tool discovery is a trust boundary
+
+When a tool is discovered dynamically, ask who owns the server, what data it can read, what actions it can perform, whether the description includes untrusted prompt content, whether schemas can change, and whether calls are audited.
+
+<Callout type="key">
+A tool description is not just documentation. To an agent, it is executable context. Treat it as untrusted input unless you control the server.
+</Callout>
+
+## Protocol design principles
+
+Good interoperability has least privilege, scoped credentials, capability manifests, human-readable consequences, audit logs, revocation, and schema versioning.
+
+## Agent-to-agent handoffs
+
+Agent-to-agent handoff sounds elegant, but it is easy to lose accountability. A handoff should include task objective, current state, constraints, permissions, evidence gathered, open questions, stop condition, and owner of the final decision.
+
+Bad handoff:
+
+```text
+Please continue this task.
+```
+
+Good handoff:
+
+```text
+Goal: draft a security review for PR #42.
+Evidence: dependency diff and test output attached.
+Constraints: do not edit files, do not approve the PR.
+Stop when: you have listed high-severity findings with file references or state that none were found.
+Owner: human reviewer makes the merge decision.
+```
+
+## Lesson exercise
+
+Design a capability manifest for one tool server your capstone might use. Include allowed reads, allowed writes, forbidden actions, approval gates, and audit fields.
+
+---
+
+[Previous: Lesson 3](/modules/module-11-frontiers/lesson-03) - [Lesson 5: Long-Horizon Autonomy ->](/modules/module-11-frontiers/lesson-05)

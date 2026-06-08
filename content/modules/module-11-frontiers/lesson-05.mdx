@@ -1,0 +1,71 @@
+---
+title: "Long-Horizon Autonomy"
+module: "module-11-frontiers"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 - Long-Horizon Autonomy
+
+Long-horizon agents work across many steps, files, tools, or sessions. They may pause, resume, wait for external events, or continue after a user leaves. The challenge is not planning once. The challenge is staying aligned as the world changes.
+
+## Why long horizon is hard
+
+Long-horizon runs amplify small errors: a vague goal becomes a wrong plan, a missed observation becomes a bad branch, a stale assumption survives for hours, a tool failure creates hidden partial state, cost grows step by step, and users lose track of what the agent is doing.
+
+Short tasks need correctness. Long tasks need governance.
+
+## The run state machine
+
+| State | Meaning |
+|---|---|
+| `planned` | goal, constraints, and milestones are defined |
+| `running` | agent is actively executing |
+| `waiting_for_user` | human approval or input is required |
+| `waiting_for_external` | external job, webhook, or delay is pending |
+| `paused` | run is intentionally stopped but resumable |
+| `escalated` | human owner must intervene |
+| `completed` | success condition met |
+| `cancelled` | user or policy stopped the run |
+| `failed` | unrecoverable error |
+
+If your system cannot name the state, users cannot trust the run.
+
+## Checkpoints
+
+```yaml
+checkpoint_id: run_123_step_07
+goal: "compare vendor contracts"
+completed:
+  - "downloaded three contracts"
+  - "extracted renewal clauses"
+open_questions:
+  - "contract B has missing page 4"
+next_action: "ask user whether to proceed without page 4"
+cost_so_far_usd: 1.42
+risk_level: "medium"
+requires_user: true
+```
+
+Checkpoints support resumability, review, debugging, and escalation.
+
+## Autonomy budget
+
+Give long-horizon agents budgets: maximum tool calls, tokens, wall-clock time, spend, retries, files changed, and external messages sent. The budget is not just cost control. It is a safety boundary.
+
+<Quiz
+  question="What is the main operational difference between a short agent run and a long-horizon run?"
+  options={[
+    { label: "Long-horizon runs need larger prompts, but the same controls.", correct: false, explanation: "Bigger context does not solve drift, resumability, cost, or user trust." },
+    { label: "Long-horizon runs need explicit state, checkpoints, budgets, and replanning triggers.", correct: true, explanation: "The longer the run, the more the system needs governance around the model." },
+    { label: "Long-horizon runs should avoid human input so they stay autonomous.", correct: false, explanation: "Autonomy without checkpoints and escalation is what makes long-horizon systems risky." }
+  ]}
+/>
+
+## Lesson exercise
+
+Write a state machine and autonomy budget for a capstone idea. Include at least two states where the run must pause for a human.
+
+---
+
+[Previous: Lesson 4](/modules/module-11-frontiers/lesson-04) - [Lesson 6: Frontier Readiness Framework ->](/modules/module-11-frontiers/lesson-06)
