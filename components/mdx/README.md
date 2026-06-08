@@ -397,3 +397,51 @@ No props. Self-contained.
 ```mdx
 <FailureCascadeSim />
 ```
+
+---
+
+## Module 11 - Frontiers Components
+
+### `<AutonomyRunSimulator>`
+
+Interactive long-horizon run state simulator. Learners choose a clean run, tool failure, budget overrun, or approval-required scenario and step through the resulting run states.
+
+No props. Self-contained. Used in Module 11, Lesson 5.
+
+```mdx
+<AutonomyRunSimulator />
+```
+
+### `<FrontierReadinessScorecard>`
+
+Seven-dimension readiness scorecard for frontier capabilities. Learners score task fit, reliability, observability, control, evaluation, UX, and maintainability from 1-4 and receive a launch decision category.
+
+No props. Self-contained. Used in Module 11, Lesson 6.
+
+```mdx
+<FrontierReadinessScorecard />
+```
+
+---
+
+## Module 12 - Capstone Components
+
+### `<CapstoneProjectScoper>`
+
+Interactive project scoping scorecard. Learners choose a project shape and score user clarity, data availability, evaluation ease, risk, and build feasibility.
+
+No props. Self-contained. Used in Module 12, Lesson 1.
+
+```mdx
+<CapstoneProjectScoper />
+```
+
+### `<LaunchReadinessReview>`
+
+Interactive launch-readiness checklist. Learners mark each capstone requirement as Pass, Needs work, or N/A and receive a suggested launch decision.
+
+No props. Self-contained. Used in Module 12, Lesson 6.
+
+```mdx
+<LaunchReadinessReview />
+```

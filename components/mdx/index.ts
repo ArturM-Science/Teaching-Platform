@@ -45,6 +45,10 @@ import { TransparencyLevelSim } from './TransparencyLevelSim'
 import { ApprovalGateSim } from './ApprovalGateSim'
 import { FeedbackCorrectionSim } from './FeedbackCorrectionSim'
 import { StreamingOutputSim } from './StreamingOutputSim'
+import { FrontierReadinessScorecard } from './FrontierReadinessScorecard'
+import { AutonomyRunSimulator } from './AutonomyRunSimulator'
+import { CapstoneProjectScoper } from './CapstoneProjectScoper'
+import { LaunchReadinessReview } from './LaunchReadinessReview'
 
 export const mdxComponents = {
   ...proseComponents,
@@ -94,4 +98,8 @@ export const mdxComponents = {
   ApprovalGateSim,
   FeedbackCorrectionSim,
   StreamingOutputSim,
+  FrontierReadinessScorecard,
+  AutonomyRunSimulator,
+  CapstoneProjectScoper,
+  LaunchReadinessReview,
 }
