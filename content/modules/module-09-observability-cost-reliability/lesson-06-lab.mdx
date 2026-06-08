@@ -207,7 +207,14 @@ Test the fallback by temporarily setting an invalid `OPENAI_API_KEY` environment
 In Langfuse UI → Evaluators → Create new:
 - Name: `helpfulness`
 - Model: `gpt-4o-mini`
-- Prompt: "Rate this response from 1 (not helpful) to 5 (excellent). Output a single integer only.\nUser: {{input}}\nAgent: {{output}}"
+- Prompt:
+
+```text
+Rate this response from 1 (not helpful) to 5 (excellent). Output a single integer only.
+User: {{input}}
+Agent: {{output}}
+```
+
 - Target trace: `customer_support`
 - Sample rate: 10%
 
