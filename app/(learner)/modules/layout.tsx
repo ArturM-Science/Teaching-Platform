@@ -11,9 +11,14 @@ export default function ModulesLayout({ children }: { children: React.ReactNode 
             </span>
             <span className="font-semibold tracking-tight">Agent Academy</span>
           </Link>
-          <Link href="/dashboard" className="rounded-md border border-white/15 px-3 py-2 text-sm font-semibold text-white transition hover:border-white/35 hover:bg-white/8">
-            Dashboard
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/account" className="rounded-md px-3 py-2 text-sm font-semibold text-zinc-300 transition hover:bg-white/8 hover:text-white">
+              Account
+            </Link>
+            <Link href="/dashboard" className="rounded-md border border-white/15 px-3 py-2 text-sm font-semibold text-white transition hover:border-white/35 hover:bg-white/8">
+              Dashboard
+            </Link>
+          </div>
         </div>
       </nav>
       <div>
