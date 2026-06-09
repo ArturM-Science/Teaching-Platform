@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { logOut } from '@/app/auth/actions'
 import { createClient } from '@/lib/supabase/server'
+import { AccountDetailsForm } from '@/components/account-details-form'
 
 const totalModules = 15
 
@@ -53,9 +54,10 @@ export default async function AccountPage() {
     .filter(row => row.module)
     .sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime())[0]
 
-  const email = profile?.email ?? user.email ?? 'Unknown email'
+  const email = user.email ?? profile?.email ?? 'Unknown email'
   const role = profile?.role ?? 'learner'
   const joinedAt = profile?.created_at ?? user.created_at
+  const formattedJoinedAt = formatDate(joinedAt)
 
   return (
     <main className="min-h-screen bg-zinc-100 text-zinc-950">
@@ -96,23 +98,7 @@ export default async function AccountPage() {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            <section className="rounded-md border border-zinc-200 bg-white p-6">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Profile</p>
-              <dl className="mt-5 space-y-4 text-sm">
-                <div className="flex justify-between gap-4 border-b border-zinc-100 pb-3">
-                  <dt className="text-zinc-500">Email</dt>
-                  <dd className="text-right font-medium text-zinc-950">{email}</dd>
-                </div>
-                <div className="flex justify-between gap-4 border-b border-zinc-100 pb-3">
-                  <dt className="text-zinc-500">Role</dt>
-                  <dd className="font-medium capitalize text-zinc-950">{role}</dd>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <dt className="text-zinc-500">Joined</dt>
-                  <dd className="font-medium text-zinc-950">{formatDate(joinedAt)}</dd>
-                </div>
-              </dl>
-            </section>
+            <AccountDetailsForm email={email} role={role} joinedAt={formattedJoinedAt} />
 
             <section className="rounded-md border border-zinc-200 bg-white p-6">
               <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">Course progress</p>

@@ -54,7 +54,7 @@ export async function signUp(
     email: credentials.email,
     password: credentials.password,
     options: {
-      emailRedirectTo: `${getAppUrl()}/auth/confirm`,
+      emailRedirectTo: `${getAppUrl()}/auth/confirm?next=/account`,
     },
   })
 

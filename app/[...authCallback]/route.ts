@@ -25,5 +25,5 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(getRedirectUrl(request, '/login'))
   }
 
-  return NextResponse.redirect(getRedirectUrl(request, '/dashboard'))
+  return NextResponse.redirect(getRedirectUrl(request, '/account'))
 }
