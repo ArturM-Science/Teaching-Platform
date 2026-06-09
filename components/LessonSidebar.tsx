@@ -1,4 +1,5 @@
 'use client'
+
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import type { LessonMeta } from '@/lib/content'
@@ -15,69 +16,65 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
   const isActive = (href: string) => pathname === href
 
   return (
-    <nav className="w-64 shrink-0 border-r border-zinc-200 bg-zinc-50">
-      <div className="sticky top-0 h-screen overflow-y-auto flex flex-col">
-
-        {/* Course header */}
-        <div className="px-5 py-5 border-b border-zinc-100">
-          <Link href="/dashboard" className="text-xs font-semibold uppercase tracking-widest text-zinc-400 hover:text-zinc-700 transition-colors">
-            AI Agents Course
+    <aside className="hidden w-72 shrink-0 border-r border-zinc-800 bg-zinc-950 text-white lg:block">
+      <div className="sticky top-[57px] flex h-[calc(100vh-57px)] flex-col overflow-y-auto">
+        <div className="border-b border-white/10 px-5 py-5">
+          <Link href="/dashboard" className="text-xs font-semibold uppercase tracking-[0.16em] text-teal-300 hover:text-teal-200">
+            Learner cockpit
           </Link>
+          <p className="mt-2 break-words text-sm font-medium text-zinc-300">{moduleSlug}</p>
         </div>
 
-        {/* Nav items */}
-        <div className="flex-1 px-3 py-4 space-y-0.5">
-
-          {/* Overview link */}
+        <nav className="flex-1 px-3 py-4">
           <Link
             href={moduleBase}
-            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+            className={`mb-4 flex items-center justify-between rounded-md px-3 py-3 text-sm font-semibold transition ${
               isActive(moduleBase)
-                ? 'bg-white text-zinc-900 border-l-2 border-zinc-900 shadow-sm'
-                : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'
+                ? 'bg-white text-zinc-950'
+                : 'border border-white/10 text-zinc-300 hover:bg-white/8 hover:text-white'
             }`}
           >
-            <span className="text-xs uppercase tracking-widest font-semibold">Overview</span>
+            <span>Module overview</span>
+            <span className={isActive(moduleBase) ? 'text-zinc-500' : 'text-zinc-600'}>00</span>
           </Link>
 
-          {/* Divider */}
-          <div className="pt-3 pb-1 px-3">
-            <span className="text-[10px] uppercase tracking-widest font-semibold text-zinc-400">Lessons</span>
+          <div className="px-3 pb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Lessons</span>
           </div>
 
-          {/* Lesson list */}
-          <ol className="space-y-0.5">
+          <ol className="space-y-1">
             {lessons.map(lesson => {
               const href = `${moduleBase}/${lesson.slug}`
               const active = isActive(href)
               const isLab = lesson.slug.includes('lab')
+
               return (
                 <li key={lesson.slug}>
                   <Link
                     href={href}
-                    className={`flex items-start gap-3 rounded-lg px-3 py-2.5 text-sm leading-snug transition-colors ${
+                    className={`grid grid-cols-[42px_1fr] gap-3 rounded-md px-3 py-3 text-sm leading-snug transition ${
                       active
-                        ? 'bg-white text-zinc-900 border-l-2 border-zinc-900 shadow-sm'
-                        : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800'
+                        ? 'bg-white text-zinc-950'
+                        : 'text-zinc-400 hover:bg-white/8 hover:text-white'
                     }`}
                   >
-                    <span className={`mt-0.5 shrink-0 min-w-[1.25rem] text-center rounded text-[11px] font-semibold tabular-nums px-1 py-px ${
+                    <span className={`flex h-7 min-w-0 items-center justify-center rounded text-[11px] font-semibold ${
                       active
-                        ? 'bg-zinc-900 text-white'
+                        ? 'bg-zinc-950 text-white'
                         : isLab
-                          ? 'bg-zinc-100 text-zinc-500'
-                          : 'bg-zinc-100 text-zinc-500'
+                          ? 'bg-teal-300 text-zinc-950'
+                          : 'bg-white/10 text-zinc-300'
                     }`}>
                       {isLab ? 'Lab' : lesson.lesson}
                     </span>
-                    <span className={active ? 'font-medium' : ''}>{lesson.title}</span>
+                    <span className={active ? 'font-semibold' : ''}>{lesson.title}</span>
                   </Link>
                 </li>
               )
             })}
           </ol>
-        </div>
+        </nav>
       </div>
-    </nav>
+    </aside>
   )
 }

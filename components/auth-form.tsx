@@ -36,7 +36,7 @@ export function AuthForm({
           type="email"
           autoComplete="email"
           required
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+          className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-teal-600"
         />
       </div>
 
@@ -51,12 +51,12 @@ export function AuthForm({
           autoComplete="current-password"
           required
           minLength={6}
-          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-zinc-500"
+          className="w-full rounded-md border border-zinc-200 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition focus:border-teal-600"
         />
       </div>
 
       {state.error ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {state.error}
         </p>
       ) : null}
@@ -64,14 +64,14 @@ export function AuthForm({
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-lg bg-zinc-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:bg-zinc-400"
+        className="w-full rounded-md bg-zinc-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
       >
         {pending ? 'Working...' : buttonLabel}
       </button>
 
       <p className="text-center text-sm text-zinc-500">
         {footerText}{' '}
-        <Link href={footerHref} className="font-medium text-zinc-900 hover:text-zinc-700">
+        <Link href={footerHref} className="font-semibold text-teal-700 hover:text-teal-800">
           {footerLabel}
         </Link>
       </p>

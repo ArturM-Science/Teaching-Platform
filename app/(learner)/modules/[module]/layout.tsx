@@ -12,7 +12,7 @@ export default async function ModuleLayout({
   const lessons = await getLessonsForModule(moduleSlug)
 
   return (
-    <div className="flex min-h-[calc(100vh-57px)]">
+    <div className="flex min-h-[calc(100vh-57px)] bg-zinc-100">
       <LessonSidebar moduleSlug={moduleSlug} lessons={lessons} />
       <main className="min-w-0 flex-1">
         {children}

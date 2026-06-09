@@ -6,16 +6,16 @@ import { useEffect, useState } from "react"
 
 const AgentNetwork3D = dynamic(() => import("./AgentNetwork3D"), {
   ssr: false,
-  loading: () => <div style={{ height: 380 }} />,
+  loading: () => <div className="h-full min-h-[420px]" />,
 })
 
 const PHRASES = [
-  "Build agents that research.",
   "Build agents that reason.",
+  "Build agents that coordinate.",
   "Build agents that ship.",
 ]
 
-function useTypewriter(phrases: string[], typingSpeed = 55, pauseMs = 1800, deleteSpeed = 30) {
+function useTypewriter(phrases: string[], typingSpeed = 52, pauseMs = 1500, deleteSpeed = 28) {
   const [displayed, setDisplayed] = useState("")
   const [phraseIndex, setPhraseIndex] = useState(0)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -41,72 +41,71 @@ function useTypewriter(phrases: string[], typingSpeed = 55, pauseMs = 1800, dele
   return displayed
 }
 
+const metrics = [
+  ["15", "modules"],
+  ["6", "course parts"],
+  ["12+", "labs and reviews"],
+  ["1", "capstone launch packet"],
+]
+
 export default function HeroSection() {
   const displayed = useTypewriter(PHRASES)
 
   return (
-    <section className="relative min-h-screen bg-[#09090b] flex flex-col overflow-hidden">
-      {/* Gradient orbs */}
-      <div className="absolute inset-0 pointer-events-none">
-        <div
-          className="animate-float-a absolute rounded-full blur-3xl opacity-[0.18]"
-          style={{ width: 600, height: 600, top: -100, left: -150, background: "#3b82f6" }}
-        />
-        <div
-          className="animate-float-b absolute rounded-full blur-3xl opacity-[0.14]"
-          style={{ width: 500, height: 500, bottom: -80, right: -100, background: "#8b5cf6" }}
-        />
-        <div
-          className="animate-float-c absolute rounded-full blur-3xl opacity-[0.10]"
-          style={{ width: 400, height: 400, top: "30%", left: "40%", background: "#10b981" }}
-        />
+    <section className="relative min-h-[92vh] overflow-hidden bg-zinc-950 text-white">
+      <div className="absolute inset-0">
+        <div className="absolute inset-y-0 right-[-18%] w-[1000px] max-w-none opacity-80 sm:right-[-10%] lg:right-[-2%]">
+          <div className="h-full min-h-[620px] scale-125 pt-28 sm:scale-110 lg:scale-125">
+            <AgentNetwork3D />
+          </div>
+        </div>
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,#09090b_0%,rgba(9,9,11,0.95)_28%,rgba(9,9,11,0.62)_62%,rgba(9,9,11,0.88)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.045)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.045)_1px,transparent_1px)] bg-[size:48px_48px] opacity-35" />
       </div>
 
-      {/* Hero content */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-6 pt-24 pb-12">
-        {/* Badge */}
-        <div className="inline-block text-xs font-medium bg-white/8 text-white/60 border border-white/10 px-3 py-1 rounded-full mb-8 uppercase tracking-widest">
-          15 modules · Build-first · Production-focused
-        </div>
+      <div className="relative z-10 mx-auto flex min-h-[92vh] max-w-6xl flex-col justify-center px-6 pb-16 pt-28">
+        <div className="max-w-3xl">
+          <div className="mb-6 inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 py-2 text-xs font-semibold uppercase tracking-[0.16em] text-teal-200">
+            AI agent engineering academy
+          </div>
 
-        {/* Typewriter headline */}
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight leading-tight text-white mb-6 min-h-[1.2em]">
-          {displayed}
-          <span className="animate-blink text-violet-400 ml-0.5">|</span>
-        </h1>
+          <h1 className="min-h-[2.3em] text-4xl font-bold leading-tight tracking-tight text-white sm:text-5xl md:text-6xl">
+            {displayed}
+            <span className="animate-blink ml-1 text-teal-300">|</span>
+          </h1>
 
-        <p className="text-lg sm:text-xl text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Not just demos. Every module ships a working artifact. Graduates can defend their design choices,
-          secure their systems, and reason about cost and reliability.
-        </p>
-
-        {/* CTAs */}
-        <div className="flex flex-wrap items-center justify-center gap-4">
-          <Link
-            href="/signup"
-            className="bg-white text-zinc-900 px-6 py-3 rounded-lg text-base font-medium hover:bg-zinc-100 transition-colors"
-          >
-            Start learning free
-          </Link>
-          <Link
-            href="#curriculum"
-            className="text-white/80 text-base font-medium border border-white/20 px-6 py-3 rounded-lg hover:border-white/40 hover:text-white transition-colors"
-          >
-            View curriculum →
-          </Link>
-        </div>
-
-        {/* 3D agent network */}
-        <div className="w-full max-w-3xl mx-auto mt-8">
-          <AgentNetwork3D />
-          <p className="text-center text-xs text-zinc-600 mt-1 tracking-wide">
-            what you&apos;ll build by Module 6 — drag to rotate
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-zinc-300">
+            A build-first course for agents that need tools, memory, evaluation, security,
+            observability, deployment, multi-agent coordination, and a defensible launch decision.
           </p>
+
+          <div className="mt-9 flex flex-wrap items-center gap-3">
+            <Link
+              href="/signup"
+              className="rounded-md bg-teal-300 px-5 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-teal-200"
+            >
+              Start learning
+            </Link>
+            <Link
+              href="#curriculum"
+              className="rounded-md border border-white/20 px-5 py-3 text-sm font-semibold text-white transition hover:border-white/40 hover:bg-white/8"
+            >
+              View curriculum
+            </Link>
+          </div>
         </div>
+
+        <dl className="mt-14 grid max-w-3xl grid-cols-2 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 sm:grid-cols-4">
+          {metrics.map(([value, label]) => (
+            <div key={label} className="bg-zinc-950/70 px-4 py-4">
+              <dt className="text-2xl font-semibold text-white">{value}</dt>
+              <dd className="mt-1 text-xs font-medium uppercase tracking-[0.14em] text-zinc-500">{label}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
-      {/* Fade-to-white at the bottom */}
-      <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+      <div className="absolute bottom-0 left-0 right-0 z-10 h-20 bg-gradient-to-t from-white to-transparent" />
     </section>
   )
 }

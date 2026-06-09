@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Agents Course",
-  description: "Self-paced AI agents course with live workshop support.",
+  title: "Agent Academy",
+  description: "Build, evaluate, harden, and ship production-minded AI agent systems.",
 };
 
 export default function RootLayout({
