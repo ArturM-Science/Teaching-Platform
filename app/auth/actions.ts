@@ -39,13 +39,18 @@ export async function signUp(
   formData: FormData
 ): Promise<AuthFormState> {
   const credentials = getCredentials(formData)
+  const confirm = String(formData.get('confirm') ?? '')
 
   if ('error' in credentials) {
     return { error: credentials.error }
   }
 
+  if (credentials.password !== confirm) {
+    return { error: 'Passwords do not match.' }
+  }
+
   const supabase = await createClient()
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email: credentials.email,
     password: credentials.password,
     options: {
@@ -54,7 +59,15 @@ export async function signUp(
   })
 
   if (error) {
+    if (error.message.toLowerCase().includes('already registered')) {
+      return { error: 'An account with this email already exists. Log in or reset your password.' }
+    }
+
     return { error: error.message }
+  }
+
+  if (data.user && data.user.identities && data.user.identities.length === 0) {
+    return { error: 'An account with this email already exists. Log in or reset your password.' }
   }
 
   revalidatePath('/', 'layout')
