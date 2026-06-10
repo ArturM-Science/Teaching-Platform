@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
@@ -9,10 +10,19 @@ export type AuthFormState = {
   success?: string
 }
 
-function getAppUrl() {
+async function getAppUrl() {
+  const headerStore = await headers()
+  const host = headerStore.get('x-forwarded-host') ?? headerStore.get('host')
+
+  if (host) {
+    const proto = headerStore.get('x-forwarded-proto') ?? 'https'
+    return `${proto}://${host}`.replace(/\/$/, '')
+  }
+
   const appUrl =
     process.env.NEXT_PUBLIC_APP_URL ??
     process.env.NEXT_PUBLIC_VERCEL_URL ??
+    process.env.VERCEL_URL ??
     'http://localhost:3000'
   const url = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`
 
@@ -50,11 +60,12 @@ export async function signUp(
   }
 
   const supabase = await createClient()
+  const appUrl = await getAppUrl()
   const { data, error } = await supabase.auth.signUp({
     email: credentials.email,
     password: credentials.password,
     options: {
-      emailRedirectTo: `${getAppUrl()}/auth/confirm?next=/account`,
+      emailRedirectTo: `${appUrl}/auth/confirm?next=/account`,
     },
   })
 
@@ -116,8 +127,9 @@ export async function requestPasswordReset(
   }
 
   const supabase = await createClient()
+  const appUrl = await getAppUrl()
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${getAppUrl()}/auth/confirm?next=/reset-password`,
+    redirectTo: `${appUrl}/auth/confirm?next=/reset-password`,
   })
 
   if (error) {
