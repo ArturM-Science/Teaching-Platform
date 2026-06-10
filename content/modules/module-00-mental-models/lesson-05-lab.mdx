@@ -1,17 +1,17 @@
 ---
 title: "Lab: Build the Bare-Metal Agent"
 module: "module-00-mental-models"
-lesson: 5
+lesson: 7
 slug: "lesson-05-lab"
 ---
 
-# Lesson 5 · Lab: Build the Bare-Metal Agent
+# Lesson 7 - Lab: Build the Bare-Metal Agent
 
-<LabBrief title="Build a Bare-Metal Agent" time="2–3 hours">
+<LabBrief title="Build a Bare-Metal Agent" time="2-3 hours">
 
 #### Objective
 
-Build a working agent loop from scratch — no framework, no SDK abstractions beyond the HTTP client. You must be able to point at every line and explain it.
+Build a working agent loop from scratch: no framework, no SDK abstractions beyond the HTTP client. You must be able to point at every line and explain it.
 
 #### Setup
 
@@ -21,9 +21,9 @@ Build a working agent loop from scratch — no framework, no SDK abstractions be
 
 #### Deliverables
 
-- `agent.py` — the complete agent (~50 lines)
-- `tools.py` — at least one hardcoded tool (calculator or web search stub)
-- `README.md` — one paragraph: what your agent does, what breaks if you remove the loop, what changes at temperature 1.0 vs 0.0
+- `agent.py`: the complete agent (~50 lines)
+- `tools.py`: at least one hardcoded tool (calculator or web search stub)
+- `README.md`: one paragraph explaining what your agent does, what breaks if you remove the loop, and what changes at temperature 1.0 vs 0.0
 
 #### Constraints
 
@@ -36,16 +36,16 @@ Build a working agent loop from scratch — no framework, no SDK abstractions be
 
 ## Starter code
 
-You'll receive a scaffold with the following structure. The functions have signatures and docstrings — no logic. Fill in each `TODO`.
+You'll receive a scaffold with the following structure. The functions have signatures and docstrings, but no logic. Fill in each `TODO`.
 
-```
+```text
 module-00-lab/
-  agent.py          ← main loop, fill in 5 TODOs
-  tools.py          ← one complete tool + one stub to implement
+  agent.py          # main loop, fill in 5 TODOs
+  tools.py          # one complete tool + one stub to implement
   tests/
-    test_loop.py    ← 3 tests: loop runs, terminates, tool is called
+    test_loop.py    # 3 tests: loop runs, terminates, tool is called
   requirements.txt
-  README.md         ← you write this
+  README.md         # you write this
 ```
 
 The five TODOs in `agent.py`:
@@ -78,7 +78,7 @@ def run_agent(goal: str) -> str:
     },
     {
       name: "Code clarity",
-      exceeds: "Explains every line cold — the why, not just the what",
+      exceeds: "Explains every line cold: the why, not just the what",
       meets: "Explains every line with minimal prompting",
       approaching: "Gaps on parsing or termination logic",
       below: "Cannot explain core sections"
@@ -99,7 +99,7 @@ def run_agent(goal: str) -> str:
     },
     {
       name: "README",
-      exceeds: "Covers what breaks if the loop is removed AND temperature effects — written for a stranger",
+      exceeds: "Covers what breaks if the loop is removed AND temperature effects, written for a stranger",
       meets: "Covers both prompts clearly",
       approaching: "Covers one prompt well",
       below: "Missing or one-line answers"
@@ -109,14 +109,14 @@ def run_agent(goal: str) -> str:
 
 ---
 
-[← Lesson 4](/modules/module-00-mental-models/lesson-04) · [Failure Museum exhibit →](/modules/module-00-mental-models/failure-museum)
+[<- Lesson 6](/modules/module-00-mental-models/lesson-06) . [Failure Museum exhibit ->](/modules/module-00-mental-models/failure-museum)
 
 <Checkpoint
   items={[
-    "I can draw the agent loop from memory — perceive, reason, act, observe, repeat",
+    "I can draw the agent loop from memory: perceive, reason, act, observe, repeat",
     "I can explain every line of my 50-line agent without referring to notes",
     "I can predict what changes when temperature goes from 0.0 to 1.0",
     "Judgment gate: I can name a problem where a plain LLM call beats an agent loop, and explain the tradeoff"
   ]}
-  next="Module 0 complete — move on to Module 1: Prompting & Reasoning →"
+  next="Module 0 complete. Move on to Module 1: Prompting & Reasoning."
 />

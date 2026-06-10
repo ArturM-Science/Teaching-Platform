@@ -1,0 +1,187 @@
+---
+title: "Write the Bare-Metal Agent"
+module: "module-00-mental-models"
+lesson: 6
+slug: "lesson-06"
+---
+
+# Lesson 6 . Write the Bare-Metal Agent
+
+Now you will see the whole agent in code. The point is not to memorize the exact implementation; the point is to understand why every part exists.
+
+## The complete shape
+
+Here is a minimal agent skeleton. It omits the provider-specific HTTP call so the loop stays visible.
+
+```python
+import json
+
+MAX_STEPS = 5
+
+TOOLS = {
+    "calculator": lambda args: str(eval(args["expression"], {"__builtins__": {}})),
+}
+
+SYSTEM_PROMPT = """
+You are a small tool-using agent.
+
+Return only JSON.
+
+To use a tool:
+{"thought": "...", "action": "calculator", "args": {"expression": "2 + 2"}}
+
+To finish:
+{"thought": "...", "action": "final", "answer": "..."}
+"""
+
+
+def run_agent(goal: str) -> str:
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": goal},
+    ]
+
+    for step in range(MAX_STEPS):
+        raw = call_model(messages)
+        action = parse_action(raw)
+
+        if action["action"] == "final":
+            return action["answer"]
+
+        tool_name = action["action"]
+        if tool_name not in TOOLS:
+            observation = f"Tool not allowed: {tool_name}"
+        else:
+            observation = TOOLS[tool_name](action.get("args", {}))
+
+        messages.append({"role": "assistant", "content": raw})
+        messages.append({"role": "user", "content": f"Observation: {observation}"})
+
+    return "I stopped because max_steps was reached."
+
+
+def parse_action(raw: str) -> dict:
+    try:
+        action = json.loads(raw)
+    except json.JSONDecodeError:
+        return {
+            "action": "final",
+            "answer": "The model returned invalid JSON, so I stopped safely.",
+        }
+
+    if "action" not in action:
+        return {
+            "action": "final",
+            "answer": "The model returned no action, so I stopped safely.",
+        }
+
+    return action
+```
+
+Do not copy this into production. `eval` is intentionally tiny for teaching, but it is not a safe calculator for real users. In the lab, replace it with a safer tool implementation.
+
+<Callout type="warning">
+The model can request a tool. It cannot be trusted to decide whether the tool is allowed. Your code must keep the allowlist.
+</Callout>
+
+## The model call
+
+Provider SDKs differ, but the idea is always the same: send the message list, get text back.
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+
+def call_model(messages: list[dict]) -> str:
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        messages=messages,
+    )
+    return response.choices[0].message.content
+```
+
+You can swap the provider later. The agent architecture stays the same:
+
+```text
+messages -> model -> JSON action -> Python dispatch -> observation -> messages
+```
+
+## Why each line exists
+
+`MAX_STEPS` prevents runaway loops. Without it, a confused agent can keep asking for tools forever.
+
+`TOOLS` is an allowlist. If a tool is not in the dictionary, the agent cannot run it.
+
+`SYSTEM_PROMPT` defines the output contract. The model needs to know the exact action shapes your parser expects.
+
+`parse_action` is a boundary. It converts untrusted model text into a Python object your program can inspect.
+
+The two `messages.append` calls are the agent's memory for this run. They record what the model asked for and what happened when Python executed it.
+
+## A tiny run
+
+User goal:
+
+```text
+What is 18 percent of 240?
+```
+
+Model response:
+
+```json
+{"thought":"I need a calculation.","action":"calculator","args":{"expression":"240 * 0.18"}}
+```
+
+Python observation:
+
+```text
+43.2
+```
+
+Next model response:
+
+```json
+{"thought":"I have the result.","action":"final","answer":"18 percent of 240 is 43.2."}
+```
+
+That is an agent. Small, but real. It chose an action, your code executed the action, the result went back into context, and the model used the observation to finish.
+
+<Quiz
+  question="In this bare-metal agent, which part actually executes the calculator?"
+  options={[
+    {
+      label: "The LLM executes the calculator after deciding on the action.",
+      correct: false,
+      explanation: "The LLM only emits text. Python reads that text and executes the calculator from the tool allowlist."
+    },
+    {
+      label: "The Python code executes the calculator after validating the requested tool name.",
+      correct: true,
+      explanation: "Correct. This boundary is the heart of agent engineering: model proposes, code disposes."
+    },
+    {
+      label: "The system prompt executes the calculator because it contains the tool schema.",
+      correct: false,
+      explanation: "A prompt can describe a tool, but it cannot run one. Execution happens in ordinary program code."
+    }
+  ]}
+/>
+
+## What to improve in the lab
+
+The lab version should be stricter than this teaching sketch:
+
+- Replace `eval` with a safe calculator or a simple hand-written operation parser
+- Validate `args` before passing them to a tool
+- Return tool errors as observations instead of crashing
+- Log each step so failures are debuggable
+- Add tests for termination and malformed JSON
+
+<Callout type="key">
+An agent is not magic. It is a loop around a model call, a parser, a tool allowlist, and a message history.
+</Callout>
+
+[<- Lesson 5](/modules/module-00-mental-models/lesson-05) . [Lab: Build it ->](/modules/module-00-mental-models/lesson-05-lab)

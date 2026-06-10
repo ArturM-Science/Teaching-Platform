@@ -1,0 +1,125 @@
+---
+title: "Choosing Your First Agent Framework"
+module: "module-00-mental-models"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Lesson 5 . Choosing Your First Agent Framework
+
+The best first framework is not LangChain, LangGraph, CrewAI, or any agent SDK. The best first framework is a tiny loop you write yourself in plain Python, because it shows you where the model stops and your program begins.
+
+## Start with the smallest useful stack
+
+For your first agent, use:
+
+- Python 3.11+
+- One model API client
+- One or two local tools
+- A fixed JSON response format
+- A hard `max_steps` limit
+
+That is enough to learn the core mechanics without hiding them behind framework vocabulary.
+
+<Callout type="key">
+Use a framework when you already understand the loop and need production conveniences. Do not use a framework to learn what an agent is.
+</Callout>
+
+## Why not start with LangChain or LangGraph?
+
+Frameworks are useful, but they compress several decisions into one line of code:
+
+- How tools are described to the model
+- How tool calls are parsed
+- How tool results are added back to context
+- How many times the loop may run
+- What happens when a tool fails
+- How state is stored between steps
+
+That compression is valuable later. At the beginning, it makes the important parts invisible.
+
+Imagine your agent calls the calculator tool three times and never finishes. If you built it yourself, you know where to inspect: the stop condition, the action parser, the message history, or the tool result. If a framework built it for you, the same bug can feel mysterious.
+
+## The right first architecture
+
+Build the first agent as four small pieces:
+
+```text
+agent.py
+  run_agent(goal)
+  call_model(messages)
+  parse_action(text)
+
+tools.py
+  calculator(expression)
+  lookup(topic)
+
+prompts.py
+  SYSTEM_PROMPT
+```
+
+The model should only decide what action to request. Python should decide whether that request is allowed, call the tool, record the result, and decide whether the loop continues.
+
+## The contract between model and code
+
+Your first agent needs a strict output contract. The simplest version is JSON:
+
+```json
+{
+  "thought": "I need to calculate the total before answering.",
+  "action": "calculator",
+  "args": { "expression": "19.99 * 3" }
+}
+```
+
+To finish:
+
+```json
+{
+  "thought": "I have enough information to answer.",
+  "action": "final",
+  "answer": "The total is 59.97."
+}
+```
+
+This contract is the real "framework" of the first agent. It tells the model what shapes it may output and tells your code what shapes it must handle.
+
+<Quiz
+  question="Why is a strict JSON action format better than asking the model to 'tell us what tool to use' in normal prose?"
+  options={[
+    {
+      label: "Because JSON makes the model more intelligent.",
+      correct: false,
+      explanation: "JSON does not make the model smarter. It makes the model's output easier for your code to validate and dispatch."
+    },
+    {
+      label: "Because your Python code can reliably parse, validate, and reject malformed or unsafe actions.",
+      correct: true,
+      explanation: "Exactly. The goal is not elegance; it is control. A strict action format gives your code a dependable boundary between model text and program behavior."
+    },
+    {
+      label: "Because JSON removes the need for a max_steps limit.",
+      correct: false,
+      explanation: "The loop can still get stuck even with perfect JSON. You still need a max_steps guardrail."
+    }
+  ]}
+/>
+
+## When to introduce a real framework
+
+After the bare-metal lab, frameworks become easier to evaluate. You can ask what each one buys you:
+
+| Need | Good next tool |
+|---|---|
+| You want graph-shaped workflows with explicit state | LangGraph |
+| You want provider-native tool calling and hosted agent features | OpenAI Agents SDK |
+| You want multiple role-based workers with tasks | CrewAI |
+| You want a broad ecosystem of chains, retrievers, and integrations | LangChain |
+
+For this course, the first step is still plain Python. Then Module 5 and Module 6 introduce orchestration and multi-agent patterns where frameworks start earning their keep.
+
+<Callout type="tip">
+The first agent should feel almost boring: one loop, one parser, one tool table, one stop condition. Boring is good. Boring code is inspectable code.
+</Callout>
+
+[<- Lesson 4](/modules/module-00-mental-models/lesson-04) . [Next: Write the bare-metal agent ->](/modules/module-00-mental-models/lesson-06)

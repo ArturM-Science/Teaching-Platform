@@ -5,14 +5,15 @@ part: 1
 slug: "module-00-mental-models"
 ---
 
-# Module 0 · Mental Models & the Bare-Metal Agent
+# Module 0 - Mental Models & the Bare-Metal Agent
 
-**Part 1 — Foundations** · 5 lessons · ~4 hours total
+**Part 1 - Foundations** - 7 lessons - ~5 hours total
 
 <LearningObjectives>
-- Explain how LLMs generate text — tokens, context windows, temperature, and sampling
+- Explain how LLMs generate text: tokens, context windows, temperature, and sampling
 - Describe why LLMs hallucinate and under what conditions it gets worse
-- Articulate the core agent loop: perceive → reason → act → observe → repeat
+- Articulate the core agent loop: perceive -> reason -> act -> observe -> repeat
+- Choose the right starting point for a first agent: plain Python before frameworks
 - Build a working agent in ~50 lines of plain Python with no framework
 </LearningObjectives>
 
@@ -20,7 +21,7 @@ slug: "module-00-mental-models"
 
 A working agent in ~50 lines of Python that takes a user goal, makes an LLM call, parses a tool call from the response, executes the tool, and loops until done or stuck. No LangChain. No framework. Pure API calls and Python.
 
-This is the foundation everything else builds on. If you understand every line of this agent, every framework you encounter later will make sense — because you'll see what it's abstracting.
+This is the foundation everything else builds on. If you understand every line of this agent, every framework you encounter later will make sense because you'll see what it is abstracting.
 
 ## Lessons
 
@@ -30,10 +31,12 @@ This is the foundation everything else builds on. If you understand every line o
 | 2 | [Context windows, tokens, and cost](/modules/module-00-mental-models/lesson-02) | ~30 min |
 | 3 | [Determinism, temperature, and "it worked yesterday"](/modules/module-00-mental-models/lesson-03) | ~30 min |
 | 4 | [The agent loop](/modules/module-00-mental-models/lesson-04) | ~45 min |
-| 5 | [Lab: Build the bare-metal agent](/modules/module-00-mental-models/lesson-05-lab) | ~2–3 hrs |
+| 5 | [Choosing your first agent framework](/modules/module-00-mental-models/lesson-05) | ~25 min |
+| 6 | [Write the bare-metal agent](/modules/module-00-mental-models/lesson-06) | ~35 min |
+| 7 | [Lab: Build the bare-metal agent](/modules/module-00-mental-models/lesson-05-lab) | ~2-3 hrs |
 
 <Callout type="tip">
-Start with Lesson 1 and work through in order — each lesson assumes the previous one.
+Start with Lesson 1 and work through in order. Each lesson assumes the previous one.
 </Callout>
 
-[**Start Lesson 1 →**](/modules/module-00-mental-models/lesson-01)
+[**Start Lesson 1 ->**](/modules/module-00-mental-models/lesson-01)
