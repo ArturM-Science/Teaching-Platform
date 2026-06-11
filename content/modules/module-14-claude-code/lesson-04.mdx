@@ -130,10 +130,9 @@ Before you loosen permissions, answer:
 5. Are destructive commands denied or ask-first?
 6. Is the environment disposable if the command goes wrong?
 
-<FailureMuseum
-  exhibit="Auto Mode on a Dirty Checkout"
-  symptom="Claude fixed the bug but also reformatted unrelated user changes"
->
+## Failure Case - Auto Mode on a Dirty Checkout
+
+**Symptom:** Claude fixed the bug but also reformatted unrelated user changes.
 
 #### What happened
 
@@ -147,27 +146,14 @@ The operator did not check Git state before granting autonomy.
 
 Run `git status --short` first. Commit, stash, or explicitly tell Claude which files are off-limits. Use a branch or worktree for larger work.
 
-</FailureMuseum>
+## Check your understanding
 
-<Quiz
-  question="What is the safest first mode for investigating an unfamiliar production bug?"
-  options={[
-    {
-      label: "Plan mode, because Claude can read and reason before source edits happen.",
-      correct: true,
-      explanation: "Correct. Start by understanding and proposing a plan before mutation."
-    },
-    {
-      label: "Bypass permissions, because bugs are urgent.",
-      correct: false,
-      explanation: "Urgency does not reduce blast radius. Broad access is only reasonable in an isolated environment."
-    },
-    {
-      label: "Auto mode with no deny rules, because background checks replace human review.",
-      correct: false,
-      explanation: "Auto mode can reduce prompts, but it does not replace task scoping, protected paths, or final review."
-    }
-  ]}
-/>
+**What is the safest first mode for investigating an unfamiliar production bug?**
+
+1. Plan mode, because Claude can read and reason before source edits happen.
+2. Bypass permissions, because bugs are urgent.
+3. Auto mode with no deny rules, because background checks replace human review.
+
+**Answer:** 1. Start by understanding and proposing a plan before mutation.
 
 [Previous: Lesson 3](/modules/module-14-claude-code/lesson-03) - [Lesson 5 ->](/modules/module-14-claude-code/lesson-05)

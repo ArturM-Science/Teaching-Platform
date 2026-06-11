@@ -129,46 +129,22 @@ Dynamic workflows can consume substantially more usage than a normal session. St
 | One project with coordinated roles | Agent team |
 | Huge audit or migration with cross-checking | Dynamic workflow |
 
-<Quiz
-  question="You want Claude to review a large diff for security, tests, and framework misuse, but you do not want the main conversation filled with every search result. What should you use?"
-  options={[
-    {
-      label: "Subagents, each with a focused review angle and a compact findings-only output.",
-      correct: true,
-      explanation: "Correct. Subagents isolate context and return summaries."
-    },
-    {
-      label: "One background bash command.",
-      correct: false,
-      explanation: "A background command runs a shell command. It does not create specialist review agents."
-    },
-    {
-      label: "Bypass permissions.",
-      correct: false,
-      explanation: "Permission mode does not solve review structure or context isolation."
-    }
-  ]}
-/>
+## Check your understanding
 
-<Quiz
-  question="When should you consider a dynamic workflow?"
-  options={[
-    {
-      label: "For a tiny typo fix, because workflows are always more reliable.",
-      correct: false,
-      explanation: "Dynamic workflows add cost and coordination overhead. They are not for tiny tasks."
-    },
-    {
-      label: "For large audits, migrations, or critical plans where many independent agents can work and cross-check results.",
-      correct: true,
-      explanation: "Correct. Dynamic workflows fit broad, high-value work that benefits from parallelism and independent verification."
-    },
-    {
-      label: "Whenever you want to avoid reviewing the final result.",
-      correct: false,
-      explanation: "A workflow can improve coverage, but the human still reviews the output and decides what ships."
-    }
-  ]}
-/>
+**You want Claude to review a large diff for security, tests, and framework misuse, but you do not want the main conversation filled with every search result. What should you use?**
+
+1. Subagents, each with a focused review angle and a compact findings-only output.
+2. One background bash command.
+3. Bypass permissions.
+
+**Answer:** 1. Subagents isolate context and return summaries.
+
+**When should you consider a dynamic workflow?**
+
+1. For a tiny typo fix, because workflows are always more reliable.
+2. For large audits, migrations, or critical plans where many independent agents can work and cross-check results.
+3. Whenever you want to avoid reviewing the final result.
+
+**Answer:** 2. Dynamic workflows fit broad, high-value work that benefits from parallelism and independent verification.
 
 [Previous: Lesson 4](/modules/module-14-claude-code/lesson-04) - [Lesson 6: Routines ->](/modules/module-14-claude-code/lesson-06-routines)
