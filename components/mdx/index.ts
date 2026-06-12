@@ -8,6 +8,7 @@ import { ModuleQuiz } from './ModuleQuiz'
 import { Video } from './Video'
 import { Rubric } from './Rubric'
 import { Solution } from './Solution'
+import { ColabButton } from './ColabButton'
 import { SlideViewer } from './SlideViewer'
 import { TemperatureExplorer } from './TemperatureExplorer'
 import { AttentionVisualizer } from './AttentionVisualizer'
@@ -66,6 +67,7 @@ export const mdxComponents = {
   Video,
   Rubric,
   Solution,
+  ColabButton,
   SlideViewer,
   TemperatureExplorer,
   AttentionVisualizer,
