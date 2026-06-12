@@ -1,0 +1,360 @@
+---
+title: "Just Enough Python for the Bare-Metal Agent"
+module: "module-00-mental-models"
+lesson: 6
+slug: "lesson-06-python-primer"
+---
+
+# Lesson 6 . Just Enough Python for the Bare-Metal Agent
+
+If you have written Python before, skip this lesson and go straight to [Lesson 7](/modules/module-00-mental-models/lesson-06). If you have not, this lesson teaches exactly the Python you need for the next two lessons — no more, no less.
+
+This is not a full Python course. It covers the eight constructs the bare-metal agent uses, in the order you will meet them.
+
+## 1. Setup: Python, a virtual environment, and your API key
+
+Install Python 3.11 or newer from [python.org](https://www.python.org/downloads/). On Windows, tick "Add Python to PATH" during install.
+
+Then, in a terminal, create a project folder with a virtual environment — an isolated space for this project's packages:
+
+```bash
+mkdir my-first-agent
+cd my-first-agent
+python -m venv .venv
+```
+
+Activate it (you do this every time you open a new terminal):
+
+```bash
+# Windows
+.venv\Scripts\activate
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+Install the one package you need:
+
+```bash
+pip install openai
+```
+
+Finally, your API key. Never paste keys into code — set them as an environment variable, which the SDK reads automatically:
+
+```bash
+# Windows (PowerShell)
+$env:OPENAI_API_KEY = "sk-..."
+
+# macOS / Linux
+export OPENAI_API_KEY="sk-..."
+```
+
+<Callout type="warning">
+If your key ever appears in a `.py` file, it will eventually end up in a git commit, and keys in git history are compromised keys. Environment variables only.
+</Callout>
+
+## 2. Dicts: labelled boxes of data
+
+A dict maps names to values. You will use dicts constantly, because every message you send to a model is a dict:
+
+```python
+message = {"role": "user", "content": "Hello!"}
+
+print(message["role"])     # user
+print(message["content"])  # Hello!
+```
+
+You read a value with `message["role"]` and add or change one with `message["role"] = "system"`.
+
+## 3. Lists, and lists of dicts
+
+A list is an ordered collection. `append` adds to the end:
+
+```python
+numbers = [1, 2, 3]
+numbers.append(4)      # [1, 2, 3, 4]
+```
+
+Now combine the two. A conversation is a **list of dicts** — one dict per message, oldest first:
+
+```python
+messages = [
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "What is an agent?"},
+]
+
+messages.append({"role": "assistant", "content": "An agent is a loop around a model call."})
+```
+
+This `messages` list is the single most important data structure in this course. The agent in Lesson 7 is essentially code that grows this list in a loop.
+
+<Quiz
+  question="After messages.append({'role': 'user', 'content': 'Hi'}), where does the new message end up?"
+  options={[
+    {
+      label: "At the start of the list",
+      correct: false,
+      explanation: "append always adds to the end. Conversations grow chronologically: oldest message first, newest last."
+    },
+    {
+      label: "At the end of the list",
+      correct: true,
+      explanation: "Correct. append adds to the end, which is exactly what a conversation needs: new messages come after old ones."
+    },
+    {
+      label: "It replaces the previous user message",
+      correct: false,
+      explanation: "Nothing is replaced. The list keeps every message, which is how the model sees the whole conversation history."
+    }
+  ]}
+/>
+
+## 4. Functions and f-strings
+
+A function bundles code behind a name. The `def` line names it and lists its inputs; `return` hands back the result:
+
+```python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+
+print(greet("Sam"))   # Hello, Sam!
+```
+
+Two details:
+
+- `name: str` and `-> str` are **type hints**. They document that `name` should be a string and the function returns a string. Python does not enforce them; they are notes for humans and tools.
+- `f"Hello, {name}!"` is an **f-string**: put `f` before the quote and anything inside curly braces gets filled in with the variable's value.
+
+## 5. Loops
+
+A `for` loop with `range` repeats a fixed number of times:
+
+```python
+for step in range(5):
+    print(f"step {step}")   # prints step 0 through step 4
+```
+
+A `while True` loop repeats forever — until `break` stops it:
+
+```python
+while True:
+    text = input("Type something (or 'quit'): ")
+    if text == "quit":
+        break
+    print(f"You typed: {text}")
+```
+
+`input(...)` pauses and waits for the user to type a line. You will use `while True` for your chat agent below, and `range(MAX_STEPS)` in Lesson 7 — the agent's safety cap on how many times it may loop.
+
+## 6. try / except and JSON
+
+When code might fail, wrap it in `try`. If the risky line raises an error, Python jumps to `except` instead of crashing:
+
+```python
+import json
+
+raw = '{"action": "calculator"}'
+
+try:
+    data = json.loads(raw)         # parse JSON text into a dict
+    print(data["action"])          # calculator
+except json.JSONDecodeError:
+    print("That was not valid JSON.")
+```
+
+`json.loads` turns JSON text into a Python dict. This matters because in Lesson 7 the model replies with JSON text, and your code must survive the days when the model replies with something malformed.
+
+<Quiz
+  question="The model returns broken JSON and your code calls json.loads on it inside a try/except block. What happens?"
+  options={[
+    {
+      label: "The program crashes with a traceback",
+      correct: false,
+      explanation: "That is what happens without try/except. With it, Python jumps to the except branch instead of crashing."
+    },
+    {
+      label: "Python runs the except branch and the program continues",
+      correct: true,
+      explanation: "Correct. This is the parser boundary you will build in Lesson 7: untrusted model text gets converted safely, and failures are handled instead of fatal."
+    },
+    {
+      label: "json.loads fixes the JSON automatically",
+      correct: false,
+      explanation: "json.loads never repairs input. It either parses valid JSON or raises JSONDecodeError."
+    }
+  ]}
+/>
+
+## 7. Your first model call
+
+Everything above comes together in five lines:
+
+```python
+from openai import OpenAI
+
+client = OpenAI()   # reads OPENAI_API_KEY from the environment
+
+response = client.chat.completions.create(
+    model="gpt-4.1-mini",
+    messages=[{"role": "user", "content": "Say hello in five words."}],
+)
+
+print(response.choices[0].message.content)
+```
+
+Run it with `python hello.py`. If you see a greeting, your setup works and you are ready for the exercise.
+
+## Exercise: build a chat agent
+
+Your goal: a program that lets you chat back and forth with the model in the terminal — and remembers the conversation. About 20 lines.
+
+It must:
+
+1. Keep a `messages` list that starts with one system message
+2. Loop forever, reading your input with `input("You: ")`
+3. Stop when you type `quit`
+4. Append your message to `messages` as a `user` message
+5. Send the whole list to the model and print the reply prefixed with `Agent: `
+6. Append the reply to `messages` as an `assistant` message — this is what gives it memory
+
+Start from this skeleton and fill in the three TODO lines:
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+MODEL = "gpt-4.1-mini"
+TEMPERATURE = 0.7   # 0 = predictable, higher = more varied
+MAX_TOKENS = 200    # cap on the length of each reply
+
+messages = [
+    {"role": "system", "content": "You are a friendly assistant. Keep answers short."},
+]
+
+while True:
+    user_text = input("You: ")
+    if user_text == "quit":
+        break
+
+    # TODO 1: append the user's message to the messages list
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
+        messages=messages,
+    )
+    reply = response.choices[0].message.content
+
+    # TODO 2: print the reply with the prefix "Agent: "
+    # TODO 3: append the reply as an assistant message
+```
+
+### Test it
+
+Run the program and have this exact conversation:
+
+```text
+You: My name is Sam.
+Agent: Nice to meet you, Sam!
+You: What is my name?
+Agent: Your name is Sam.
+```
+
+If the agent knows your name in the second answer, your TODO 3 works: the model "remembers" only because the full `messages` list is sent on every call.
+
+### Experiment 1: break the memory
+
+Comment out your TODO 3 line and have the same conversation again. The agent forgets your name instantly. Nothing is remembered between calls — the context window is the agent's only memory. This is Lesson 2 made physical.
+
+### Experiment 2: feel the temperature
+
+Set `TEMPERATURE = 0`, restart, and ask "Give me a name for a pet robot" three times (restart between runs). Then set `TEMPERATURE = 1.2` and repeat. At 0 you get nearly identical names; at 1.2 you get a different one each run.
+
+This is why the Lesson 7 agent runs at `temperature=0`: when output has to be parsed as JSON, you want boring and repeatable, not creative.
+
+Also try `MAX_TOKENS = 20` and watch replies get cut off mid-sentence — that is the token cap from Lesson 2 in action.
+
+<Solution>
+
+#### Complete solution
+
+```python
+from openai import OpenAI
+
+client = OpenAI()
+
+MODEL = "gpt-4.1-mini"
+TEMPERATURE = 0.7
+MAX_TOKENS = 200
+
+messages = [
+    {"role": "system", "content": "You are a friendly assistant. Keep answers short."},
+]
+
+while True:
+    user_text = input("You: ")
+    if user_text == "quit":
+        break
+
+    messages.append({"role": "user", "content": user_text})
+
+    response = client.chat.completions.create(
+        model=MODEL,
+        temperature=TEMPERATURE,
+        max_tokens=MAX_TOKENS,
+        messages=messages,
+    )
+    reply = response.choices[0].message.content
+
+    print(f"Agent: {reply}")
+    messages.append({"role": "assistant", "content": reply})
+```
+
+#### Why each TODO line works
+
+- **TODO 1** — `messages.append({"role": "user", "content": user_text})` adds your message to the end of the history, so the model sees it on the next call.
+- **TODO 2** — `print(f"Agent: {reply}")` uses an f-string to fill the reply into the output.
+- **TODO 3** — `messages.append({"role": "assistant", "content": reply})` records what the model said. Without this line, the next call sends a history with your questions but none of the model's answers, and the conversation falls apart.
+
+#### Stretch goal
+
+Stop after 5 turns instead of looping forever:
+
+```python
+for turn in range(5):
+    user_text = input("You: ")
+    ...
+```
+
+That cap is the same idea as `MAX_STEPS` in the Lesson 7 agent — a hard limit so a loop can never run away.
+
+</Solution>
+
+<Quiz
+  question="Your chat agent gives a different answer every time you ask the same question. Which setting explains this?"
+  options={[
+    {
+      label: "The system prompt",
+      correct: false,
+      explanation: "The system prompt shapes tone and behaviour, but it does not control randomness between runs."
+    },
+    {
+      label: "TEMPERATURE",
+      correct: true,
+      explanation: "Correct. Higher temperature means more varied sampling. At temperature 0 the model picks the most likely token nearly every time, so answers become almost identical."
+    },
+    {
+      label: "MAX_TOKENS",
+      correct: false,
+      explanation: "MAX_TOKENS only caps the length of the reply. It does not change which words the model picks."
+    }
+  ]}
+/>
+
+<Callout type="key">
+Your chat agent is already half of the bare-metal agent. Lesson 7 adds the other half: instead of printing the model's reply to a human, the code parses it as JSON and executes the tool it asks for.
+</Callout>
+
+[← Lesson 5](/modules/module-00-mental-models/lesson-05) · [Next: Write the bare-metal agent →](/modules/module-00-mental-models/lesson-06)

@@ -240,6 +240,33 @@ Interactive self-assessment checklist. Accepts `items` and `next` props.
 
 ---
 
+### `<Solution>`
+
+Collapsible solution reveal for exercises. Content stays hidden until the learner clicks the button, encouraging them to attempt the exercise first.
+
+| Prop | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `label` | `string` | No | `'Show solution'` | Button text shown while collapsed |
+| `children` | `ReactNode` | Yes | — | Solution body — code blocks, explanations, lists |
+
+Use `####` headings, `ul`/`ol` lists, and fenced code blocks inside the body; they're styled automatically.
+
+````mdx
+<Solution>
+
+#### Complete solution
+
+```python
+messages.append({"role": "user", "content": user_text})
+```
+
+Walkthrough of why each line works.
+
+</Solution>
+````
+
+---
+
 ### `<FailureMuseum>`
 
 Collapsible failure case study. Expand/collapse is client-side.

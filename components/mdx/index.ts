@@ -6,6 +6,7 @@ import { Checkpoint } from './Checkpoint'
 import { Quiz } from './Quiz'
 import { Video } from './Video'
 import { Rubric } from './Rubric'
+import { Solution } from './Solution'
 import { SlideViewer } from './SlideViewer'
 import { TemperatureExplorer } from './TemperatureExplorer'
 import { AttentionVisualizer } from './AttentionVisualizer'
@@ -62,6 +63,7 @@ export const mdxComponents = {
   Quiz,
   Video,
   Rubric,
+  Solution,
   SlideViewer,
   TemperatureExplorer,
   AttentionVisualizer,
