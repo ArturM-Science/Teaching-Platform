@@ -13,6 +13,16 @@ slug: "lesson-09-lab-autogen"
   objective="Implement the 4-agent research pipeline using AutoGen's conversational GroupChat model. You will see how agents debate, critique, and iterate via a shared conversation thread — and experience both the strengths and costs of the conversational approach."
 />
 
+## Run this lab
+
+**Option A — VS Code / local terminal** (instructions below)
+
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
+
+<ColabButton notebook="module-06-lab-autogen" />
+
+---
+
 ## The mental model
 
 AutoGen's core idea: agents communicate through a shared conversation thread. Instead of explicit tool calls or graph edges, agents take turns speaking — and the `GroupChatManager` decides who speaks next. This maps naturally to workflows that benefit from iterative refinement: one agent writes, another critiques, the first revises.
