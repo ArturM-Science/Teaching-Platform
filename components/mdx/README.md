@@ -219,6 +219,32 @@ Notes:
 
 ---
 
+### `<ModuleQuiz>`
+
+End-of-module graded quiz. Lives in its own MDX page (`module-quiz.mdx`, frontmatter `lesson: 90`, slug `module-quiz`) placed after the lab. When the learner submits and scores `passPercent` or higher, it calls `markModuleComplete(moduleSlug)` — this is the official module-completion trigger.
+
+| Prop | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `moduleSlug` | `string` | Yes | — | Module to mark complete on pass |
+| `questions` | `QuizQuestion[]` | Yes | — | `{ question, options: [{ label, correct? }], explanation? }` — explanation shown only on wrong answers after submit |
+| `passPercent` | `number` | No | `80` | Minimum score to pass |
+| `next` | `string` | No | — | Message shown on pass |
+
+Notes:
+- All questions must be answered before Submit enables. Failing shows a Retry button that resets the quiz.
+- Use 5–8 questions covering the module's core concepts and the lab.
+
+```mdx
+<ModuleQuiz
+  moduleSlug="module-00-mental-models"
+  questions={[
+    { question: "…", options: [{ label: "wrong" }, { label: "right", correct: true }], explanation: "Shown when wrong." }
+  ]}
+/>
+```
+
+---
+
 ### `<Checkpoint>`
 
 Interactive self-assessment checklist. Accepts `items` and `next` props.

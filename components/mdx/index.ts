@@ -4,6 +4,7 @@ import { LabBrief } from './LabBrief'
 import { FailureMuseum } from './FailureMuseum'
 import { Checkpoint } from './Checkpoint'
 import { Quiz } from './Quiz'
+import { ModuleQuiz } from './ModuleQuiz'
 import { Video } from './Video'
 import { Rubric } from './Rubric'
 import { Solution } from './Solution'
@@ -61,6 +62,7 @@ export const mdxComponents = {
   FailureMuseum,
   Checkpoint,
   Quiz,
+  ModuleQuiz,
   Video,
   Rubric,
   Solution,

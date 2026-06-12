@@ -2,18 +2,28 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import type { LessonMeta } from '@/lib/content'
 
 interface Props {
   moduleSlug: string
   lessons: LessonMeta[]
+  percent?: number
+  complete?: boolean
 }
 
-export function LessonSidebar({ moduleSlug, lessons }: Props) {
+export function LessonSidebar({ moduleSlug, lessons, percent = 0, complete = false }: Props) {
   const pathname = usePathname()
   const moduleBase = `/modules/${moduleSlug}`
 
   const isActive = (href: string) => pathname === href
+
+  const target = Math.min(100, Math.max(0, percent))
+  const [barWidth, setBarWidth] = useState(0)
+  useEffect(() => {
+    const t = setTimeout(() => setBarWidth(target), 120)
+    return () => clearTimeout(t)
+  }, [target])
 
   return (
     <aside className="hidden w-72 shrink-0 border-r border-zinc-800 bg-zinc-950 text-white lg:block">
@@ -23,6 +33,19 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
             Learner cockpit
           </Link>
           <p className="mt-2 break-words text-sm font-medium text-zinc-300">{moduleSlug}</p>
+          <div className="mt-3 flex items-center gap-2">
+            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+              <div
+                className={`h-full rounded-full transition-[width] duration-700 ease-out ${
+                  complete ? 'bg-teal-300' : 'bg-gradient-to-r from-teal-500 to-teal-300'
+                }`}
+                style={{ width: `${barWidth}%` }}
+              />
+            </div>
+            <span className="w-9 text-right text-xs font-semibold tabular-nums text-zinc-400">
+              {complete ? '✓' : `${target}%`}
+            </span>
+          </div>
         </div>
 
         <nav className="flex-1 px-3 py-4">
@@ -48,6 +71,7 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
               const active = isActive(href)
               const isLab = lesson.slug.includes('lab')
               const isExhibit = lesson.slug.includes('failure-museum')
+              const isQuiz = lesson.slug.includes('module-quiz')
 
               return (
                 <li key={lesson.slug}>
@@ -64,11 +88,13 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
                         ? 'bg-zinc-950 text-white'
                         : isLab
                           ? 'bg-teal-300 text-zinc-950'
-                          : isExhibit
-                            ? 'bg-red-300 text-zinc-950'
-                            : 'bg-white/10 text-zinc-300'
+                          : isQuiz
+                            ? 'bg-amber-300 text-zinc-950'
+                            : isExhibit
+                              ? 'bg-red-300 text-zinc-950'
+                              : 'bg-white/10 text-zinc-300'
                     }`}>
-                      {isLab ? 'Lab' : isExhibit ? 'FM' : lesson.lesson}
+                      {isLab ? 'Lab' : isQuiz ? 'Quiz' : isExhibit ? 'FM' : lesson.lesson}
                     </span>
                     <span className={active ? 'font-semibold' : ''}>{lesson.title}</span>
                   </Link>

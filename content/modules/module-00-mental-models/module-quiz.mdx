@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Mental Models"
+module: "module-00-mental-models"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 00 Quiz
+
+You've built a bare-metal agent from scratch. Time to prove the mental models stuck. Score 80% or higher to mark this module complete on your dashboard.
+
+<ModuleQuiz
+  moduleSlug="module-00-mental-models"
+  passPercent={80}
+  next="Head back to the dashboard — Module 01 is unlocked and waiting."
+  questions={[
+    {
+      question: "What does an LLM fundamentally do when it generates a response?",
+      options: [
+        { label: "Looks up answers in a database of facts" },
+        { label: "Predicts the next token repeatedly, based on the tokens so far", correct: true },
+        { label: "Runs the code it was trained on" },
+        { label: "Searches the internet in real time" }
+      ],
+      explanation: "An LLM is a next-token predictor. Everything else — reasoning, tool use, agents — is built on top of repeated next-token prediction."
+    },
+    {
+      question: "Your agent worked yesterday but gives a different answer today with the same prompt. The most likely explanation is:",
+      options: [
+        { label: "The model was retrained overnight" },
+        { label: "Sampling is non-deterministic — temperature above 0 means the same prompt can produce different tokens", correct: true },
+        { label: "Your API key changed" },
+        { label: "The context window shrank" }
+      ],
+      explanation: "With temperature > 0 the model samples from a probability distribution, so identical inputs can produce different outputs. This is expected behaviour, not a bug."
+    },
+    {
+      question: "What happens when a conversation exceeds the model's context window?",
+      options: [
+        { label: "The model automatically remembers the important parts" },
+        { label: "The request fails or older content must be dropped/summarised — the model cannot see what doesn't fit", correct: true },
+        { label: "The model slows down but sees everything" },
+        { label: "Nothing — context windows are unlimited on paid plans" }
+      ],
+      explanation: "The context window is a hard limit. Anything outside it simply does not exist for the model — managing what goes in it is a core agent-building skill."
+    },
+    {
+      question: "In the agent loop you built in the lab, what turns a plain LLM call into an agent?",
+      options: [
+        { label: "Using a more expensive model" },
+        { label: "The loop: the model picks a tool, your code executes it, the result goes back into the context, repeat until done", correct: true },
+        { label: "A system prompt that says 'You are an agent'" },
+        { label: "Streaming the output token by token" }
+      ],
+      explanation: "An agent is an LLM in a loop with tools: model decides → your code executes → result feeds back. The loop and tool execution live in YOUR code, not in the model."
+    },
+    {
+      question: "Why did the lab use a safe AST-based calculator instead of Python's eval()?",
+      options: [
+        { label: "eval() is too slow for production" },
+        { label: "The model's output is untrusted input — eval() would execute anything the model writes, including harmful code", correct: true },
+        { label: "eval() can't do multiplication" },
+        { label: "AST parsing gives more accurate maths" }
+      ],
+      explanation: "Tool inputs come from the model, and the model can be wrong or manipulated. Treat model output as untrusted user input — never pass it to eval() or a shell directly."
+    },
+    {
+      question: "Lowering temperature towards 0 makes the model:",
+      options: [
+        { label: "More creative and varied" },
+        { label: "More deterministic — it picks the most likely token nearly every time", correct: true },
+        { label: "Faster but less accurate" },
+        { label: "Use fewer tokens from the context window" }
+      ],
+      explanation: "Temperature scales the randomness of sampling. Near 0 the model almost always picks the top token — good for tool calls and structured output, less good for creative writing."
+    }
+  ]}
+/>
+
+---
+
+[← Lesson 8: What You Actually Built](/modules/module-00-mental-models/lesson-05) · [Failure Museum →](/modules/module-00-mental-models/failure-museum)
