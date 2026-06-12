@@ -278,6 +278,73 @@ produces a draft with no citations to check, and the verifier always passes —
 masking a content-quality issue."]
 ```
 
+<Solution>
+
+#### Reference solution — the parts the walkthrough leaves to you
+
+**1. Estimated token cost in the runner** (a hard constraint the starter doesn't implement). Every Anthropic response carries usage data — accumulate it:
+
+```python
+# workflow/runner.py — additions
+TOTAL_USAGE = {"input": 0, "output": 0}
+
+def track(response):
+    TOTAL_USAGE["input"] += response.usage.input_tokens
+    TOTAL_USAGE["output"] += response.usage.output_tokens
+    return response
+```
+
+Wrap each `client.messages.create(...)` call: `response = track(client.messages.create(...))`, then at the end of `run()`:
+
+```python
+    # Haiku and Sonnet have different prices; this single blended estimate is
+    # fine for the lab — note in WORKFLOW.md that production should split by model.
+    est_cost = TOTAL_USAGE["input"] / 1e6 * 3 + TOTAL_USAGE["output"] / 1e6 * 15
+    print(f"Tokens: {TOTAL_USAGE['input']} in / {TOTAL_USAGE['output']} out "
+          f"(~${est_cost:.4f})")
+```
+
+**2. Partial failure handling in the searcher** (the "Exceeds" criterion — one failed branch must not sink the workflow):
+
+```python
+# workflow/searcher.py — replace search_all
+async def search_all(queries: list[str]) -> list[dict]:
+    results = await asyncio.gather(
+        *[search_one(q) for q in queries],
+        return_exceptions=True,
+    )
+    ok = []
+    for query, result in zip(queries, results):
+        if isinstance(result, Exception):
+            print(f"  branch failed for '{query}': {result}")
+            ok.append({"query": query, "facts": [], "source": "failed"})
+        else:
+            ok.append(result)
+    return ok
+```
+
+`return_exceptions=True` is the whole trick: failures come back as values instead of propagating, so the synthesiser still runs on the surviving branches. The placeholder dict keeps result counts aligned with queries for the stage report.
+
+**3. A completed WORKFLOW.md failure-mode section:**
+
+```md
+## Known failure mode
+
+The verifier judges "missing citations" with a model call, so it can
+false-pass: if the synthesiser hallucinates a citation-shaped string
+("[Source: simulated]") for a claim that appears in no search result,
+the verifier sees a citation and passes the draft. The loop checks
+citation *presence*, not citation *grounding*.
+
+Mitigation: a deterministic post-check that extracts every [Source: X]
+value and asserts X appears in the search results' source fields —
+cheap string matching, no model call, cannot be sweet-talked.
+```
+
+**4. One robustness fix worth making everywhere:** every `json.loads(response.content[0].text)` in the pipeline (planner, searcher, verifier) is a crash waiting for the day the model adds prose around the JSON. Wrap each in `try/except json.JSONDecodeError` and return a safe default (planner: re-raise with the raw text in the message; searcher: the same `"failed"` placeholder as above; verifier: `{"pass": True, "missing_citations": []}` plus a warning — failing open on the *verifier* keeps max-2-iterations the only loop bound, which is the documented behaviour).
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 3 (Meets) or above to pass."
   criteria={[

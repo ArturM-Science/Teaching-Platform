@@ -73,6 +73,56 @@ Use one of:
 
 Justify the decision with evidence from evaluation, safety review, and observability.
 
+<Solution label="Show exemplar excerpts">
+
+The capstone is your own project, so there is no solution to copy — but these excerpts show the *register* that scores 4 on the two criteria submissions most often fumble: scope freeze and launch decision.
+
+#### Step 1 — a scope freeze with teeth (example: support-ticket triage agent)
+
+```md
+This capstone ships:
+- Classify incoming tickets into 4 queues with confidence scores
+- Draft a first reply for the 2 highest-volume queues, never auto-send
+- Full eval suite (22 cases) wired into ci.sh, gating deploys
+
+This capstone does not ship:
+- Auto-sending replies (deliberately out: the eval set can't yet measure
+  tone failures, and a bad sent reply is irreversible)
+- The billing queue (PII handling unresolved — see safety_review.md §3)
+- Memory across tickets (cut on day 2; classification doesn't need it)
+```
+
+Two tells of a real freeze versus a wish list: each "does not ship" line names the *reason* it's out, and at least one item was visibly cut during the project rather than never planned. Scope you never attempted isn't scope you cut.
+
+#### Step 5 — a launch decision that scores 4 on readiness judgment
+
+```md
+## Decision: ready for supervised pilot
+
+Evidence for: 19/22 eval cases pass (threshold: 18); all 4 regression cases
+pass; p95 latency 3.1s against a 5s budget; cost $0.004/ticket; zero PII in
+traces verified by search across the last 200 spans.
+
+Evidence against full production — and why pilot anyway: the 3 failing cases
+are all sarcasm-misread misclassifications that route to a *slower* queue
+(annoying, recoverable), not a wrong-reply draft (harmful). Drafts are
+human-approved in the pilot, so the remaining harm path has a gate.
+
+Pilot terms: 2 agents in the support team, 2 weeks, drafts flagged
+[AI-DRAFT], weekly misclassification review against the eval set.
+
+Next iteration (in priority order):
+1. 10 sarcasm/frustration cases for the eval set, then retune the classifier
+   prompt against them (addresses all 3 failures)
+2. Confidence threshold below which the agent declines to draft (data from
+   pilot week 1 decides the cutoff)
+3. Billing queue PII design doc — blocker for any scope expansion
+```
+
+What makes this a 4 and not a 3: the decision *engages with its own counter-evidence* (the failing cases are characterised by blast radius, not hidden), the pilot has terms and an end date rather than being an indefinite soft launch, and every next-iteration item traces to a specific observed gap. A launch decision that only cites passing numbers reads as marketing; one that explains why the failures are survivable reads as engineering.
+
+</Solution>
+
 <Rubric
   threshold="Score 3+ on all five criteria to pass"
   criteria={[

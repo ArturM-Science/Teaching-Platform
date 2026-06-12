@@ -132,6 +132,91 @@ Your task:
 [Write your synthesis instructions here]
 ```
 
+<Solution label="Show a worked example design">
+
+This is one defensible design, not the only one. Compare it to yours task by task — if you made different choices with reasons, that can score just as well.
+
+#### Task 1 — System prompts
+
+**Orchestrator:**
+
+```text
+You are the orchestrator of a multi-agent research pipeline. You receive one
+research question from the user. Your first job is to decompose it into exactly
+two non-overlapping sub-questions: one on model compression, one on inference
+optimisation, each as JSON: {"sub_question": "...", "assigned_to": "specialist_a|b"}.
+Your second job, after the Critic's verdict arrives, is to synthesise the
+specialists' outputs into the final answer using your synthesis instructions.
+You do NOT research topics yourself, and you do NOT edit specialist findings —
+you only decompose, route, and synthesise.
+```
+
+**Specialist A (model compression):**
+
+```text
+You are a specialist researcher focused exclusively on model compression
+techniques: quantisation, pruning, distillation, and low-rank factorisation.
+You receive one sub-question as JSON with a "sub_question" field. You return
+JSON: {"findings": [{"claim": "...", "technique": "...", "evidence": "...",
+"confidence": "high|medium|low"}], "summary": "..."}. Every claim must carry
+an evidence string and a confidence level. If the sub-question is outside
+model compression, return {"out_of_scope": true} and nothing else. You do
+NOT cover inference optimisation, serving infrastructure, or hardware.
+```
+
+**Specialist B (inference optimisation):** identical structure, scoped to KV-cache management, speculative decoding, batching, and attention optimisations, with the mirror-image refusal.
+
+**Critic:**
+
+```text
+You are a critic agent. You do not generate research — you evaluate it. You
+receive both specialists' JSON outputs. For each claim, check: is it supported
+by its evidence string, is the confidence level justified, and does it
+contradict any claim from the other specialist? You return JSON:
+{"verdict": "approve|revise", "unverified_claims": ["..."],
+"contradictions": ["..."], "notes": "..."}. You do NOT rewrite findings,
+add new claims, or soften your verdict to be agreeable.
+```
+
+#### Task 2 — Communication pattern
+
+**Choice: direct handoff (orchestrator-mediated), with the two specialists running in parallel.**
+
+Why it beats the alternatives here: the pipeline is a fixed diamond — decompose, fan out to exactly two known specialists, fan in, review, synthesise. A shared message queue buys nothing because no agent subscribes dynamically; a blackboard adds the risk that one specialist reads the other's partial findings and anchors on them, which this design explicitly wants to avoid (independent findings make divergence informative at synthesis time). Parallelism is preserved because the handoff is orchestrator→both simultaneously.
+
+Main risk of this choice: the orchestrator is a single point of failure and a bandwidth bottleneck — if its decomposition is bad, both specialists do the wrong work and nothing downstream can detect it. Mitigation: the decomposition is itself JSON with a fixed schema, validated in code before dispatch, and the Critic's contradiction check provides a late tripwire for incoherent sub-questions.
+
+#### Task 3 — Failure modes (MAST)
+
+| Failure mode | How it occurs in this pipeline | Mitigation |
+|---|---|---|
+| Information withholding / lossy handoff | Specialist A's `summary` field is what the orchestrator reads at synthesis; nuance in individual findings (a "low" confidence flag on a headline number) is dropped, so the final answer states the number as fact | Synthesis prompt receives the full `findings` array, not just summaries, and is required to propagate the lowest confidence level attached to any claim it uses |
+| Verifier capitulation / weak critic | The Critic returns "approve" on everything because nothing forces specificity — approval is the path of least resistance | Critic schema requires `unverified_claims` and `contradictions` arrays even when empty, plus orchestrator-side rule: an approve verdict with empty notes on findings containing any "low" confidence claim triggers one re-review |
+
+#### Task 4 — Synthesis prompt
+
+```text
+You have received research from two specialists and a quality verdict from the Critic.
+Specialist A output: {specialist_a_output}
+Specialist B output: {specialist_b_output}
+Critic verdict: {critic_verdict}
+
+Your task:
+1. Produce a final answer with exactly these sections:
+   ## Where the approaches agree
+   ## Where they diverge or trade off
+   ## Open questions and unverified claims
+   ## Bottom line (max 4 sentences)
+2. In the first two sections, draw only on claims present in the specialists'
+   findings arrays. Carry each claim's confidence level inline, e.g. "(confidence: medium)".
+3. Every claim listed in the Critic's unverified_claims must appear in the
+   "Open questions" section, marked "unverified" — it may not appear anywhere else.
+4. If the Critic's verdict is "revise", do not synthesise: return
+   {"action": "revision_needed", "reason": <critic notes>} instead.
+```
+
+</Solution>
+
 ## Submission checklist
 
 <Checkpoint

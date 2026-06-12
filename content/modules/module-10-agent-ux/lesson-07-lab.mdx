@@ -176,6 +176,105 @@ Expected behaviour:
 - The approval gate still fires before writing
 - The final file includes a front-matter note: `sources_available: 2/3`
 
+<Solution>
+
+#### The approval-wait pattern (the part everyone gets stuck on)
+
+The SSE stream and the approve button arrive on *different HTTP requests*, so they need a shared rendezvous keyed by run id:
+
+```python
+# state shared between the stream and the approve/cancel endpoints
+import asyncio, uuid
+from fastapi import FastAPI, HTTPException
+
+app = FastAPI()
+RUNS: dict[str, dict] = {}   # run_id -> {"event": asyncio.Event, "approved": bool}
+
+async def wait_for_approval(run_id: str, timeout: float = 300) -> bool:
+    run = RUNS[run_id]
+    try:
+        await asyncio.wait_for(run["event"].wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return False                      # timeout = cancel, never auto-approve
+    return run["approved"]
+
+@app.post("/api/research/{run_id}/approve")
+async def approve(run_id: str):
+    run = RUNS.get(run_id)
+    if not run:
+        raise HTTPException(404)
+    run["approved"] = True
+    run["event"].set()
+    return {"ok": True}
+
+@app.post("/api/research/{run_id}/cancel")
+async def cancel(run_id: str):
+    run = RUNS.get(run_id)
+    if not run:
+        raise HTTPException(404)
+    run["approved"] = False
+    run["event"].set()
+    return {"ok": True}
+```
+
+In the `/api/research` handler, create `run_id = uuid.uuid4().hex`, register `RUNS[run_id] = {"event": asyncio.Event(), "approved": False}`, and **include `run_id` in the `approval_required` event** so the frontend knows where to POST — that's the missing field in the starter's event format. Clean up `RUNS.pop(run_id, None)` in a `finally`. Two design points worth writing down: a timeout resolves to *cancel* (irreversible actions fail closed), and this dict only works single-process — multiple workers need the Redis variant.
+
+#### Graceful degradation — the mock and the loop
+
+```python
+async def read_source(source, *, fail_index=None, i=None):
+    if fail_index is not None and i == fail_index:
+        raise TimeoutError("mocked timeout")
+    ...
+
+# in the loop — the error event carries everything the UI banner needs:
+        except TimeoutError:
+            failed.append(i + 1)
+            await stream({
+                "type": "error",
+                "message": f"Source {i+1} timed out",
+                "recoverable": True,
+                "suggestion": f"The report will cover {len(sources) - len(failed)} of {len(sources)} sources.",
+            })
+            continue
+```
+
+The report prompt then receives only `summaries`, and the file write prepends front-matter: `sources_available: {len(summaries)}/{len(sources)}`. The principle being tested: degradation is *declared*, in the stream, in the banner, and in the artifact — partial results that look complete are worse than failures.
+
+#### Feedback rerun
+
+```python
+@app.post("/api/research/{run_id}/feedback")
+async def feedback(run_id: str, body: dict):
+    log_feedback(run_id, body["rating"], body.get("correction", ""))
+    return {"ok": True}
+```
+
+The rerun button simply calls `runResearch` again with:
+
+```typescript
+const rerunQuery = `${originalQuery}\n\nUser correction from previous attempt: ${correction}`
+```
+
+New run, new run_id, full pipeline including the approval gate — a correction does not inherit the previous run's approval, because the report it produces is different.
+
+#### Frontend: the three state transitions that matter
+
+```typescript
+const handlers: StreamHandlers = {
+  token:            e => setAnswer(a => a + e.content),
+  tool_call:        e => setFeed(f => [...f, { ...e, status: "running" }]),
+  tool_result:      e => setFeed(f => markDone(f, e.tool)),
+  error:            e => setFeed(f => [...f, { type: "error", label: e.message, note: e.suggestion }]),
+  approval_required: e => setApproval(e),       // renders <ApprovalDialog {...e} />
+  done:             e => { setApproval(null); setShowFeedback(true) },
+}
+```
+
+The `error` handler appending a labelled card (instead of throwing or toasting a stack trace) is what satisfies the checkpoint's "no stack traces in the UI under any failure scenario" — every failure path ends in a rendered, human-readable element.
+
+</Solution>
+
 ## Rubric
 
 <Rubric

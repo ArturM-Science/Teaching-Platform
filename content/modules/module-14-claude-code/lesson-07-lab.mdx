@@ -266,6 +266,80 @@ Submit:
 - permission rule or hook proposal
 - Managed Agents design sketch
 
+<Solution label="Show a worked example session">
+
+Each run differs — this shows the two deliverables learners most often under-deliver: the safety-control proposal (Step 5) and the Managed Agents design (Step 7), filled in for a real session on a Next.js content site.
+
+#### Step 5 — a permission proposal tied to an actual risk
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build)",
+      "Bash(npm run lint *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Bash(git push *)",
+      "Bash(npx supabase *)"
+    ]
+  }
+}
+```
+
+With the justification from the notes: *"The allow list is exactly the verification loop this repo uses, so routine sessions need zero prompts. The deny list maps to the two real risks observed: the repo's `.env.local` holds a Supabase service key (data exposure), and `npx supabase db push` is an external write that no local task should ever need. I chose permission rules over a PostToolUse lint hook because lint here takes 40s — as a hook it would fire on every edit and make Claude slower without blocking anything dangerous."*
+
+That last sentence is what "Exceeds" wants: the *rejected* option is named with a reason. A proposal with no rejected alternative reads as a template paste.
+
+#### Step 7 — Managed Agents design at scoring depth
+
+```md
+## Managed Agents design
+
+### Agent
+- Model: claude-sonnet-4-6 (content edits don't need Opus; cost matters at cron frequency)
+- System prompt: the repo's CLAUDE.md rules + "produce a PR, never push to main"
+- Skills: none required
+- MCP servers: none — repo file access only
+- Built-in tools enabled: file read/write/edit, bash (build + lint only)
+- Custom tools: none
+
+### Environment
+- Cloud sandbox (Anthropic-hosted): the repo is on GitHub, no internal services needed
+- Network policy: GitHub + npm registry only; all other egress blocked
+- Secrets policy: a fine-grained GitHub token scoped to this repo, contents+PR
+  only; no Supabase credentials enter the environment (builds use a stub env)
+
+### Session
+- User event: weekly cron (Mon 07:00) + manual trigger from the dashboard
+- Success criteria: lint and build pass, diff < 200 lines, PR opened with summary
+- Stop conditions: 30 min wall clock, $2 budget, or any permission denial
+- Human approval points: PR review is the single gate — the agent has no merge rights
+
+### Permission policy
+- always_allow: read repo, edit content/**, run npm run build / lint
+- always_ask: edits outside content/**, any new dependency, any git push
+
+### Data handling
+- Stored server-side: session transcripts and diffs (30-day retention)
+- Must not enter the session: .env values, Supabase keys, user PII from the prod DB
+- Deletion/retention: transcripts auto-expire; PRs are the durable audit record
+```
+
+The translation insight that separates a 4 from a 3, stated in one line in the notes: *"Locally, I am the approval gate at every permission prompt; in Managed Agents, nobody is watching mid-session — so every mid-session 'ask me' either becomes a hard deny, a pre-approved allow, or a stop condition. The PR boundary replaces me."* If your design still contains interactive approval points with no one to answer them, the translation isn't done.
+
+#### Common pitfalls in the rest of the lab
+
+- **Step 3:** the most frequent durable-context mistake is writing a CLAUDE.md rule about *this session's task* ("the port flag is in cli.py"). The repo records that already — durable rules capture what the repo *can't* say about itself (build quirks, forbidden zones, verification habits).
+- **Step 6:** if the review pass returns "looks good" in one line, it didn't engage — rerun with the blocking phrasing. An explicit "no blocking findings; residual risk: no test covers the empty-input path" is a *pass*; silence is not.
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 3 (Meets) or above to pass."
   criteria={[

@@ -223,6 +223,84 @@ assert all(isinstance(t.validation.passed, bool) for t in traces)
 # the agent stops after 2 retries with the same error
 ```
 
+<Solution>
+
+#### Reference solution
+
+The two `NotImplementedError` stubs, completed:
+
+```python
+# validator.py
+import subprocess
+import tempfile
+import os
+from models import ValidationResult
+
+def run_tests(code: str, test_suite: str, timeout: int = 30) -> ValidationResult:
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "solution.py"), "w") as f:
+            f.write(code)
+        with open(os.path.join(tmp, "tests.py"), "w") as f:
+            f.write(test_suite)
+
+        try:
+            result = subprocess.run(
+                ["pytest", "tests.py", "--tb=short", "-q"],
+                cwd=tmp, capture_output=True, text=True, timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return ValidationResult(passed=False, error_output="Test run timed out",
+                                    test_count=0, failed_count=0)
+
+        output = result.stdout + result.stderr
+        passed = result.returncode == 0
+
+        # crude but reliable enough: pytest's summary line, e.g. "3 passed" / "1 failed, 2 passed"
+        import re
+        failed = sum(int(n) for n in re.findall(r"(\d+) failed", output))
+        ok = sum(int(n) for n in re.findall(r"(\d+) passed", output))
+
+        return ValidationResult(
+            passed=passed,
+            error_output=None if passed else output[-3000:],
+            test_count=failed + ok,
+            failed_count=failed,
+        )
+```
+
+```python
+# agent.py — generate_code
+from openai import OpenAI
+from pydantic import ValidationError
+
+client = OpenAI()
+
+def generate_code(messages: list) -> CodeOutput:
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=messages,
+    )
+    raw = response.choices[0].message.content
+    try:
+        return CodeOutput.model_validate_json(raw)
+    except ValidationError as e:
+        # Treat malformed output like a failed attempt: surface it as a structured error
+        return CodeOutput(code="", explanation=f"Model returned invalid output: {e}")
+```
+
+#### Design notes
+
+- **Why truncate `error_output` to the last 3,000 characters:** retry prompts must include the failure, but a huge traceback wastes context. The tail of pytest output contains the assertion details — the part the model needs.
+- **Why `temperature=0`:** retries should converge. At higher temperatures the model can produce a different wrong answer each attempt, defeating the convergence check.
+- **Why a `ValidationError` becomes an empty `CodeOutput` rather than an exception:** the hard constraint says no unhandled exceptions. Empty code fails the test run, which flows through the normal retry path with the validation error visible in the trace.
+- **The convergence check is already in the starter `run_agent`:** `result.error_output == last_error` flips status to `failed`. The README should explain that this catches the "model is stuck in a loop producing the same bug" case that MAX_RETRIES alone would burn attempts on.
+
+For the README's two stuck conditions: (1) the model repeats an identical wrong fix — bounded by the convergence check; (2) the task is unsolvable as specified (test suite contradicts the task) — bounded by MAX_RETRIES.
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
   criteria={[

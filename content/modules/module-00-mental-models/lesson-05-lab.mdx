@@ -64,6 +64,115 @@ def run_agent(goal: str) -> str:
     return "max steps reached"
 ```
 
+<Solution>
+
+#### Reference solution
+
+```python
+# tools.py
+import ast
+import operator as op
+
+_OPS = {
+    ast.Add: op.add, ast.Sub: op.sub,
+    ast.Mult: op.mul, ast.Div: op.truediv,
+}
+
+def _safe_eval(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+        return _OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+    raise ValueError("unsupported expression")
+
+def calculator(args: dict) -> str:
+    try:
+        tree = ast.parse(args["expression"], mode="eval")
+        return str(_safe_eval(tree.body))
+    except Exception as e:
+        return f"calculator error: {e}"
+
+TOOLS = {"calculator": calculator}
+```
+
+```python
+# agent.py
+import json
+import logging
+from openai import OpenAI
+from tools import TOOLS
+
+logging.basicConfig(level=logging.INFO)
+log = logging.getLogger(__name__)
+
+client = OpenAI()
+MAX_STEPS = 5
+
+SYSTEM_PROMPT = """You are a small tool-using agent. Return only JSON.
+To use a tool: {"thought": "...", "action": "calculator", "args": {"expression": "2 + 2"}}
+To finish: {"thought": "...", "action": "final", "answer": "..."}"""
+
+
+def build_initial_messages(goal: str) -> list[dict]:
+    # TODO 1: build the messages list from goal + history
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": goal},
+    ]
+
+def call_model(messages: list[dict]) -> str:
+    # TODO 2: call the LLM and get a response
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini", temperature=0, messages=messages,
+    )
+    return response.choices[0].message.content
+
+def parse_action(text: str) -> dict:
+    # TODO 3: parse whether the response wants to call a tool
+    try:
+        action = json.loads(text)
+    except json.JSONDecodeError:
+        return {"action": "final", "answer": "Invalid JSON from model; stopping safely."}
+    if "action" not in action:
+        return {"action": "final", "answer": "No action in model output; stopping safely."}
+    return action
+
+def run_agent(goal: str) -> str:
+    messages = build_initial_messages(goal)
+
+    for step in range(MAX_STEPS):
+        raw = call_model(messages)
+        action = parse_action(raw)
+        log.info("step %d: %s", step, action.get("action"))
+
+        # TODO 5: decide whether we are done and return the result
+        if action["action"] == "final":
+            return action["answer"]
+
+        # TODO 4: execute the tool and append the result to messages
+        tool_name = action["action"]
+        if tool_name not in TOOLS:
+            observation = f"Tool not allowed: {tool_name}"
+        else:
+            observation = TOOLS[tool_name](action.get("args", {}))
+
+        messages.append({"role": "assistant", "content": raw})
+        messages.append({"role": "user", "content": f"Observation: {observation}"})
+
+    return "max steps reached"
+```
+
+#### Why this passes the constraints
+
+- **Termination:** the `final` action returns immediately, and `range(MAX_STEPS)` guarantees the loop can never run more than 5 times even if the model never finishes.
+- **Safe calculator:** `eval` is replaced with an AST walker that only accepts numbers and the four arithmetic operators — any other expression returns an error string as an observation instead of executing code.
+- **No crashes:** malformed JSON, a missing `action` key, an unknown tool, and a bad expression all become normal observations or safe stops, never exceptions.
+- **Debuggability:** each step logs the attempt number and chosen action, satisfying the tracing requirement.
+
+For the three tests in `tests/test_loop.py`: run a goal that needs the calculator (loop runs + tool is called) and assert the return value is a string (terminates); for the termination test, mock `call_model` to always return a tool action and assert you get `"max steps reached"`.
+
+</Solution>
+
 ## Rubric
 
 <Rubric

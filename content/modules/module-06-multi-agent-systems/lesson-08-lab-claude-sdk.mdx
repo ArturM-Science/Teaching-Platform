@@ -265,4 +265,86 @@ Managed Agents sessions are stateful: the session persists across multiple calls
 
 **4. Compare token cost.** Run the same question on a single Claude call (no subagents) and on the multi-agent pipeline. Compare the total token count. Does the multi-agent system produce a meaningfully better answer? At what quality threshold does the extra cost become worthwhile?
 
+<Solution>
+
+#### Exercise 1 — structured handoffs
+
+Define the schema once in code and reference it in both prompts:
+
+```python
+from pydantic import BaseModel, ValidationError
+
+class SpecialistOutput(BaseModel):
+    findings: list[str]
+    citations: list[str]
+    key_claim: str
+
+SCHEMA_SNIPPET = SpecialistOutput.model_json_schema()
+```
+
+Append to each specialist prompt: `"Your JSON MUST validate against this schema: {SCHEMA_SNIPPET}. Return JSON only — no prose before or after."` Then add the validation phase to the orchestrator prompt, between Phase 2 and Phase 3:
+
+```text
+**Phase 2.5 — Validate handoffs**
+Before passing outputs to the critic, check each specialist output:
+- If it is out_of_scope: rewrite the sub-question so it falls inside that
+  specialist's stated scope and re-spawn ONCE. If still out of scope,
+  reassign the sub-question to the other specialist.
+- If it is not valid JSON matching {findings: list, citations: list,
+  key_claim: str}: re-spawn that specialist with the message
+  "Your output did not match the required schema. Return JSON only."
+  At most one re-spawn per specialist for format errors.
+```
+
+The deeper point of the exercise: in the SDK, the schema lives in *prompts*, so enforcement is probabilistic — which is why you also validate in code when you consume the result (`SpecialistOutput.model_validate_json(...)` wrapped in `try/except ValidationError`). LangGraph gave you the inverse: code-level typing, prompt-level freedom.
+
+#### Exercise 2 — session persistence
+
+```python
+options = ClaudeAgentOptions(
+    model="claude-opus-4-5",
+    allowed_tools=["Agent", "web_search"],
+    agents=SPECIALISTS,
+    permission_mode="auto_approve_tools",
+    thread_id="research-001",          # same id on both runs
+)
+
+agent = ClaudeAgent(prompt=ORCHESTRATOR_PROMPT, options=options)
+first = agent.run(question)
+
+# Second run, same thread_id: session history is loaded, so the model
+# sees its previous decompose output in context.
+second = agent.run("Continue: tighten the synthesis to 200 words.")
+
+decompose_events = [
+    e for e in second.session.events
+    if e.type == "tool_use" and "sub_question" in str(getattr(e, "input", ""))
+]
+assert len(decompose_events) == 0, "decompose ran again — session did not resume"
+```
+
+The verification is the event log, not the output text: if resumption worked, the second run contains no new decompose phase because the sub-questions are already in the conversation history.
+
+#### Exercise 3 — scope enforcement
+
+Change Phase 1 of the orchestrator prompt so sub-question A becomes "What are the latest results in speculative decoding?" (deliberately inference-scoped) and run. Expected trace: compression-specialist returns `{"out_of_scope": true, "reason": "speculative decoding is inference optimisation"}`; the orchestrator — because its Phase 2.5 instructions from Exercise 1 cover this — re-routes the question to inference-specialist rather than retrying.
+
+If instead the compression specialist *answers* the question, your scope refusal isn't strong enough. The fix that reliably works: put the refusal at the top of the specialist prompt, not the bottom, and make it categorical ("Before doing anything else, decide: is this question inside your scope? If not, your ENTIRE response must be the out_of_scope JSON").
+
+#### Exercise 4 — token cost comparison
+
+```python
+def count_tokens(result) -> int:
+    return sum(
+        e.usage.input_tokens + e.usage.output_tokens
+        for e in result.session.events if hasattr(e, "usage")
+    )
+```
+
+Typical findings (yours will vary): the multi-agent run costs **3–5×** the single-call baseline — every specialist re-reads its sub-question and system prompt, and the critic re-reads both outputs. Quality differs most on the *comparison* aspect of the question: the single call tends to produce two summaries side by side; the pipeline's critic-then-synthesis steps produce genuine cross-referencing and flagged contradictions.
+
+The judgment answer the exercise is fishing for: the extra cost is worthwhile when the cost of a wrong or shallow answer exceeds the API bill — research informing a real decision, content that will be published, claims that must be cited. For a casual question, the single call wins. If you can't articulate who suffers when the answer is mediocre, you don't need the pipeline.
+
+</Solution>
+
 [Next framework lab: AutoGen / AG2 →](/modules/module-06-multi-agent-systems/lesson-09-lab-autogen)

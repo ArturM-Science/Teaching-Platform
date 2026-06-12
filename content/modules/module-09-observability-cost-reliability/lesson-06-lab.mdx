@@ -257,6 +257,81 @@ slos:
         action: page_oncall
 ```
 
+<Solution label="Show worked examples">
+
+#### cost_audit.md — what "Meets" looks like (real numbers, not vibes)
+
+```markdown
+# Cost Audit — Customer Support Agent
+Data: 100 traces exported from Langfuse, 2026-06-10.
+
+## Baseline
+- avg prompt tokens/query: 3,840   avg completion tokens/query: 410
+- model: gpt-4o ($2.50/M in, $10.00/M out)
+- cost/query: (3840/1e6 × 2.50) + (410/1e6 × 10.00) = $0.0137
+- monthly @ 1,000 q/day: **$411.60**
+
+## Top 3 cost drivers (from span-level token attribution)
+1. System prompt: 1,710 tokens resent on every call — 44% of input spend
+2. Retrieved context: 1,580 tokens avg, retrieval always returns k=6 chunks
+   even when 2 suffice — 41% of input spend
+3. Completions: 410 tokens avg; answers routinely restate the question
+
+## Optimisations applied
+1. Prompt caching on the system prompt (≥1,024 tokens, so eligible):
+   cached input is $1.25/M → system prompt cost drops ~50% after first call
+2. Retrieval k=6 → k=3 with a relevance threshold: context 1,580 → 790 tokens
+3. "Answer directly, do not restate the question" instruction:
+   completions 410 → 290 tokens
+
+## After
+- avg prompt tokens: 2,140 (of which 1,710 cached at $1.25/M)
+- cost/query: $0.0083 → monthly **$249.00**
+- **Reduction: 39.5%** ✓ (≥30% required)
+- Quality check: helpfulness rolling avg 4.2 → 4.1 (within noise; k=3
+  retrieval did not measurably hurt answers on the 100-trace sample)
+```
+
+The last line is the part most submissions miss: a cost audit without a quality check is half an audit — you must show what the 30% bought you, or didn't cost you.
+
+#### PII scrubbing (hard constraint 5)
+
+`user_id` must be an opaque id, and inputs must be scrubbed before they land in span attributes:
+
+```python
+import hashlib, re
+
+def scrub(text: str) -> str:
+    text = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "<EMAIL>", text)
+    text = re.sub(r"\+?\d[\d\s().-]{7,}\d", "<PHONE>", text)
+    return text
+
+@observe()
+def run(user_message: str, user_id: str) -> str:
+    langfuse_context.update_current_trace(
+        name="customer_support",
+        user_id=hashlib.sha256(user_id.encode()).hexdigest()[:16],  # opaque
+        input=scrub(user_message),
+        tags=["production", "lab"],
+    )
+```
+
+Verify the constraint the same way a reviewer would: search the Langfuse UI for `@` across your last 10 traces — zero hits or you haven't finished.
+
+#### readiness_checklist.md — three sample entries showing the expected register
+
+```markdown
+| # | Item | Status | Justification |
+|---|------|--------|---------------|
+| 3 | Every LLM call has timeout + bounded retry | Pass | 30s timeout in client init; pybreaker wraps primary; secondary has no retry by design (last resort must fail fast). |
+| 7 | Cost per query is known and alarmed | Pass | $0.0083 measured from Langfuse export; daily-spend webhook alert at 2× expected. |
+| 9 | Rollback procedure documented and tested | Fail | No tested rollback for prompt changes. Remediation: version prompts in git, keep N-1 deployable — owner: me, by 2026-06-20. |
+```
+
+A "Fail" with an owner and date scores higher than a hand-waved "Pass" — the rubric's Exceeds line is explicit about this, and it mirrors how real readiness reviews work.
+
+</Solution>
+
 <Rubric
   threshold="Score 3+ on at least 4 of 5 criteria to pass"
   criteria={[

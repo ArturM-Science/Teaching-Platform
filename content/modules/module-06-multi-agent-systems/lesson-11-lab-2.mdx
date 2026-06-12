@@ -493,6 +493,128 @@ The boundary between two multi-agent systems is the highest-trust point in the a
 
 **5. Add observability across both systems.** Add timing instrumentation: record when System A starts, when the handoff is produced, when System B starts, and when the final post is complete. Log the quality score, revision count, and token usage from both systems. What is the total wall-clock time? What is the breakdown between System A and System B?
 
+<Solution>
+
+#### Exercise 1 — boundary validator test
+
+```python
+import pytest
+
+def make_valid_handoff() -> dict:
+    return {
+        "question": "test", "produced_at": "2026-06-01T00:00:00Z",
+        "compression_findings": [{"claim": "int8 halves memory", "citation": "Dettmers 2022", "confidence": 0.9}],
+        "inference_findings":   [{"claim": "PagedAttention cuts waste", "citation": "Kwon 2023", "confidence": 0.9}],
+        "key_compression_claim": "x", "key_inference_claim": "y",
+        "overall_score": 0.8, "agreements": [], "divergences": [],
+        "unresolved_issues": [], "passed_critic": True, "critic_revision_count": 1,
+    }
+
+def test_uncited_claim_blocked():
+    bad = make_valid_handoff()
+    bad["compression_findings"][0]["citation"] = ""
+    with pytest.raises(SystemBoundaryError) as exc:
+        cross_system_handoff(bad)
+    assert "Uncited finding" in str(exc.value)
+    # System B never starts: run_system_b is only called after this returns
+```
+
+The structural guarantee is in `run_full_pipeline`: `run_system_b(handoff)` takes the *return value* of `cross_system_handoff` as its argument, so when the boundary raises there is no handoff object to pass — System B can't start by construction, not by discipline.
+
+#### Exercise 2 — quality escalation path
+
+Make the critic's threshold a state field so a retry can raise it:
+
+```python
+class SystemAState(TypedDict):
+    # ... existing fields ...
+    pass_threshold: float   # default 0.75
+
+# critic prompt becomes: f"Pass if score >= {state['pass_threshold']} and no uncited claims."
+
+def run_full_pipeline(question: str) -> str:
+    for attempt, threshold in enumerate([0.75, 0.85], start=1):
+        config = {"configurable": {"thread_id": f"research-{attempt}"}}
+        a_result = system_a.invoke(
+            {"question": question, "pass_threshold": threshold}, config=config
+        )
+        try:
+            handoff = cross_system_handoff(a_result["handoff"])
+            break
+        except SystemBoundaryError as e:
+            if attempt == 2:
+                return (
+                    "The pipeline could not complete: the research team's output "
+                    "failed quality validation twice (final attempt used a stricter "
+                    f"0.85 critic threshold). Specific failures: {e}. "
+                    "No blog post was generated from unvalidated research."
+                )
+            print(f"Attempt {attempt} failed boundary validation — retrying stricter: {e}")
+    return run_system_b(handoff)
+```
+
+Note the counter-intuitive bit: the retry uses a *stricter* critic, not a looser one — the goal is to force System A's repair loop to do more work, not to lower the bar at the boundary (the boundary's own validators never change).
+
+#### Exercise 3 — swapping the frameworks
+
+The handoff works identically — that is the point of the exercise. `cross_system_handoff` doesn't change by a single line: it takes a dict, returns a validated `ResearchHandoff`, and neither knows nor cares which framework produced the dict. What changes is each system's *internal* shape: System A in CrewAI becomes four `Task`s under `Process.hierarchical` whose final task's `expected_output` is "a JSON object matching the ResearchHandoff schema" (and you parse `result.raw` with `json.loads` before the boundary — CrewAI gives you prose-wrapped JSON more often than LangGraph, so this direction needs a more defensive extraction step, e.g. regex out the first `{...}` block). System B in LangGraph becomes a three-node linear graph (`write → edit → format`) whose state carries `draft`, `edited`, `formatted` fields. The one-sentence takeaway for your writeup: schemas at boundaries are what make frameworks swappable; everything inside a system is an implementation detail.
+
+#### Exercise 4 — acknowledgement message
+
+```python
+class AcknowledgementMessage(BaseModel):
+    handoff_question: str
+    research_usable: bool
+    editor_corrections: int       # count of [EDITOR: ...] markers in the edit pass
+    final_word_count: int
+    acknowledged_at: datetime
+
+def run_system_b(handoff: ResearchHandoff) -> tuple[str, AcknowledgementMessage]:
+    tasks = build_system_b_tasks(handoff)
+    crew = Crew(agents=[writer, editor, formatter], tasks=tasks,
+                process=Process.sequential, verbose=1)
+    result = crew.kickoff()
+    edited = tasks[1].output.raw if tasks[1].output else ""
+    ack = AcknowledgementMessage(
+        handoff_question=handoff.question,
+        research_usable=True,
+        editor_corrections=edited.count("[EDITOR:"),
+        final_word_count=len(result.raw.split()),
+        acknowledged_at=datetime.now(timezone.utc),
+    )
+    with open("system_a_feedback.jsonl", "a") as f:
+        f.write(ack.model_dump_json() + "\n")
+    return result.raw, ack
+```
+
+The acknowledgement is itself a typed, validated message — the same discipline in the reverse direction. A high `editor_corrections` count across runs is the signal System A's owners would use to tighten the specialists' citation prompts.
+
+#### Exercise 5 — cross-system observability
+
+```python
+import time
+
+def run_full_pipeline(question: str) -> str:
+    t0 = time.monotonic()
+    a_result = system_a.invoke({"question": question}, config=config)
+    t_handoff = time.monotonic()
+
+    handoff = cross_system_handoff(a_result["handoff"])
+    final_post, ack = run_system_b(handoff)
+    t_done = time.monotonic()
+
+    print(f"System A:  {t_handoff - t0:6.1f}s  "
+          f"(score {handoff.overall_score:.2f}, {handoff.critic_revision_count} revision(s))")
+    print(f"System B:  {t_done - t_handoff:6.1f}s  "
+          f"({ack.editor_corrections} editor corrections, {ack.final_word_count} words)")
+    print(f"Total:     {t_done - t0:6.1f}s")
+    return final_post
+```
+
+(Token usage: System B's is `result.token_usage`; for System A, accumulate `response.usage_metadata` in each node as in the Module 05 lab.) Typical split: System A dominates wall-clock — usually 60–75% — because the critic loop is sequential-with-retries while System B is a straight three-stage pipeline. The number worth staring at: when `critic_revision_count` is 2, System A's share jumps and the *quality score barely moves* — repair loops have steeply diminishing returns, which is exactly why the cap exists.
+
+</Solution>
+
 <Checkpoint
   moduleSlug="module-06-multi-agent-systems"
   items={[

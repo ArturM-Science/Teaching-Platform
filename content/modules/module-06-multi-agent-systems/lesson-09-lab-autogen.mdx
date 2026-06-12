@@ -266,4 +266,63 @@ The AG2 graph approach trades the flexibility of LLM-selected speakers for the p
 
 **4. Implement the AG2 graph version.** Port your GroupChat implementation to `DiGraphGroupChat`. Add a conditional edge from `Critic` back to `CompressionSpecialist` or `InferenceSpecialist` based on which specialist had uncited claims. How do you handle conditional routing in AG2 vs `add_conditional_edges` in LangGraph?
 
+<Solution>
+
+#### Exercise 1 — token cost vs LangGraph
+
+Use real usage numbers, not the character estimate — AutoGen exposes per-call usage via the client's cost tracking (`agent.client.total_usage_summary` on v0.2, or the `model_client` usage on v0.4); for LangGraph, sum `response.usage_metadata` over your node calls. Expected result: AutoGen lands **2–4× higher** for this 4-agent pipeline, and the gap *grows with rounds* — in GroupChat, round N's input includes all N−1 previous rounds, so cost is roughly quadratic in conversation length, while LangGraph nodes each see only the state fields you hand them (roughly linear). That asymmetry, not the absolute numbers, is the finding worth writing down.
+
+#### Exercise 2 — round-robin failure
+
+With `speaker_selection_method="round_robin"`, the turn order is fixed by the participants list, regardless of what the conversation needs. Concretely: after the orchestrator decomposes, the turn passes to the next agent in list order even if that's the inference specialist being asked the compression sub-question; the critic gets a turn *before both specialist outputs exist* and reviews half a pipeline; and when the critic fails an output, the "repair" turn goes to whoever is next in the rotation, not to the specialist that needs to fix its work. The pipeline doesn't crash — it produces confident nonsense on schedule, which is worse. Lesson: round-robin suits symmetric debates (every agent contributes the same kind of turn); any pipeline with *roles* needs either LLM selection (flexible, unpredictable) or explicit edges (AG2/LangGraph).
+
+#### Exercise 3 — human agent
+
+```python
+user_proxy = UserProxyAgent(
+    "Human",
+    human_input_mode="ALWAYS",
+    code_execution_config=False,
+)
+```
+
+There's no fixed right answer; what you should observe: when you interject "Critic: be stricter — reject anything without a quantitative benchmark", the critic's *next* verdict applies your bar (your message is in the shared history every agent reads), and specialists adjust on their re-run. Two things worth noticing: your instruction persists in history, so the stricter bar applies to every later round whether you intended that or not, and each pause is a checkpoint where you can see exactly what every agent will see next — the GroupChat equivalent of `interrupt_before`.
+
+#### Exercise 4 — AG2 graph with conditional repair routing
+
+AG2 has no `add_conditional_edges`. Conditional routing is expressed by giving an edge an *activation condition* on the message content (in current AG2, `DiGraph` edges accept a condition; the idiom below) — which means **the critic must emit a routable token in its text**:
+
+```python
+# Critic system prompt gains:
+# "If compression claims are uncited, include the token REPAIR_COMPRESSION.
+#  If inference claims are uncited, include REPAIR_INFERENCE.
+#  If both pass, include VERDICT_PASS."
+
+from autogen_agentchat.teams import DiGraphBuilder, GraphFlow
+
+builder = DiGraphBuilder()
+builder.add_node(orchestrator_a2).add_node(compression_a2)
+builder.add_node(inference_a2).add_node(critic_a2)
+
+builder.add_edge(orchestrator_a2, compression_a2)
+builder.add_edge(orchestrator_a2, inference_a2)
+builder.add_edge(compression_a2, critic_a2)
+builder.add_edge(inference_a2, critic_a2)
+
+# Conditional edges: activated when the condition string appears in the message
+builder.add_edge(critic_a2, compression_a2, condition="REPAIR_COMPRESSION")
+builder.add_edge(critic_a2, inference_a2,   condition="REPAIR_INFERENCE")
+builder.add_edge(critic_a2, orchestrator_a2, condition="VERDICT_PASS")
+
+team = GraphFlow(
+    participants=builder.get_participants(),
+    graph=builder.build(),
+    termination_condition=TextMentionTermination("FINAL_ANSWER:"),
+)
+```
+
+The comparison the exercise asks for: in LangGraph, routing is a **Python function over typed state** — testable without a model, impossible to misspell silently. In AG2, routing is **string matching over model output** — the critic must be prompted to emit exact tokens, and a paraphrase ("compression needs repairs") silently activates nothing. If your AG2 graph stalls after the critic turn, that's almost always why. Cap repairs the same way as everywhere else: a max-rounds termination condition alongside the text-mention one.
+
+</Solution>
+
 [Next framework lab: CrewAI →](/modules/module-06-multi-agent-systems/lesson-10-lab-crewai)

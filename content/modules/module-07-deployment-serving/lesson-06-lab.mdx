@@ -203,6 +203,76 @@ curl -N -X POST localhost:8080/chat/stream \
   -d '{"message":"Summarise the transformer architecture.","history":[]}'
 ```
 
+<Solution>
+
+#### Reference solution — the parts the walkthrough leaves to you
+
+**1. `drain_in_flight`** (referenced in the lifespan hook but not implemented). Track in-flight requests with a counter and wait for it to reach zero:
+
+```python
+# service.py — additions
+IN_FLIGHT = 0
+_in_flight_lock = asyncio.Lock()
+
+async def track_request():
+    global IN_FLIGHT
+    async with _in_flight_lock:
+        IN_FLIGHT += 1
+    try:
+        yield
+    finally:
+        async with _in_flight_lock:
+            IN_FLIGHT -= 1
+
+async def drain_in_flight(timeout: float = 30):
+    deadline = asyncio.get_event_loop().time() + timeout
+    while IN_FLIGHT > 0 and asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(0.25)
+    if IN_FLIGHT > 0:
+        print(f"shutdown: abandoning {IN_FLIGHT} request(s) after {timeout}s drain")
+```
+
+Increment/decrement around the work in each handler (`async with SEM:` block). Uvicorn stops accepting new connections on SIGTERM; the drain gives requests already inside the semaphore time to finish.
+
+**2. Adapting the Module 3 agent to `run_agent` / `run_agent_streaming`** — the key changes are async, injected history, and returning the new history instead of storing it:
+
+```python
+# agent.py
+from anthropic import AsyncAnthropic
+from config import config
+
+client = AsyncAnthropic(timeout=config.MODEL_TIMEOUT)
+
+async def run_agent(message: str, history: list[dict]) -> tuple[str, list[dict]]:
+    messages = history + [{"role": "user", "content": message}]
+    response = await call_with_retry(lambda: client.messages.create(
+        model=config.MODEL, max_tokens=1024, messages=messages,
+    ))
+    answer = response.content[0].text
+    new_history = messages + [{"role": "assistant", "content": answer}]
+    return answer, new_history
+
+async def run_agent_streaming(message: str, history: list[dict]):
+    messages = history + [{"role": "user", "content": message}]
+    async with client.messages.stream(
+        model=config.MODEL, max_tokens=1024, messages=messages,
+    ) as stream:
+        async for text in stream.text_stream:
+            yield text
+```
+
+Note what's *absent*: no module-level `messages` list, no session dict. The function signature is the statelessness constraint — state comes in as an argument and leaves as a return value, so any replica can serve any request.
+
+**3. README_DEPLOY rollout paragraph (model answer):**
+
+> **Rollout: canary.** New revisions ship to one replica receiving ~10% of traffic for 30 minutes while we compare its error rate, p95 latency, and eval-suite spot checks against the stable pool; promotion to 100% is manual. Canary over blue-green because agent regressions are *behavioural*, not crashes — a bad system prompt change serves 200s with confidently worse answers, which an instant blue-green cutover would ship to every user at once. The canary's small blast radius plus a real traffic sample is the only way to catch quality regressions that the offline eval suite missed.
+
+That paragraph is also the answer to the checkpoint's judgment gate: replacing all replicas at once on a Friday means a behavioural regression hits 100% of traffic with nobody watching over the weekend — and there's no old pool still warm to shift traffic back to if rollback requires a rebuild.
+
+**4. Verifying the eval gate blocks the build** (the rubric's "demonstrated with a failing run"): temporarily flip one regression case's assertion (or run with `ANTHROPIC_API_KEY=""` as shown above), run `./ci.sh`, and capture the output showing the script exits before `docker build` is reached. Screenshot or paste that output into README_DEPLOY — an eval gate you've never seen fail is a gate you don't know works.
+
+</Solution>
+
 <Rubric
   threshold="Score 3 (Meets) or above on all criteria. A score of 1 (Below) on any criterion requires resubmission."
   criteria={[

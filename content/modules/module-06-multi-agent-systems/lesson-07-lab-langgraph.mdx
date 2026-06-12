@@ -291,4 +291,101 @@ app_with_review.invoke(None, config=config)
 LangGraph's fan-out (one node → multiple nodes) and fan-in (multiple nodes → one node) require the compiled graph to have no ambiguous ordering. If you add edges that create cycles not resolved by conditional routing, the graph will raise a validation error at compile time — not at runtime.
 </Callout>
 
+<Solution>
+
+#### Exercises 1 + 2 — repair node with correct fan-out
+
+These two exercises share one fix: a `repair_orchestrator` node that turns the critic's issues into instructions, then fans out to *both* specialists.
+
+First, extend the state so the specialists can see repair guidance:
+
+```python
+class ResearchState(TypedDict):
+    # ... existing fields ...
+    repair_instructions: str     # empty on first pass
+```
+
+The repair node:
+
+```python
+REPAIR_PROMPT = """
+You are a research orchestrator. The critic rejected the specialists' work.
+Turn the critic's issues into concrete, actionable instructions for the
+specialists' next attempt. Be specific: name the claim, say what is wrong,
+say what evidence is needed.
+
+Return plain text instructions.
+"""
+
+def repair_orchestrator(state: ResearchState) -> dict:
+    issues = state["critic_verdict"].get("issues", [])
+    response = llm.invoke([
+        {"role": "system", "content": REPAIR_PROMPT},
+        {"role": "user", "content": "Critic issues:\n" + "\n".join(f"- {i}" for i in issues)}
+    ])
+    return {"repair_instructions": response.content}
+```
+
+Make the specialists consume the instructions (shown for A; mirror for B):
+
+```python
+def specialist_compression(state: ResearchState) -> dict:
+    user_content = state["sub_question_a"]
+    if state.get("repair_instructions"):
+        user_content += f"\n\nYour previous attempt was rejected. Address these issues:\n{state['repair_instructions']}"
+    response = llm.invoke([
+        {"role": "system", "content": COMPRESSION_SPECIALIST_PROMPT},
+        {"role": "user", "content": user_content}
+    ])
+    import json
+    return {"specialist_a_output": json.loads(response.content)}
+```
+
+Rewire the graph — the conditional edge now targets the repair node, and the repair node fans out to both specialists exactly like `decompose` does:
+
+```python
+graph.add_node("repair_orchestrator", repair_orchestrator)
+
+graph.add_conditional_edges(
+    "critic",
+    route_after_critic,
+    {
+        "synthesise": "synthesise",
+        "repair":     "repair_orchestrator",   # was: "specialist_a"
+        "escalate":   "escalate",              # see exercise 4
+    }
+)
+
+graph.add_edge("repair_orchestrator", "specialist_a")
+graph.add_edge("repair_orchestrator", "specialist_b")
+```
+
+Both specialists feed `critic` again through the existing edges, so the fan-in join still works on the repair pass.
+
+#### Exercise 3 — LangSmith tracing
+
+There is no single right answer (it's an observation exercise), but you should find: the **specialist nodes dominate latency** — they run in parallel, so wall-clock time is `max(A, B)`, not the sum, which the trace timeline shows as two overlapping spans. After `critic` runs, the state snapshot contains both specialist outputs plus `critic_verdict` and the incremented `repair_count` — confirming the critic only writes its two fields and the rest of the state flows through untouched. If your two specialist spans run sequentially in the trace, your edges are wrong.
+
+#### Exercise 4 — escalation node
+
+```python
+import logging
+log = logging.getLogger("pipeline")
+
+def escalate(state: ResearchState) -> dict:
+    log.error(
+        "Escalation: critic rejected after %d repair attempt(s). Issues: %s",
+        state["repair_count"],
+        state["critic_verdict"].get("issues", []),
+    )
+    return {"final_answer": ""}   # explicit empty answer, not a missing key
+
+graph.add_node("escalate", escalate)
+graph.add_edge("escalate", END)
+```
+
+With `MAX_REPAIRS = 0`, the first failed verdict routes straight here: the log line fires, `final_answer` is explicitly empty, and the run ends without ever reaching `synthesise`. The point of the explicit node: silent `END` is indistinguishable from success in your logs; an escalation node makes failure observable — which is the difference between a demo and a system you can operate.
+
+</Solution>
+
 [Next framework lab: Claude Agent SDK →](/modules/module-06-multi-agent-systems/lesson-08-lab-claude-sdk)

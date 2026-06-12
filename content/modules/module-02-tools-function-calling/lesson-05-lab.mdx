@@ -175,6 +175,152 @@ output = run_agent("What is 7 * 8? Save the answer to workspace/math.txt")
 assert isinstance(output, str)
 ```
 
+<Solution>
+
+#### Reference solution
+
+The two missing schemas:
+
+```python
+READ_FILE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "read_file",
+        "description": (
+            "Read a text file from the agent workspace and return its contents. "
+            "Only files inside the workspace are accessible. "
+            "Do NOT use for URLs - use search_web for web content."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path relative to the workspace, e.g. 'notes/summary.txt'"
+                }
+            },
+            "required": ["path"]
+        }
+    }
+}
+
+RUN_CODE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "run_code",
+        "description": (
+            "Execute a short Python script in a sandboxed subprocess and return "
+            "stdout, stderr, and the exit code. Use for calculations and file "
+            "manipulation inside the workspace. Scripts are killed after 10 seconds, "
+            "so do NOT use for long-running or interactive programs."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Complete Python source to execute"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "default": 10,
+                    "description": "Seconds before the script is killed"
+                }
+            },
+            "required": ["code"]
+        }
+    }
+}
+```
+
+The three tool implementations:
+
+```python
+def search_web(query: str, max_results: int = 5) -> dict:
+    try:
+        resp = httpx.get(
+            "https://api.duckduckgo.com/",
+            params={"q": query, "format": "json", "no_html": 1},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = [
+            {"title": t.get("Text", ""), "url": t.get("FirstURL", "")}
+            for t in data.get("RelatedTopics", [])[:max_results]
+            if isinstance(t, dict) and t.get("FirstURL")
+        ]
+        return {"results": results}
+    except httpx.TimeoutException:
+        return {"error": "TimeoutError", "message": "Search timed out", "retryable": True}
+    except httpx.HTTPStatusError as e:
+        return {"error": "HTTPError", "message": str(e),
+                "retryable": e.response.status_code >= 500}
+
+def read_file(path: str) -> dict:
+    resolved = os.path.realpath(os.path.join(WORKSPACE, path))
+    if not resolved.startswith(WORKSPACE + os.sep) and resolved != WORKSPACE:
+        return {"error": "PathError", "message": "Path outside workspace", "retryable": False}
+    try:
+        with open(resolved, "r", encoding="utf-8") as f:
+            return {"content": f.read(20_000)}
+    except FileNotFoundError:
+        return {"error": "NotFound", "message": f"No such file: {path}", "retryable": False}
+    except OSError as e:
+        return {"error": "OSError", "message": str(e), "retryable": False}
+
+def run_code(code: str, timeout: int = 10) -> dict:
+    timeout = min(timeout, 10)
+    try:
+        result = subprocess.run(
+            ["python", "-c", code],
+            cwd=WORKSPACE, capture_output=True, text=True, timeout=timeout,
+        )
+        return {"stdout": result.stdout[-5000:], "stderr": result.stderr[-5000:],
+                "returncode": result.returncode}
+    except subprocess.TimeoutExpired:
+        return {"error": "TimeoutError",
+                "message": f"Script exceeded {timeout}s", "retryable": False}
+```
+
+Argument validation in the agent loop (the `# TODO: add argument validation` line):
+
+```python
+        for call in msg.tool_calls:
+            name = call.function.name
+            try:
+                args = json.loads(call.function.arguments)
+            except json.JSONDecodeError:
+                result = {"error": "BadArguments", "message": "Arguments were not valid JSON"}
+            else:
+                if name not in TOOL_MAP:
+                    result = {"error": "UnknownTool", "message": f"No such tool: {name}"}
+                else:
+                    schema = next(t for t in TOOLS if t["function"]["name"] == name)
+                    try:
+                        jsonschema.validate(args, schema["function"]["parameters"])
+                        result = TOOL_MAP[name](**args)
+                    except jsonschema.ValidationError as e:
+                        result = {"error": "SchemaError", "message": e.message}
+
+            messages.append({
+                "role": "tool",
+                "tool_call_id": call.id,
+                "content": json.dumps(result)
+            })
+```
+
+#### Why this passes the constraints
+
+- **Path traversal:** `os.path.realpath` resolves `..` sequences and symlinks *before* the prefix check, so `../../etc/passwd` resolves outside `WORKSPACE` and is rejected. The string-only check the rubric warns about would miss symlinks.
+- **Timeout:** `min(timeout, 10)` enforces the cap even if the model requests more; `TimeoutExpired` becomes a structured error, marked `retryable: False` because retrying an infinite loop wastes 10 more seconds.
+- **No unhandled exceptions:** every failure path — bad JSON args, unknown tool, schema violation, tool error — flows back to the model as a `tool` message, so the agent can recover or report instead of crashing.
+- **Output truncation:** `stdout`/`stderr`/file content are truncated so one chatty script can't flood the context window.
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
   criteria={[

@@ -197,6 +197,65 @@ Submit the branch or patch with:
 - `codex-lab-notes.md`
 - Any `AGENTS.md` update
 
+<Solution label="Show a worked example session">
+
+Every run of this lab is different — this shows one complete session at the quality the rubric calls "Exceeds", so you can compare the *artifacts*, not the steps.
+
+#### The filled-in codex-lab-notes.md
+
+```md
+# Codex lab notes
+
+## Chosen task
+Add input validation to the CLI's `--port` flag: non-numeric and
+out-of-range values currently crash with a TypeError three calls deep.
+
+## Why this is small enough
+One function (cli.py:parse_args), one new test file, ~25 changed lines.
+Candidate 2 (renaming the config module) touched 14 files — rejected.
+
+## Files in scope
+src/cli.py, tests/test_cli.py
+
+## Non-goals
+No argparse → click migration (Codex proposed it; declined — refactor,
+not improvement). No validation of other flags.
+
+## Verification command
+python -m pytest tests/test_cli.py -q
+
+## Prompts used
+[the three prompts from steps 1, 2, 4, pasted verbatim]
+
+## Final review notes
+Review pass found 1 finding: my error message leaked the raw input
+unescaped into a f-string destined for the shell — cosmetic here, but
+fixed by repr(). Assessed as valid; fixed; tests rerun: 6 passed.
+
+## Reflection
+Codex's first diff also "improved" two adjacent help strings. The
+non-goals line stopped a refactor but not micro-edits — next time I'll
+add "do not modify lines outside the named function" for surgical tasks.
+```
+
+#### What the durable-learning decision looked like
+
+The session produced one correction worth keeping (Codex tried to add `click` as a dependency in step 1's candidate list), so `AGENTS.md` gained:
+
+```md
+- Do not propose new dependencies for CLI, formatting, or utility tasks;
+  the standard library versions are deliberate.
+```
+
+Note what *didn't* go in: "don't edit adjacent help strings" — that correction was task-specific (sometimes you want adjacent cleanups), so it stayed in the notes as a prompting lesson instead. That's the judgment the last rubric criterion is testing: durable rules are about the *repo's* invariants, not about one session's preferences.
+
+#### The two most common ways this lab goes sideways
+
+1. **The diff grows during the repair loop.** The verification fails, and the "smallest fix" touches a second module, which pulls in a third. The fix is in the repair prompt's last line — "if the same error appears twice, stop and explain" — actually stopping. A blocked lab with a clear explanation scores better on Verification than a green check earned by scope creep.
+2. **The review pass is asked to "check the code" instead of to block.** Phrasing matters: "review as if blocking a PR, findings first" produces findings; "does this look good?" produces agreement. If your review pass found nothing and cleared nothing explicitly, rerun it with the adversarial phrasing before submitting.
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 3 (Meets) or above to pass."
   criteria={[

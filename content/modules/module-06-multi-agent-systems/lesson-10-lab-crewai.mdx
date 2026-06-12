@@ -270,4 +270,48 @@ result_sequential = crew_sequential.kickoff(inputs={"question": QUESTION})
 
 **4. Add long-term memory.** Set `memory=True` on the crew. Run the pipeline twice with slightly different questions (e.g., first ask about compression only, then about both). Does the second run benefit from the first? What does CrewAI's memory store contain?
 
+<Solution>
+
+#### Exercise 1 — process comparison
+
+Run both and record `result.token_usage.total_tokens` plus your own 1–5 quality score on the synthesis. Typical pattern: `sequential` is the cheapest (no manager calls) and `hierarchical` runs **1.5–2.5× more tokens** on this pipeline, almost all of it manager overhead — the orchestrator re-reads task outputs to decide delegation and acceptance. Where hierarchical earns the cost: when an output genuinely fails (a specialist returns thin findings or drifts out of scope), the manager rejects it against `expected_output` and re-delegates — sequential just passes the weak output downstream. So the honest answer to "when does the manager add value": when output quality is *variable* and the `expected_output` contracts are specific enough to reject against. On a question both specialists handle cleanly first try, hierarchical is pure overhead and the two syntheses are near-identical.
+
+#### Exercise 2 — human feedback gate
+
+```python
+review_task = Task(
+    description=(
+        "Present the critic's verdict and both specialist outputs to the human "
+        "reviewer for approval before synthesis. Summarise the verdict in 3 lines."
+    ),
+    agent=critic,
+    expected_output="Human approval or rejection with reasons.",
+    context=[compression_task, inference_task, critic_task],
+    human_input=True,
+)
+# tasks=[compression_task, inference_task, critic_task, review_task, synthesis_task]
+```
+
+When you reject an output the critic passed, your rejection text enters the synthesis task's context (it flows through `review_task`'s output), and the synthesiser visibly hedges or reworks the areas you flagged — demonstrating the design point: in CrewAI the human gate is **just another task output**, not a state rollback. The specialist is not re-run unless the manager (hierarchical mode) decides to re-delegate; in sequential mode your rejection changes the synthesis's framing but cannot trigger a retry.
+
+#### Exercise 3 — `max_iter` circuit breaker
+
+```python
+compression_specialist = Agent(
+    role="Model Compression Specialist",
+    # ... unchanged ...
+    max_iter=1,
+)
+```
+
+Expected behaviour: the specialist gets exactly one reasoning/tool cycle; if the critic then fails its output, the manager attempts re-delegation, the specialist's iteration budget is exhausted, and CrewAI returns the best available output rather than looping — `result.raw` still exists, with the critic's failing verdict visible in the task outputs. The verification that matters: **the run terminates**. If you see repeated delegation attempts, also set `max_iter` on the *manager* — in hierarchical mode the retry loop lives there, and an unbounded manager with a bounded specialist still burns tokens asking for work the specialist can't redo.
+
+#### Exercise 4 — long-term memory
+
+With `memory=True`, CrewAI writes to a local store (by default under `~/.crewai/` or the `CREWAI_STORAGE_DIR`): short-term memory (recent task outputs, RAG-embedded), entity memory (extracted entities and facts), and long-term memory (task results keyed by task description, in SQLite). On the second run you should see the specialists reference findings from run one — most visibly, the run-two compression answer arrives faster and repeats run-one phrasing, because retrieved memories are injected into the agent's context before it starts.
+
+The caveat that makes this exercise worth doing: memory retrieval is similarity-based on the *task description*, so your "slightly different question" pulls in run-one findings whether or not they're still appropriate — stale benchmarks included. That's the memory-poisoning surface from Lesson 4 appearing in a real framework: nothing validates remembered facts on the way back in. Inspect the store (open the SQLite file) and you'll find the raw task outputs stored verbatim.
+
+</Solution>
+
 [Next: Lab 2 — Cross-System Agent Communication →](/modules/module-06-multi-agent-systems/lesson-11-lab-2)

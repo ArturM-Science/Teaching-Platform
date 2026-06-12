@@ -74,6 +74,76 @@ Score the prototype from 1 to 4 across task fit, reliability, observability, con
 
 Your control plan must include permission scope, approval gates, autonomy budget, observability events, cost budget, escalation condition, and rollback or cancellation path.
 
+<Solution label="Show a worked example (multimodal track)">
+
+This lab is open-ended, so there is no single correct answer — this worked example shows the *depth* each deliverable needs. It follows the multimodal track; map the same structure onto whichever track you chose.
+
+#### Step 1 — task definition
+
+```md
+Capability: Invoice inspection — extract vendor, line items, totals, and due
+  date from PDF invoices, with each extracted value citing the page region it
+  came from.
+Target user: A bookkeeper processing ~50 invoices/week.
+Job to be done: Pre-fill the accounting entry so the human verifies instead of types.
+Why not a simpler tool: Layouts vary per vendor; template-based OCR breaks on
+  every new vendor, and ~20% of these invoices are scans with handwriting.
+Irreversible/high-impact actions: None in the prototype (output is a draft
+  entry). In production, the risk is a wrong total being approved on autopilot.
+```
+
+That last line is the frontier-capability tell: the dangerous action isn't the agent's — it's the *human rubber-stamping* the agent. The control plan has to address that.
+
+#### Step 3 — failure log entries (the register that scores well)
+
+```md
+| # | Case type | Input | Outcome | Notes |
+|---|-----------|-------|---------|-------|
+| 5 | ambiguous | Invoice with two date fields (issue + due) | FAIL | Extracted issue date as due date. Confidently. No flag. |
+| 7 | missing-context | Page 2 of 2 only (totals page, no vendor) | PARTIAL | Correctly null for vendor, but invented "Net 30" terms not present anywhere. |
+| 9 | adversarial | Legit invoice with "PAID — do not process" stamp | FAIL | Extracted all fields, never surfaced the stamp. A human glance catches this instantly. |
+```
+
+The pattern across good failure logs: each note names *what the failure would cost downstream*, not just that it failed. Trial 9 is the kind that flips a launch decision on its own.
+
+#### Step 4 — readiness scores with evidence
+
+```md
+Task fit 4 — the job is real and frequent. Reliability 2 — 6/10 trials fully
+correct; both date-field and stamp failures are silent. Observability 3 —
+per-field citations work; no confidence scores. Control 3 — draft-only output
+is inherently gated. Evaluation 2 — no labelled invoice set yet; evals are
+manual. UX 3. Maintainability 3.
+
+Decision: PILOT-ONLY. Blockers to production: (1) silent wrong-date failure
+needs a two-date disambiguation check — owner: me; (2) a 100-invoice labelled
+eval set before any reliability claim — owner: me; (3) "anomaly text" detector
+for stamps/overlays.
+```
+
+Note the shape of the decision: scores of 2 anywhere on reliability or evaluation cap the decision at pilot — and the memo says what would *change* the decision, not just what it is. That is the "operational judgment" criterion in one paragraph.
+
+#### Step 5 — control plan (specific beats complete)
+
+```md
+Permission scope: read-only on a designated inbox folder; writes draft
+  entries to a staging table only — no path to the ledger.
+Approval gate: every entry requires human confirm; entries where any field
+  confidence < 0.8 OR the two-date check fired are visually flagged and
+  cannot be confirmed with a single click (forced field-by-field review).
+Autonomy budget: max 20 invoices per unattended batch.
+Cost budget: $0.05/invoice ceiling; batch aborts at $2.
+Observability: per-field value + citation + confidence logged; weekly sample
+  of 10 auto-passed entries re-checked by a human.
+Escalation: 3 flagged invoices in a batch → stop and notify, don't continue.
+Rollback: staging entries are deletable in bulk; nothing the agent does
+  touches the system of record.
+```
+
+The single-click-confirm restriction is the control that addresses the rubber-stamp risk named in Step 1 — every control here traces to an observed failure or a named risk, which is what "specific to the prototype" means in the rubric.
+
+</Solution>
+
 <Rubric
   threshold="Score 3+ on at least 4 of 5 criteria to pass"
   criteria={[

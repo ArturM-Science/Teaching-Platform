@@ -264,6 +264,167 @@ assert "archived" in stats
 assert "total" in stats
 ```
 
+<Solution>
+
+#### Reference solution
+
+```python
+# memory.py — completed functions
+import hashlib
+
+def write_note(title: str, body: str, tags: list[str], links: list[str]) -> Path:
+    frontmatter = {
+        "date": date.today().isoformat(),
+        "tags": tags,
+        "importance": 0.5,
+        "access_count": 0,
+    }
+    related = "\n".join(f"- [[{_slug(l)}]]" for l in links)
+    content = f"---\n{yaml.safe_dump(frontmatter)}---\n\n{body}\n\n## Related\n{related}\n"
+    path = VAULT / f"{_slug(title)}.md"
+    path.write_text(content, encoding="utf-8")
+    log.info("memory write: %s", title)
+    return path
+
+def _parse(path: Path) -> Note | None:
+    raw = path.read_text(encoding="utf-8")
+    match = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.DOTALL)
+    if not match:
+        return None
+    meta = yaml.safe_load(match.group(1))
+    body = match.group(2).strip()
+    return Note(
+        title=path.stem, body=body,
+        tags=meta.get("tags", []),
+        links=re.findall(r"\[\[([^\]]+)\]\]", body),
+        importance=meta.get("importance", 0.5),
+        access_count=meta.get("access_count", 0),
+        date=str(meta.get("date", "")),
+    )
+
+def read_note(title: str) -> Note | None:
+    path = VAULT / f"{_slug(title)}.md"
+    if not path.exists():
+        return None
+    note = _parse(path)
+    if note:
+        # increment access_count in the frontmatter and write back
+        raw = path.read_text(encoding="utf-8")
+        new_count = note.access_count + 1
+        raw = re.sub(r"access_count: \d+", f"access_count: {new_count}", raw, count=1)
+        path.write_text(raw, encoding="utf-8")
+        note.access_count = new_count
+        log.info("memory read: %s (access %d)", title, new_count)
+    return note
+
+def list_notes() -> list[Note]:
+    notes = []
+    for path in VAULT.glob("*.md"):
+        note = _parse(path)
+        if note:
+            notes.append(note)
+    return notes
+
+def _file_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+def sync_embeddings():
+    collection = get_collection()
+    existing = {m["slug"]: m.get("hash") for m in
+                (collection.get(include=["metadatas"])["metadatas"] or [])}
+    seen = set()
+
+    for path in VAULT.glob("*.md"):
+        slug, h = path.stem, _file_hash(path)
+        seen.add(slug)
+        if existing.get(slug) != h:
+            note = _parse(path)
+            if note:
+                collection.upsert(
+                    ids=[slug],
+                    documents=[note.body],
+                    metadatas=[{"slug": slug, "hash": h, "title": note.title}],
+                )
+                log.info("index upsert: %s", slug)
+
+    stale = set(existing) - seen
+    if stale:
+        collection.delete(ids=list(stale))
+        log.info("index delete: %s", sorted(stale))
+
+def search_similar(query: str, k: int = 4) -> list[Note]:
+    collection = get_collection()
+    if collection.count() == 0:
+        return []
+    hits = collection.query(query_texts=[query], n_results=min(k, collection.count()))
+    notes = []
+    for slug in hits["ids"][0]:
+        note = read_note(slug)
+        if note:
+            notes.append(note)
+    return notes
+```
+
+(This version lets ChromaDB embed with its built-in model, which keeps the lab self-contained. To use `voyage-3` as the starter suggests, pass a Voyage `embedding_function` to `get_or_create_collection` — the sync logic is identical.)
+
+```python
+# consolidator.py — completed functions
+from memory import sync_embeddings
+
+def score_importance(note: Note) -> float:
+    try:
+        age_days = (date.today() - date.fromisoformat(note.date)).days
+    except ValueError:
+        age_days = 180
+    recency = max(0.0, 1.0 - age_days / 180)
+    access = min(note.access_count / 10, 1.0)
+    return 0.4 * recency + 0.6 * access
+
+def consolidate(importance_threshold: float = 0.2) -> dict:
+    notes = list_notes()
+    archived = 0
+    for note in notes:
+        if score_importance(note) < importance_threshold:
+            src = VAULT / f"{note.title}.md"
+            src.rename(ARCHIVE / src.name)
+            archived += 1
+            log.info("memory archive: %s", note.title)
+    sync_embeddings()
+    return {"archived": archived, "total": len(notes)}
+```
+
+```python
+# agent.py — completed Step 3
+import json
+
+    # Step 3: Write note back to vault
+    try:
+        parsed = json.loads(synthesis)
+        body = parsed["synthesis"]
+        tags = parsed.get("tags", [])
+        links = parsed.get("related", [])
+    except (json.JSONDecodeError, KeyError):
+        # model ignored the JSON contract — store raw text, no links extracted
+        body, tags, links = synthesis, [], []
+        log.warning("synthesis was not valid JSON; storing raw text")
+
+    if not links:
+        links = [n.title for n in memory_hits[:2]]  # link to retrieved notes as fallback
+
+    write_note(title=topic, body=body, tags=tags, links=links)
+    sync_embeddings()
+    return body
+```
+
+#### Design notes
+
+- **Hash-based sync** is what separates "Meets" from "Exceeds" on the rubric: only changed files are re-embedded, and notes deleted from the vault are removed from the collection, so the index never serves ghosts.
+- **The backlink fallback** (linking to the retrieved memory notes when the model returns no `related` list) guarantees the hard constraint that every note has at least one `[[backlink]]` even on a bad model day.
+- **`score_importance` weights access over recency** (0.6 vs 0.4) per the starter's spec — a note read often stays alive even when old, which is the behaviour you want from memory.
+- **The README tradeoff in one line:** the vault is the human-auditable source of truth (you can read, edit, and version it); ChromaDB is a disposable retrieval index that can be rebuilt from the vault at any time. Lose the vault and you lose the memory; lose the index and you lose nothing but a rebuild.
+
+</Solution>
+
 <Rubric
   threshold="All criteria must score 2 (Approaching) or above. A score of 1 (Below) on any criterion requires re-submission."
   criteria={[
