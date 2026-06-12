@@ -32,6 +32,12 @@ const modules = [
   { number: '12', slug: 'module-12-capstone', title: 'Capstone', part: 'Part 5 - Frontiers & Capstone', status: 'ready', lab: 'Launch packet' },
   { number: '13', slug: 'module-13-openai-codex', title: 'OpenAI Codex: Agentic Software Engineering', part: 'Part 6 - Practitioner Tools', status: 'ready', lab: 'Codex repo change' },
   { number: '14', slug: 'module-14-claude-code', title: 'Claude Code: Operating Agentic Coding Workflows', part: 'Part 6 - Practitioner Tools', status: 'ready', lab: 'Safe coding workflow' },
+  { number: '15', slug: 'module-15-anthropic-sdk', title: 'Anthropic Python SDK', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'Production research assistant' },
+  { number: '16', slug: 'module-16-langgraph', title: 'LangGraph', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'State graph pipeline' },
+  { number: '17', slug: 'module-17-google-adk', title: 'Google ADK', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'Hierarchical research system' },
+  { number: '18', slug: 'module-18-openai-agents-sdk', title: 'OpenAI Agents SDK', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'Triage + specialist system' },
+  { number: '19', slug: 'module-19-autogen-ag2', title: 'AutoGen / AG2', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'Code review with nested chats' },
+  { number: '20', slug: 'module-20-crewai', title: 'CrewAI', part: 'Part 7 - Framework Electives', status: 'ready', lab: 'Content production pipeline' },
 ]
 
 const parts = [...new Set(modules.map(m => m.part))]
