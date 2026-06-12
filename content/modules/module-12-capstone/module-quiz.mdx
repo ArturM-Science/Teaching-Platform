@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Capstone"
+module: "module-12-capstone"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 12 Quiz
+
+The capstone is graded on your submission — this quiz checks the judgment behind it. Score 80% or higher to mark the module complete.
+
+<ModuleQuiz
+  moduleSlug="module-12-capstone"
+  passPercent={80}
+  next="Capstone module complete — congratulations!"
+  questions={[
+    {
+      question: "What makes a capstone project well-scoped?",
+      options: [
+        { label: "Maximum ambition — use every technique from the course" },
+        { label: "A real task, narrow enough to ship and evaluate end-to-end, with clear success criteria defined up front", correct: true },
+        { label: "Whatever takes exactly four weeks" },
+        { label: "Replicating a paper" }
+      ],
+      explanation: "Shipped-and-measured beats ambitious-and-unfinished. The discipline is cutting scope until end-to-end quality is achievable, then defining what 'works' means before building."
+    },
+    {
+      question: "In an architecture design review, the first question to answer is:",
+      options: [
+        { label: "Which vector database to use" },
+        { label: "Does this problem need an agent at all — and if so, what's the simplest control flow that could work?", correct: true },
+        { label: "How many subagents to spawn" },
+        { label: "What the UI colour scheme is" }
+      ],
+      explanation: "The course's recurring lesson: prefer the simplest thing — a single call, then a workflow, then an agent, then multi-agent — and justify each escalation."
+    },
+    {
+      question: "Why must the evaluation plan exist before you build, not after?",
+      options: [
+        { label: "It's required paperwork" },
+        { label: "Without predefined success criteria you'll judge by vibes and optimise toward whatever demos well", correct: true },
+        { label: "Evals are too slow to write later" },
+        { label: "The grader checks timestamps" }
+      ],
+      explanation: "Defining metrics and a test set first forces clarity about the task and prevents moving the goalposts to match whatever the system happens to do."
+    },
+    {
+      question: "'Production hardening' in the capstone primarily means:",
+      options: [
+        { label: "Buying a bigger server" },
+        { label: "Handling the failure paths: bad inputs, tool errors, injection attempts, cost caps, and graceful degradation", correct: true },
+        { label: "Minifying the JavaScript" },
+        { label: "Adding more features" }
+      ],
+      explanation: "The happy path is the demo; the failure paths are the product. Hardening = applying Modules 07–09: errors handled, costs bounded, security boundaries enforced."
+    },
+    {
+      question: "What belongs in a useful retrospective?",
+      options: [
+        { label: "Only what went well" },
+        { label: "What worked, what failed, what you'd change — including measured results vs. the original success criteria", correct: true },
+        { label: "A list of frameworks you used" },
+        { label: "Plans for features you didn't build" }
+      ],
+      explanation: "The retrospective closes the loop: compare outcomes to the criteria you set in the eval plan, and be specific about failures — that's where the learning is."
+    },
+    {
+      question: "Your capstone demo works 9 times out of 10. For launch readiness, the key question is:",
+      options: [
+        { label: "Can you make the demo video from the 9 good runs?" },
+        { label: "What happens on the 10th run — is the failure visible, contained, and recoverable, or silent and damaging?", correct: true },
+        { label: "Is 90% better than your classmates?" },
+        { label: "Can you hide the failure case in the README?" }
+      ],
+      explanation: "Launch readiness is about the failure mode, not the success rate alone. A visible, contained 10% failure can ship; a silent or destructive one can't."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Final Capstone Submission](/modules/module-12-capstone/lesson-07-lab)

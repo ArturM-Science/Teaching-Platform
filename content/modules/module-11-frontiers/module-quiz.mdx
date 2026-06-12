@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Frontiers"
+module: "module-11-frontiers"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 11 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-11-frontiers"
+  passPercent={80}
+  next="Module 11 complete — Module 12: Capstone is next."
+  questions={[
+    {
+      question: "How do computer-use agents differ from API/tool-calling agents?",
+      options: [
+        { label: "They run on faster hardware" },
+        { label: "They operate UIs built for humans — screenshots, clicks, typing — instead of structured API calls, trading reliability for reach", correct: true },
+        { label: "They don't use LLMs" },
+        { label: "They can only browse the web" }
+      ],
+      explanation: "Computer use reaches any software with a screen, but pixels and clicks are far more brittle and slower than structured tool calls. Prefer an API when one exists."
+    },
+    {
+      question: "What new input does multimodality add to the agent threat model?",
+      options: [
+        { label: "Nothing — images are inert data" },
+        { label: "Injection via non-text channels: instructions hidden in images, screenshots, or documents the model 'sees'", correct: true },
+        { label: "Only larger file sizes" },
+        { label: "GPU memory attacks" }
+      ],
+      explanation: "A screenshot containing 'ignore your instructions and…' is read by a vision model just like text. Every modality the model perceives is an injection surface."
+    },
+    {
+      question: "What problem do agent interoperability protocols (MCP, A2A) address?",
+      options: [
+        { label: "Making models smaller" },
+        { label: "Standard interfaces so tools and agents from different vendors can discover and talk to each other without N×M custom integrations", correct: true },
+        { label: "Replacing HTTP" },
+        { label: "Encrypting prompts" }
+      ],
+      explanation: "MCP standardises agent↔tool/data connections; A2A targets agent↔agent. Both replace bespoke per-pair integrations with a common contract."
+    },
+    {
+      question: "Why do agent error rates compound over long-horizon tasks?",
+      options: [
+        { label: "Models get tired" },
+        { label: "Per-step success multiplies: 99% per step is ~90% over 10 steps and ~37% over 100 — without checkpoints and recovery, long runs fail by default", correct: true },
+        { label: "The API throttles long sessions" },
+        { label: "They don't — errors average out" }
+      ],
+      explanation: "0.99^100 ≈ 0.37. Long-horizon autonomy demands checkpointing, self-verification, and recovery so single-step errors don't sink the run."
+    },
+    {
+      question: "In the Frontier Readiness Framework, when should you adopt a frontier capability into a product?",
+      options: [
+        { label: "As soon as a demo looks impressive" },
+        { label: "When your own evaluation on your task shows acceptable reliability AND failure costs are containable", correct: true },
+        { label: "Never — wait until it's no longer frontier" },
+        { label: "When a competitor ships it" }
+      ],
+      explanation: "Demos are best-case; your task is not their demo. Measure on your distribution, then weigh reliability against the blast radius of failures."
+    },
+    {
+      question: "The lab had you evaluate a frontier capability before relying on it. What was the essential method?",
+      options: [
+        { label: "Reading the vendor's announcement blog" },
+        { label: "Building a small task-specific eval set, running it repeatedly, and measuring the actual success rate and failure modes", correct: true },
+        { label: "Polling social media sentiment" },
+        { label: "Testing one example, once" }
+      ],
+      explanation: "Frontier claims need local verification: a representative eval, multiple trials (variance matters), and a written record of how it fails — Module 04 skills applied to new capabilities."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Evaluate a Frontier Agent Capability](/modules/module-11-frontiers/lesson-07-lab)

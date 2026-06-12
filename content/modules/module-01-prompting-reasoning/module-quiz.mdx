@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Prompting & Reasoning"
+module: "module-01-prompting-reasoning"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 01 Quiz
+
+Prove the prompting and reasoning patterns stuck. Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-01-prompting-reasoning"
+  passPercent={80}
+  next="Module 01 complete — Module 02: Tools & Function Calling is next."
+  questions={[
+    {
+      question: "In the Role–Task–Context–Format prompt anatomy, what is the Format section for?",
+      options: [
+        { label: "Telling the model which personality to adopt" },
+        { label: "Specifying exactly what shape the output must take, so downstream code can parse it", correct: true },
+        { label: "Listing the documents the model should read" },
+        { label: "Setting the temperature" }
+      ],
+      explanation: "Role sets who the model is, Task says what to do, Context supplies the material, and Format pins down the output shape — critical when code, not a human, consumes the answer."
+    },
+    {
+      question: "Why does 'think step by step' (chain-of-thought) change model behaviour?",
+      options: [
+        { label: "It activates a hidden reasoning module inside the model" },
+        { label: "The model generates intermediate tokens it can condition on, so later tokens benefit from the worked steps", correct: true },
+        { label: "It increases the context window" },
+        { label: "It forces temperature to 0" }
+      ],
+      explanation: "LLMs predict tokens conditioned on everything before. Writing out steps puts the intermediate reasoning into the context, improving the final answer — there's no separate reasoning engine."
+    },
+    {
+      question: "What distinguishes ReAct from plain chain-of-thought?",
+      options: [
+        { label: "ReAct interleaves reasoning steps with tool actions and observations, instead of reasoning in one pass", correct: true },
+        { label: "ReAct uses a bigger model" },
+        { label: "ReAct removes the need for prompts" },
+        { label: "ReAct only works with search engines" }
+      ],
+      explanation: "ReAct = Reason + Act: thought → action → observation → thought → … The model can react to real tool output mid-task instead of reasoning blind."
+    },
+    {
+      question: "What's the main benefit of structured outputs with Pydantic?",
+      options: [
+        { label: "The model writes better prose" },
+        { label: "Output is validated against a schema, so malformed responses fail loudly at the boundary instead of corrupting downstream steps", correct: true },
+        { label: "It makes responses shorter and cheaper" },
+        { label: "It eliminates hallucinations" }
+      ],
+      explanation: "Pydantic validates the model's JSON against a typed schema. Bad output raises a validation error you can catch and retry — far better than passing garbage downstream."
+    },
+    {
+      question: "In a self-correction loop, what stops the agent from looping forever on an unfixable error?",
+      options: [
+        { label: "The model eventually gives up on its own" },
+        { label: "A maximum-iterations cap (and/or convergence check) in your loop code", correct: true },
+        { label: "The API disconnects automatically" },
+        { label: "Self-correction loops can't get stuck" }
+      ],
+      explanation: "The loop and its stopping conditions live in your code. Without a MAX_ITERATIONS cap, an unfixable error means an infinite, expensive loop."
+    },
+    {
+      question: "In the lab's self-correcting code agent, what signal drives each repair iteration?",
+      options: [
+        { label: "A human reviewing each attempt" },
+        { label: "The error output from actually running the generated code, fed back into the prompt", correct: true },
+        { label: "The model's confidence score" },
+        { label: "A second model voting on the answer" }
+      ],
+      explanation: "Run the code, capture the traceback, feed it back: the verifiable external signal (execution) is what makes self-correction work — the model alone can't reliably grade itself."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Self-Correcting Code Agent](/modules/module-01-prompting-reasoning/lesson-06-lab)

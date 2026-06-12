@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Security & Safety"
+module: "module-08-security-safety"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 08 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-08-security-safety"
+  passPercent={80}
+  next="Module 08 complete — Module 09: Observability, Cost & Reliability is next."
+  questions={[
+    {
+      question: "What makes the LLM threat model fundamentally different from classic application security?",
+      options: [
+        { label: "LLM apps don't use databases" },
+        { label: "Instructions and data travel in the same channel — any text the model reads can act as instructions", correct: true },
+        { label: "Attackers need GPU access" },
+        { label: "TLS doesn't work for LLM traffic" }
+      ],
+      explanation: "SQL injection was solved by separating code from data. LLMs have no such separation: a retrieved document, email, or webpage can carry instructions the model may follow."
+    },
+    {
+      question: "Why is prompt injection called 'the unsolvable problem'?",
+      options: [
+        { label: "Nobody has tried to fix it" },
+        { label: "There's no reliable mechanism to make a model ignore instructions embedded in content it must read — defences reduce, not eliminate, the risk", correct: true },
+        { label: "It only affects open-source models" },
+        { label: "It's solved by lowering temperature" }
+      ],
+      explanation: "Delimiters, system-prompt warnings, and classifiers all help and all leak. You design assuming injection will sometimes succeed — and limit what success can do."
+    },
+    {
+      question: "OWASP's 'excessive agency' risk means:",
+      options: [
+        { label: "The agent runs too many iterations" },
+        { label: "The agent has more permissions, tools, or autonomy than its task needs, so a hijack or mistake does outsized damage", correct: true },
+        { label: "Too many agents in one system" },
+        { label: "The model is overconfident in its answers" }
+      ],
+      explanation: "An email-summarising agent that can also send emails turns one injected message into an exfiltration channel. Least privilege applies to agents exactly as to users."
+    },
+    {
+      question: "Given injection can't be fully prevented, the most load-bearing defence is:",
+      options: [
+        { label: "A stronger worded system prompt" },
+        { label: "Limiting blast radius — least-privilege tools, sandboxing, and human approval gates on irreversible actions", correct: true },
+        { label: "Blocking the word 'ignore' in inputs" },
+        { label: "Switching providers regularly" }
+      ],
+      explanation: "Assume compromise, contain damage. If a hijacked agent can only read what it needs and irreversible actions need approval, an injection becomes an incident, not a breach."
+    },
+    {
+      question: "Your agent must process documents from untrusted sources. The right architecture treats retrieved content as:",
+      options: [
+        { label: "Trusted, since your RAG pipeline fetched it" },
+        { label: "Untrusted input — quarantined from high-privilege actions, e.g. the agent that reads it can't also execute sensitive tools", correct: true },
+        { label: "System-prompt material" },
+        { label: "Safe after keyword filtering" }
+      ],
+      explanation: "Provenance determines trust. Splitting 'reads untrusted content' from 'wields dangerous tools' (dual-LLM / quarantine patterns) keeps an injected document from pulling the trigger."
+    },
+    {
+      question: "In the red-team lab, why attack your own agent before shipping?",
+      options: [
+        { label: "To generate marketing material" },
+        { label: "To discover which injections and abuses actually work on YOUR system, so hardening targets real holes instead of guesses", correct: true },
+        { label: "Because OWASP requires a certificate" },
+        { label: "To train the model on the attacks" }
+      ],
+      explanation: "Generic checklists miss system-specific holes. Red-teaming your own agent — injections in retrieved docs, tool-abuse chains, data exfiltration paths — produces the fix list that matters."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Red-team and Harden Your Agent](/modules/module-08-security-safety/lesson-06-lab)

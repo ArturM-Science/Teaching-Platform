@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — OpenAI Codex"
+module: "module-13-openai-codex"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 13 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-13-openai-codex"
+  passPercent={80}
+  next="Module 13 complete — Module 14: Claude Code is next."
+  questions={[
+    {
+      question: "What is Codex, in one sentence?",
+      options: [
+        { label: "A code autocomplete plugin" },
+        { label: "A software engineering agent that takes a task, works in a sandboxed environment with your repo, and produces a reviewable change", correct: true },
+        { label: "A new programming language" },
+        { label: "A model fine-tuned only on Python" }
+      ],
+      explanation: "Codex is an agent, not autocomplete: it reads the repo, runs commands and tests in a sandbox, and delivers diffs/PRs you review — closer to a junior engineer than a keyboard shortcut."
+    },
+    {
+      question: "What makes a good Codex task prompt?",
+      options: [
+        { label: "A one-liner like 'fix the bug'" },
+        { label: "A spec: the goal, relevant context/files, constraints, and a definition of done the agent can verify", correct: true },
+        { label: "The entire repo pasted in" },
+        { label: "Vague goals so it can be creative" }
+      ],
+      explanation: "Agents loop until 'done' — so 'done' must be checkable: tests pass, command output matches, behaviour reproduced. Vague specs produce confident wrong changes."
+    },
+    {
+      question: "Why does Codex run in a sandbox with explicit permissions?",
+      options: [
+        { label: "To make execution faster" },
+        { label: "Agent actions are fallible and model output is untrusted — the sandbox bounds what a bad command or hijacked run can damage", correct: true },
+        { label: "Licensing requirements" },
+        { label: "To hide the code from the user" }
+      ],
+      explanation: "Same principle as every module: least privilege + containment. Network and filesystem restrictions mean a mistake (or injection in repo content) has a bounded blast radius."
+    },
+    {
+      question: "What role do git checkpoints play in an agentic coding workflow?",
+      options: [
+        { label: "They make commits look professional" },
+        { label: "They're the undo mechanism — each checkpoint is a known-good state you can roll back to when the agent goes down a bad path", correct: true },
+        { label: "They speed up CI" },
+        { label: "They're required by Codex to run" }
+      ],
+      explanation: "Autonomy is safe when it's reversible. Frequent commits/checkpoints turn 'the agent ruined my branch' into 'git reset, try a better prompt'."
+    },
+    {
+      question: "What is AGENTS.md for?",
+      options: [
+        { label: "Marketing copy for your repo" },
+        { label: "Persistent repo-level instructions the agent reads every run — conventions, commands, and warnings it would otherwise have to rediscover", correct: true },
+        { label: "A list of all AI agents ever run on the repo" },
+        { label: "GitHub Actions configuration" }
+      ],
+      explanation: "AGENTS.md is standing context: build commands, code conventions, gotchas. Write it once and every future run starts already knowing the rules of your repo."
+    },
+    {
+      question: "When is a review/repair loop (agent reviews or re-attempts its own PR) most valuable?",
+      options: [
+        { label: "Never — one attempt should be final" },
+        { label: "When there's a verifiable signal (tests, lint, CI) the loop can use to detect and fix its own failures before a human looks", correct: true },
+        { label: "Only on weekends when engineers are away" },
+        { label: "When the diff is under 5 lines" }
+      ],
+      explanation: "Repair loops need a grading signal. CI failures, test output, and lint errors give the agent concrete feedback to iterate on — the same repair-loop pattern from Module 05."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Ship a Codex-Assisted Repo Improvement](/modules/module-13-openai-codex/lesson-06-lab)

@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Memory & Knowledge"
+module: "module-03-memory-knowledge"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 03 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-03-memory-knowledge"
+  passPercent={80}
+  next="Module 03 complete — Module 04: Evaluation is next."
+  questions={[
+    {
+      question: "Why is the context window not the same thing as memory?",
+      options: [
+        { label: "It is — they're synonyms" },
+        { label: "Context is wiped between sessions and limited in size; memory requires explicitly storing and retrieving information outside the model", correct: true },
+        { label: "Memory is faster than context" },
+        { label: "Context only holds images" }
+      ],
+      explanation: "The model remembers nothing between calls. Anything that should persist must be stored externally and re-inserted into context when relevant — that machinery is what we call memory."
+    },
+    {
+      question: "What do embeddings let you do?",
+      options: [
+        { label: "Compress text losslessly" },
+        { label: "Compare texts by meaning — semantically similar texts get nearby vectors, enabling similarity search", correct: true },
+        { label: "Encrypt documents" },
+        { label: "Make the model deterministic" }
+      ],
+      explanation: "An embedding maps text to a vector where distance ≈ semantic similarity. 'Refund my order' and 'I want my money back' land close together even with zero shared words."
+    },
+    {
+      question: "Put the core RAG pipeline in the right order:",
+      options: [
+        { label: "Generate → retrieve → embed → chunk" },
+        { label: "Chunk documents → embed chunks → retrieve relevant chunks for the query → generate with them in context", correct: true },
+        { label: "Embed the query → generate → chunk the answer" },
+        { label: "Retrieve everything → fine-tune the model" }
+      ],
+      explanation: "Index time: chunk + embed + store. Query time: embed the query, retrieve nearest chunks, stuff them into the prompt, generate. Retrieval quality caps answer quality."
+    },
+    {
+      question: "What makes RAG 'agentic'?",
+      options: [
+        { label: "Using a vector database with more dimensions" },
+        { label: "The agent decides when and what to retrieve, can reformulate queries, and can retrieve multiple times if results are poor", correct: true },
+        { label: "Retrieving from two databases at once" },
+        { label: "Caching previous answers" }
+      ],
+      explanation: "Classic RAG retrieves once, blindly, for every query. Agentic RAG puts retrieval behind tools: the model judges whether results answer the question and retries with better queries when they don't."
+    },
+    {
+      question: "Why does long-term memory need consolidation and forgetting, not just appending?",
+      options: [
+        { label: "Storage is expensive" },
+        { label: "An ever-growing store fills retrieval with stale and contradictory entries — old facts must be merged, updated, or dropped to stay useful", correct: true },
+        { label: "Vector databases have row limits" },
+        { label: "It doesn't — append-only is best practice" }
+      ],
+      explanation: "If 'user lives in London' and 'user lives in Lisbon' both sit in memory, retrieval becomes a coin flip. Consolidation resolves conflicts; forgetting prunes what no longer matters."
+    },
+    {
+      question: "In the lab's research agent, what was the key test that memory actually worked?",
+      options: [
+        { label: "The agent ran faster on the second query" },
+        { label: "A new session could use facts learned in a previous session, without them being in the prompt", correct: true },
+        { label: "The vector database file grew in size" },
+        { label: "The agent stopped calling tools" }
+      ],
+      explanation: "Persistence across sessions is the whole point: fresh process, empty context, and the agent still recalls prior findings via retrieval — that proves memory, not just context reuse."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Research Agent with Persistent Memory](/modules/module-03-memory-knowledge/lesson-06-lab)

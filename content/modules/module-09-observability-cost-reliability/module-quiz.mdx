@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Observability, Cost & Reliability"
+module: "module-09-observability-cost-reliability"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 09 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-09-observability-cost-reliability"
+  passPercent={80}
+  next="Module 09 complete — Module 10: Agent UX is next."
+  questions={[
+    {
+      question: "Why do agents need traces, not just logs?",
+      options: [
+        { label: "Logs are deprecated" },
+        { label: "An agent run is a tree of LLM calls and tool calls — a trace preserves the structure and causality that flat log lines lose", correct: true },
+        { label: "Traces are cheaper to store" },
+        { label: "Logs can't store JSON" }
+      ],
+      explanation: "When a run fails, the question is 'which step, fed what input, produced what output?' A trace (spans for each call, parent-child links) answers that; grepping logs doesn't."
+    },
+    {
+      question: "What's the minimum to capture for every LLM call when instrumenting an agent?",
+      options: [
+        { label: "Only the final answer" },
+        { label: "Inputs, outputs, model, token counts, latency, and errors — enough to replay and to bill", correct: true },
+        { label: "The provider's stock price" },
+        { label: "CPU temperature" }
+      ],
+      explanation: "Those fields let you debug (replay the exact input), monitor (latency/error rates), and control cost (tokens per call). Missing any one blinds a use case."
+    },
+    {
+      question: "Output tokens usually cost several times more than input tokens. A cheap high-leverage cost optimisation is therefore:",
+      options: [
+        { label: "Removing the system prompt" },
+        { label: "Capping max output tokens and prompting for concise output where verbosity adds nothing", correct: true },
+        { label: "Calling the API at night" },
+        { label: "Switching every call to the largest model" }
+      ],
+      explanation: "Output is the expensive direction. Bounding it (max_tokens + concise-output instructions), routing easy tasks to small models, and caching repeated prompts are the standard first wins."
+    },
+    {
+      question: "What does a circuit breaker add that retries alone don't?",
+      options: [
+        { label: "Faster individual retries" },
+        { label: "After repeated failures it stops calling the failing dependency for a cooldown, preventing pile-up and giving it room to recover", correct: true },
+        { label: "Automatic API key rotation" },
+        { label: "Lower latency on success" }
+      ],
+      explanation: "Retries handle transient blips; when a dependency is truly down, retries amplify the outage. The breaker fails fast during cooldown and probes before resuming."
+    },
+    {
+      question: "Which is a well-formed SLO for an agent service?",
+      options: [
+        { label: "The agent should be fast and good" },
+        { label: "99% of requests complete successfully within 30 seconds, measured over 30 days", correct: true },
+        { label: "Zero errors, ever" },
+        { label: "Latency below the competitor's" }
+      ],
+      explanation: "An SLO needs a metric, threshold, target percentage, and window. 'Zero errors' isn't an SLO, it's a wish — error budgets exist because 100% is the wrong target."
+    },
+    {
+      question: "In the lab's cost audit, what typically turns out to dominate an agent's spend?",
+      options: [
+        { label: "The final user-facing answer" },
+        { label: "Repeated context re-sent on every loop iteration and tool round-trip — the conversation grows and is re-billed each call", correct: true },
+        { label: "Embedding calls" },
+        { label: "HTTP overhead" }
+      ],
+      explanation: "Each iteration re-sends the whole growing history as input tokens. Long agent loops quietly multiply cost — context management is cost management."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Instrument, Cost-Audit & Harden Your Agent](/modules/module-09-observability-cost-reliability/lesson-06-lab)

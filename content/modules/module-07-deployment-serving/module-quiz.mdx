@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Deployment & Serving"
+module: "module-07-deployment-serving"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 07 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-07-deployment-serving"
+  passPercent={80}
+  next="Module 07 complete — Module 08: Security & Safety is next."
+  questions={[
+    {
+      question: "What's the biggest shift when moving an agent from a notebook to a service?",
+      options: [
+        { label: "The code must be rewritten in a compiled language" },
+        { label: "It must handle concurrent users, failures, restarts, and untrusted input — not just the happy path with you watching", correct: true },
+        { label: "Notebooks can't call APIs" },
+        { label: "Services can't use environment variables" }
+      ],
+      explanation: "In a notebook you are the error handler. A service needs explicit handling for concurrency, crashes, bad input, and secrets — the agent logic is the easy part."
+    },
+    {
+      question: "Why is streaming the default serving pattern for chat-style agents?",
+      options: [
+        { label: "It reduces total token cost" },
+        { label: "Agent responses take many seconds — streaming shows progress immediately instead of a long blank wait", correct: true },
+        { label: "It's the only pattern HTTP supports" },
+        { label: "It makes responses deterministic" }
+      ],
+      explanation: "Time-to-first-token beats time-to-full-response for perceived speed. For multi-second agent runs, sync = a frozen UI; streaming keeps the user engaged."
+    },
+    {
+      question: "Your agent service runs multiple replicas behind a load balancer. Where should conversation state live?",
+      options: [
+        { label: "In a Python dict in each replica" },
+        { label: "In external shared storage (database/cache) keyed by session, so any replica can serve any request", correct: true },
+        { label: "In the load balancer" },
+        { label: "In the model's weights" }
+      ],
+      explanation: "In-process state breaks the moment a second replica exists or one restarts — requests land on a replica that's never seen the session. Externalise state; keep replicas stateless."
+    },
+    {
+      question: "The LLM provider starts returning 429 (rate limit) under load. The right pattern is:",
+      options: [
+        { label: "Retry immediately in a tight loop" },
+        { label: "Exponential backoff with jitter, plus a cap — and ideally a queue or circuit breaker upstream", correct: true },
+        { label: "Switch all traffic to temperature 0" },
+        { label: "Return a 500 to every user instantly" }
+      ],
+      explanation: "Immediate retries amplify the overload (thundering herd). Backoff + jitter spreads retries; a circuit breaker stops hammering a failing dependency."
+    },
+    {
+      question: "Why do prompts and model choices belong in config rather than hardcoded?",
+      options: [
+        { label: "Hardcoded strings are slower at runtime" },
+        { label: "You can change or roll back model/prompt behaviour without redeploying code — and run gradual rollouts", correct: true },
+        { label: "Python can't store long strings" },
+        { label: "Providers require it" }
+      ],
+      explanation: "Prompt and model changes are deployments of behaviour. Config (with versioning) lets you roll out gradually, A/B test, and roll back fast when quality drops."
+    },
+    {
+      question: "In the lab, why does the service health-check more than just 'process is running'?",
+      options: [
+        { label: "Kubernetes requires three checks" },
+        { label: "An agent service can be up but useless — e.g. bad API key or unreachable provider; readiness should reflect ability to serve real requests", correct: true },
+        { label: "Health checks reduce token usage" },
+        { label: "Port 8000 needs keep-alives" }
+      ],
+      explanation: "Liveness ≠ usefulness. A dependency check (can I reach the model provider?) catches the failure modes that actually take agent services down."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Deploy the Research Agent as a Production Service](/modules/module-07-deployment-serving/lesson-06-lab)

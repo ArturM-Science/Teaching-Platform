@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Workflow Patterns"
+module: "module-05-workflow-patterns"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 05 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-05-workflow-patterns"
+  passPercent={80}
+  next="Module 05 complete — Module 06: Multi-Agent Systems is next."
+  questions={[
+    {
+      question: "When should you upgrade a single prompt into a multi-step workflow?",
+      options: [
+        { label: "Always — workflows are strictly better" },
+        { label: "When one prompt is doing several distinct jobs and failing at some of them — splitting lets you test and fix each step independently", correct: true },
+        { label: "Whenever the prompt exceeds 100 words" },
+        { label: "Only when you switch model providers" }
+      ],
+      explanation: "Workflows add latency, cost, and failure points. The trigger is a prompt overloaded with distinct responsibilities — split when separation buys reliability you can measure."
+    },
+    {
+      question: "In a sequential chain, what's the most common failure mode at step boundaries?",
+      options: [
+        { label: "Steps running in the wrong order" },
+        { label: "Context loss — a step doesn't pass forward information a later step needs", correct: true },
+        { label: "Steps sharing too much memory" },
+        { label: "The API rejecting chained calls" }
+      ],
+      explanation: "Each step sees only what you explicitly pass it. Summarising too aggressively between steps silently drops details that a later step needed."
+    },
+    {
+      question: "What's the role of a classifier in a routing workflow?",
+      options: [
+        { label: "It generates the final answer" },
+        { label: "It assigns the input to one of a fixed set of categories, which determines the branch that handles it", correct: true },
+        { label: "It compresses the context window" },
+        { label: "It validates output schemas" }
+      ],
+      explanation: "Classify first, then route to a branch specialised for that category. Constrain the classifier to a closed label set and handle the 'none of the above' case explicitly."
+    },
+    {
+      question: "A repair loop keeps producing the same failing output every iteration. What's the right design response?",
+      options: [
+        { label: "Increase MAX_ITERATIONS to 100" },
+        { label: "Detect non-convergence (same error twice) and exit early with a useful failure report", correct: true },
+        { label: "Lower the temperature each iteration" },
+        { label: "Remove the validator that keeps failing it" }
+      ],
+      explanation: "If the error isn't changing, more iterations just burn money. Detect the stall, stop, and surface what was tried — that's the RepairLoopSim's MAX_ITERATIONS scenario."
+    },
+    {
+      question: "When does fan-out/fan-in parallelism actually help?",
+      options: [
+        { label: "When each sub-task depends on the previous one's output" },
+        { label: "When sub-tasks are independent — they can run concurrently and an aggregation step merges the results", correct: true },
+        { label: "Whenever you want lower token costs" },
+        { label: "Only with multiple API keys" }
+      ],
+      explanation: "Parallelism needs independence. Dependent steps must stay sequential; independent ones (e.g. researching three sources) can fan out, then fan in to an aggregator."
+    },
+    {
+      question: "In the lab's research workflow, why validate structured output at every step boundary instead of only at the end?",
+      options: [
+        { label: "It's required by Pydantic's license" },
+        { label: "Failing fast at the boundary pinpoints which step broke; end-only validation tells you something failed but not where", correct: true },
+        { label: "It reduces total token usage" },
+        { label: "End-of-workflow validation is impossible" }
+      ],
+      explanation: "Boundaries are where garbage propagates. Per-step validation turns 'the workflow output is wrong' into 'step 2 emitted an invalid plan' — a debuggable failure."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Build a Multi-Step Research Workflow](/modules/module-05-workflow-patterns/lesson-06-lab)

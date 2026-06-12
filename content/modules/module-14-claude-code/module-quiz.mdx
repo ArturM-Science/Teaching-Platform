@@ -1,0 +1,92 @@
+---
+title: "Module Quiz — Claude Code"
+module: "module-14-claude-code"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 14 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-14-claude-code"
+  passPercent={80}
+  next="Module 14 complete — you've finished the course content!"
+  questions={[
+    {
+      question: "Claude Code is best described as:",
+      options: [
+        { label: "A model that's better at coding than Claude" },
+        { label: "A harness around the model — tools, permissions, context management, and a loop that lets the model work in your repo and terminal", correct: true },
+        { label: "A VS Code theme" },
+        { label: "A cloud IDE" }
+      ],
+      explanation: "The model provides reasoning; Claude Code provides the agent loop, file/shell tools, permission system, and context plumbing. Understanding the harness is how you steer it."
+    },
+    {
+      question: "When should you use plan mode?",
+      options: [
+        { label: "For every request, always" },
+        { label: "For larger or riskier changes — the agent explores and proposes a plan you approve before any edits happen", correct: true },
+        { label: "Only for documentation tasks" },
+        { label: "When you want faster output" }
+      ],
+      explanation: "Plan mode separates 'figure out what to do' from 'do it'. For multi-file or ambiguous work, reviewing the plan first is much cheaper than reviewing a wrong implementation."
+    },
+    {
+      question: "What is CLAUDE.md for?",
+      options: [
+        { label: "Release notes" },
+        { label: "Persistent project instructions loaded every session — conventions, commands, and rules the agent should always follow in this repo", correct: true },
+        { label: "A chat transcript" },
+        { label: "The model's training data" }
+      ],
+      explanation: "Like AGENTS.md for Codex: standing context that survives across sessions, so you don't re-explain the project's rules every conversation."
+    },
+    {
+      question: "The permission system's main design idea is:",
+      options: [
+        { label: "Trust the agent fully after the first approval" },
+        { label: "Actions are gated by configurable rules — safe operations flow, risky ones (writes, shell, network) require approval until you allowlist them", correct: true },
+        { label: "Block everything always" },
+        { label: "Permissions only apply to MCP tools" }
+      ],
+      explanation: "It's the human-in-the-loop pattern from Module 10 applied to coding: gate by consequence, expand autonomy deliberately as trust is earned, sandbox where possible."
+    },
+    {
+      question: "When do subagents (parallel work) actually pay off?",
+      options: [
+        { label: "Every task — more agents is always faster" },
+        { label: "Independent subtasks like broad searches or parallel investigations — not tightly coupled edits to the same files", correct: true },
+        { label: "Only on multi-GPU machines" },
+        { label: "When the main context is empty" }
+      ],
+      explanation: "Same rule as Module 05 fan-out: parallelism needs independence. Subagents shine for exploration and isolated workstreams; coupled changes belong in one context (or separate worktrees)."
+    },
+    {
+      question: "What are routines in Claude Code?",
+      options: [
+        { label: "Daily standup reminders for humans" },
+        { label: "Scheduled or triggered cloud automations — agent runs that execute on a cron schedule or event without you at the keyboard", correct: true },
+        { label: "Keyboard macros" },
+        { label: "A test framework" }
+      ],
+      explanation: "Routines move agent work from interactive to autonomous: nightly dependency checks, triggered triage, recurring reports — long-horizon autonomy with the safety lessons applied."
+    },
+    {
+      question: "In the lab you configured a 'safe autonomy' workflow. Which combination embodies it?",
+      options: [
+        { label: "Full permissions + no git + maximum speed" },
+        { label: "Scoped permissions, sandboxed execution, git checkpoints for reversibility, and verification (tests) the agent must pass", correct: true },
+        { label: "Read-only mode forever" },
+        { label: "Asking the agent to be careful in the prompt" }
+      ],
+      explanation: "Safe autonomy is structural, not rhetorical: bound what it can touch, make everything reversible, and require verifiable success criteria. Prompts asking for care are not a control."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Configure a Safe Claude Code Workflow](/modules/module-14-claude-code/lesson-07-lab)

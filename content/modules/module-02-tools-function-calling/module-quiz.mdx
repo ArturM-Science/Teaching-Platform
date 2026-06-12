@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Tools & Function Calling"
+module: "module-02-tools-function-calling"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 02 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-02-tools-function-calling"
+  passPercent={80}
+  next="Module 02 complete — Module 03: Memory & Knowledge is next."
+  questions={[
+    {
+      question: "Why do tool names and descriptions matter so much?",
+      options: [
+        { label: "They're checked by the API for uniqueness" },
+        { label: "They are the only information the model has when deciding which tool to call and how", correct: true },
+        { label: "They affect billing" },
+        { label: "They're displayed to end users" }
+      ],
+      explanation: "The model picks tools purely from names, descriptions, and schemas in its context. A vague description means wrong or missed tool calls — tool design is prompt design."
+    },
+    {
+      question: "In function calling, who actually executes the function?",
+      options: [
+        { label: "The model runs it on the provider's servers" },
+        { label: "Your code — the model only returns a structured request naming the function and arguments", correct: true },
+        { label: "The API gateway" },
+        { label: "Nobody — it's simulated" }
+      ],
+      explanation: "The model emits {name, arguments}; your code executes the function and sends the result back as a new message. The model never runs anything itself."
+    },
+    {
+      question: "What problem does the Model Context Protocol (MCP) solve?",
+      options: [
+        { label: "It makes models faster" },
+        { label: "It standardises how tools and data sources are exposed, so any MCP client can use any MCP server without custom integration", correct: true },
+        { label: "It compresses the context window" },
+        { label: "It replaces function calling entirely" }
+      ],
+      explanation: "MCP is a standard interface between agents and tool/data providers — write a server once, and every MCP-compatible client (Claude Code, IDEs, etc.) can use it."
+    },
+    {
+      question: "A tool call times out. What should a well-designed agent do?",
+      options: [
+        { label: "Crash, since the task can't continue" },
+        { label: "Return a structured error message to the model so it can retry, pick another tool, or tell the user", correct: true },
+        { label: "Silently return an empty string" },
+        { label: "Retry forever until it succeeds" }
+      ],
+      explanation: "Tool errors should flow back to the model as information, not crash the loop or vanish. The model can often recover — but only if it's told what failed."
+    },
+    {
+      question: "Why did the lab sandbox the code-runner tool?",
+      options: [
+        { label: "Sandboxes make code run faster" },
+        { label: "The code being run is model-generated and untrusted — a sandbox limits what damage it can do", correct: true },
+        { label: "Python requires it" },
+        { label: "To reduce token costs" }
+      ],
+      explanation: "Model output is untrusted input. Executing it with full filesystem/network access means one bad generation (or injection) can do real damage — sandbox by default."
+    },
+    {
+      question: "The model keeps calling a tool with arguments that fail schema validation. The best first fix is:",
+      options: [
+        { label: "Switch to a bigger model immediately" },
+        { label: "Improve the parameter descriptions and add examples to the tool schema", correct: true },
+        { label: "Remove validation so calls succeed" },
+        { label: "Lower the temperature to exactly 0.31" }
+      ],
+      explanation: "Most malformed calls trace back to ambiguous schemas. Clarify descriptions, constrain types/enums, add examples — removing validation just moves the failure downstream."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Multi-Tool Agent with Sandboxed Code Runner](/modules/module-02-tools-function-calling/lesson-05-lab)

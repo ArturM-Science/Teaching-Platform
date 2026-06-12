@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Multi-Agent Systems"
+module: "module-06-multi-agent-systems"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 06 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-06-multi-agent-systems"
+  passPercent={80}
+  next="Module 06 complete — Module 07: Deployment & Serving is next."
+  questions={[
+    {
+      question: "What actually makes a system multi-agent, rather than a workflow with several LLM calls?",
+      options: [
+        { label: "Using more than one model provider" },
+        { label: "Multiple agents with their own context, role, and decision-making, coordinating with each other — not just fixed steps in your code", correct: true },
+        { label: "Having more than three prompts" },
+        { label: "Running on more than one server" }
+      ],
+      explanation: "A workflow's control flow lives in your code; agents decide. Multi-agent means several deciding entities with separate contexts coordinating — which buys flexibility and new failure modes."
+    },
+    {
+      question: "In an orchestrator/subagent architecture, what is the orchestrator's job?",
+      options: [
+        { label: "To do all the work itself, with subagents as backups" },
+        { label: "To decompose the task, delegate to subagents, and integrate their results — usually without doing domain work itself", correct: true },
+        { label: "To store the vector database" },
+        { label: "To rate-limit the API" }
+      ],
+      explanation: "The orchestrator plans, delegates, and merges. If it fails, the whole system fails — which is why its prompt and output contract deserve the most care."
+    },
+    {
+      question: "Why add a critic agent instead of letting each agent check its own work?",
+      options: [
+        { label: "Critics are cheaper to run" },
+        { label: "A separate context isn't anchored on the producer's reasoning, so it catches errors the producer is blind to", correct: true },
+        { label: "Self-checking is technically impossible" },
+        { label: "Critics can use tools and producers can't" }
+      ],
+      explanation: "A model reviewing its own output inherits its own assumptions. A critic with fresh context and an adversarial brief breaks that anchoring — same idea as human code review."
+    },
+    {
+      question: "What is memory poisoning in a multi-agent system?",
+      options: [
+        { label: "A vector database running out of disk" },
+        { label: "One agent writing wrong or malicious content into shared state, which other agents then trust and build on", correct: true },
+        { label: "Two agents using the same API key" },
+        { label: "Forgetting to clear the context between sessions" }
+      ],
+      explanation: "Shared memory is a trust boundary. One bad write propagates: downstream agents treat it as ground truth. Mitigations include provenance tracking and validating before writing."
+    },
+    {
+      question: "Compared to a single-agent solution, a hierarchical multi-agent system typically costs:",
+      options: [
+        { label: "About the same in tokens" },
+        { label: "Significantly more — coordination messages, repeated context, and orchestrator overhead multiply token usage", correct: true },
+        { label: "Less, because work is shared" },
+        { label: "Nothing — orchestration is free" }
+      ],
+      explanation: "Every delegation re-sends context, and the orchestrator burns tokens managing. The CrewAI lab measured exactly this overhead — multi-agent must earn its cost."
+    },
+    {
+      question: "In the cross-system lab, why put a strict Pydantic schema at the boundary between System A (LangGraph) and System B (CrewAI)?",
+      options: [
+        { label: "Both frameworks require Pydantic internally" },
+        { label: "The boundary is a trust edge — validating the payload means System B never ingests malformed or unexpected data from System A", correct: true },
+        { label: "It makes the systems run in parallel" },
+        { label: "Pydantic encrypts the data in transit" }
+      ],
+      explanation: "Different systems, different owners, different failure modes. A validated contract at the boundary means failures are caught at the edge, with a clear error, instead of corrupting System B's run."
+    }
+  ]}
+/>
+
+---
+
+[← Lab 2: Cross-System Agent Communication](/modules/module-06-multi-agent-systems/lesson-11-lab-2)

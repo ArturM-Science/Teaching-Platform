@@ -1,0 +1,82 @@
+---
+title: "Module Quiz — Agent UX"
+module: "module-10-agent-ux"
+lesson: 90
+slug: "module-quiz"
+---
+
+# Module 10 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-10-agent-ux"
+  passPercent={80}
+  next="Module 10 complete — Module 11: Frontiers is next."
+  questions={[
+    {
+      question: "Why is agent UX fundamentally different from classic app UX?",
+      options: [
+        { label: "Agents need bigger buttons" },
+        { label: "The system is probabilistic and takes autonomous multi-step actions — users must calibrate trust in something that can be confidently wrong", correct: true },
+        { label: "Agents only run on desktop" },
+        { label: "There's no difference" }
+      ],
+      explanation: "Classic UI: deterministic responses to clicks. Agent UI: variable-latency, fallible, autonomous behaviour. The design problem shifts to trust calibration, visibility, and recovery."
+    },
+    {
+      question: "What's the right level of transparency for most agent products?",
+      options: [
+        { label: "Raw chain-of-thought and full API payloads for everyone" },
+        { label: "Meaningful progress and key decisions surfaced ('searching X', 'found 3 sources'), with detail available on demand", correct: true },
+        { label: "Nothing — just the final answer" },
+        { label: "A spinner" }
+      ],
+      explanation: "Zero transparency destroys trust on the first error; raw traces overwhelm. Show intent and progress at human granularity, with drill-down for power users."
+    },
+    {
+      question: "Which actions should require human approval in a human-in-the-loop design?",
+      options: [
+        { label: "Every single tool call" },
+        { label: "Irreversible or high-stakes ones — sending external messages, spending money, deleting data — while safe actions proceed autonomously", correct: true },
+        { label: "None, once the agent passes evals" },
+        { label: "Only actions that take over 10 seconds" }
+      ],
+      explanation: "Gate by consequence, not by count. Approving everything trains users to click yes blindly; gating only irreversible actions keeps approvals meaningful."
+    },
+    {
+      question: "A user corrects the agent mid-task ('no, the OTHER London — Ontario'). A well-designed agent should:",
+      options: [
+        { label: "Restart the whole task from scratch" },
+        { label: "Incorporate the correction into its working context and adjust the remaining steps, confirming the change", correct: true },
+        { label: "Ignore input until the run finishes" },
+        { label: "Ask the user to file a ticket" }
+      ],
+      explanation: "Corrections are steering, not failures. The loop should accept feedback mid-run, update state, and visibly change course — that's what makes users feel in control."
+    },
+    {
+      question: "What does 'designing for failure' mean for agents?",
+      options: [
+        { label: "Hiding errors so users don't worry" },
+        { label: "Treating failure as a normal path: say what failed, what was tried, preserve partial work, and offer a next step", correct: true },
+        { label: "Preventing all failures through testing" },
+        { label: "Showing stack traces in the chat" }
+      ],
+      explanation: "Agents will fail. 'Something went wrong' that discards ten minutes of work is the trust-killer; a good failure state keeps partial results and a recovery path."
+    },
+    {
+      question: "In the lab's approval gate, why default to CANCEL when the approval times out?",
+      options: [
+        { label: "To save server memory" },
+        { label: "Fail-closed: for irreversible actions, no answer must mean no — silence shouldn't authorise consequences", correct: true },
+        { label: "Because SSE connections expire" },
+        { label: "To increase approval rates" }
+      ],
+      explanation: "If the user walks away, the safe default for an irreversible action is to not do it. Fail-open approval gates are just decoration."
+    }
+  ]}
+/>
+
+---
+
+[← Lab: Human-in-the-Loop Agent with Streaming UI](/modules/module-10-agent-ux/lesson-07-lab)
