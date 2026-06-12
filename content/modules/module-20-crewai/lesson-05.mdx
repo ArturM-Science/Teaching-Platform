@@ -1,0 +1,335 @@
+---
+title: "Production: Flows, Memory, Cost Optimisation, and When NOT to Use CrewAI"
+module: "module-20-crewai"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Flows, Memory, Cost Optimisation, and When NOT to Use CrewAI
+
+Individual crews get you to a working prototype quickly. But production systems need more: conditional routing between crews, memory that persists across runs, and cost controls that keep your API bill from compounding unexpectedly. This lesson covers all three — plus an honest assessment of where CrewAI's abstraction works against you.
+
+<LearningObjectives items={[
+  "Build a multi-crew pipeline with Flows using @start, @listen, and @router",
+  "Configure all three memory types: short-term, long-term, and entity memory",
+  "Apply four cost optimisation strategies with specific configuration targets",
+  "Name three scenarios where LangGraph or another framework is a better choice than CrewAI",
+]} />
+
+## Flows: connecting crews with conditional routing
+
+A single crew handles a linear or manager-orchestrated pipeline. A Flow connects multiple crews with conditional branching — think of it as the pipeline-of-pipelines.
+
+Flows were introduced in CrewAI 0.70 and are now the standard way to build multi-stage systems.
+
+### The decorator model
+
+Flows use three decorators:
+
+| Decorator | Role |
+|---|---|
+| `@start()` | Entry point — the first method called when `flow.kickoff()` is called |
+| `@listen(method)` | Runs after `method` completes — receives its return value as argument |
+| `@router(method)` | A branching `@listen` — returns a string key to route to the next `@listen` |
+
+### A complete content pipeline Flow
+
+```python
+from pathlib import Path
+from crewai.flow.flow import Flow, start, listen, router
+
+# Assume research_crew and writing_crew are already defined Crew objects
+
+class ContentPipeline(Flow):
+    @start()
+    def research_phase(self):
+        """Run the research crew."""
+        result = research_crew.kickoff(
+            inputs={"topic": self.state.get("topic", "AI")}
+        )
+        return result.raw
+
+    @listen(research_phase)
+    def writing_phase(self, research_output):
+        """Run the writing crew, passing the research output."""
+        result = writing_crew.kickoff(
+            inputs={"research": research_output}
+        )
+        return result.raw
+
+    @router(writing_phase)
+    def quality_gate(self, draft):
+        """Route based on draft word count."""
+        word_count = len(draft.split())
+        if word_count > 200:
+            return "publish"
+        return "revise"
+
+    @listen("publish")
+    def save_and_publish(self, content):
+        """Save the approved draft to disk."""
+        Path("output.md").write_text(content)
+        return "Published successfully."
+
+    @listen("revise")
+    def request_revision(self, short_draft):
+        """Log that the draft needs more work."""
+        print(f"Draft too short ({len(short_draft.split())} words). Needs revision.")
+        return "Revision requested."
+
+
+# Run the Flow
+flow = ContentPipeline()
+result = flow.kickoff(inputs={"topic": "LLM efficiency techniques"})
+print(result)
+```
+
+### How @router works
+
+`@router` is a `@listen` that returns a string key instead of directly producing output. The string it returns determines which `@listen("key")` branch fires next:
+
+```python
+@router(writing_phase)
+def quality_gate(self, draft):
+    word_count = len(draft.split())
+    return "publish" if word_count > 200 else "revise"
+
+@listen("publish")
+def save_and_publish(self, content): ...
+
+@listen("revise")
+def request_revision(self, short_draft): ...
+```
+
+If `quality_gate` returns `"publish"`, `save_and_publish` fires. If it returns `"revise"`, `request_revision` fires. Only one branch runs. If the returned key matches no `@listen`, the Flow ends at that step.
+
+### Flow state
+
+`self.state` is a dict available throughout the flow. Initialise it by passing `inputs` to `kickoff`:
+
+```python
+flow.kickoff(inputs={"topic": "LLM efficiency", "max_words": 500})
+```
+
+Any method can read from it:
+
+```python
+@start()
+def research_phase(self):
+    topic = self.state.get("topic", "AI")
+    max_words = self.state.get("max_words", 300)
+    ...
+```
+
+State is not automatically shared across multiple `kickoff` calls — each run starts fresh.
+
+<Callout type="tip">
+CrewAI Flows are the right tool when you need conditional branching between crews, quality gates that route to different next steps, or pipelines where the path depends on content. For conditional logic within a single crew (between individual tasks), use the manager agent's validation loop in hierarchical mode. Flows operate at a higher level — between crews, not within them.
+</Callout>
+
+## Memory
+
+CrewAI supports three memory types. All three are enabled with `memory=True` on the crew:
+
+```python
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    memory=True,
+    verbose=True,
+)
+```
+
+### Short-term memory
+
+Within a single run, agents can retrieve recent context via RAG over prior messages. This helps in long runs where the LLM context window would otherwise truncate important early context. Short-term memory is built in — no extra configuration needed when `memory=True`.
+
+### Long-term memory
+
+Persists across multiple `kickoff()` calls. By default, CrewAI stores it in a local SQLite database. Agents can recall relevant information from past runs when working on similar tasks.
+
+```python
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    memory=True,      # enables all three types including long-term
+    verbose=True,
+)
+```
+
+The SQLite file is created in the working directory. To reset long-term memory, delete the file or set `memory=False` temporarily.
+
+### Entity memory
+
+Extracts and stores named entities (people, organisations, concepts, locations) from agent interactions. When the same entity appears in a later task, the agent receives the stored context about it automatically.
+
+```python
+# Entity memory is enabled automatically with memory=True
+# No extra configuration needed
+crew = Crew(..., memory=True)
+```
+
+Entity memory is most valuable in long-running research pipelines where agents repeatedly encounter the same organisations, researchers, or concepts across multiple runs.
+
+### Configuring the embedder
+
+By default, CrewAI uses OpenAI embeddings for memory. Override this for cost or privacy:
+
+```python
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    memory=True,
+    embedder={
+        "provider": "openai",
+        "config": {"model": "text-embedding-3-small"},  # cheaper than ada-002
+    },
+)
+```
+
+For a fully local setup:
+
+```python
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    memory=True,
+    embedder={
+        "provider": "ollama",
+        "config": {"model": "nomic-embed-text"},
+    },
+)
+```
+
+## Cost optimisation
+
+### 1. Use cheap models for workers, expensive only for the manager
+
+The manager in hierarchical mode requires judgment — use a capable model. Workers doing straightforward tasks can use a cheaper model:
+
+```python
+from langchain_anthropic import ChatAnthropic
+
+worker_llm = ChatAnthropic(model="claude-haiku-4-5-20251001")   # cheapest
+manager_llm = ChatAnthropic(model="claude-sonnet-4-5-20251022") # more capable
+
+worker_agent = Agent(role="...", goal="...", backstory="...", llm=worker_llm)
+manager = Agent(role="Project Manager", goal="...", backstory="...", llm=manager_llm)
+
+crew = Crew(
+    agents=[worker_agent],
+    tasks=[task],
+    process=Process.hierarchical,
+    manager_agent=manager,
+)
+```
+
+This alone can reduce cost by 60–80% compared to using a large model for all agents.
+
+### 2. Tighten max_iter
+
+```python
+agent = Agent(..., max_iter=3)  # default is 5
+```
+
+Every iteration an agent makes costs tokens. If your agents have tools and tend to loop, lowering `max_iter` forces them to commit to an answer earlier. Pair this with clear, specific `expected_output` descriptions so agents don't need multiple iterations to format their response correctly.
+
+### 3. Prefer sequential with tight expected_output over hierarchical
+
+For well-defined pipelines where outputs are predictable:
+
+```python
+crew = Crew(
+    agents=agents,
+    tasks=tasks,
+    process=Process.sequential,   # no manager overhead
+    verbose=False,                # verbose=True adds latency and stdout cost
+)
+```
+
+A good `expected_output` description can replicate much of the quality control that hierarchical provides — at zero overhead. If you find yourself choosing hierarchical primarily because outputs are inconsistent, try tightening `expected_output` first.
+
+### 4. verbose=False in production
+
+```python
+crew = Crew(..., verbose=False)
+agent = Agent(..., verbose=False)
+```
+
+`verbose=True` is for development only. It adds stdout overhead and, in some deployment environments, can slow down execution. Always set `verbose=False` before deploying.
+
+## When NOT to use CrewAI
+
+CrewAI is the right tool for well-defined team structures with clear `expected_output` criteria. It becomes the wrong tool when your requirements push against its abstraction.
+
+### When you need checkpointing or resumability — use LangGraph
+
+CrewAI crews run to completion or fail entirely. There is no built-in way to checkpoint a partially-complete run and restart from where it left off. If your pipeline runs for 10 minutes and fails at step 8, you restart from the beginning.
+
+LangGraph has first-class checkpoint support via its `checkpointer` interface. For long-running or expensive pipelines where partial progress must be preserved, LangGraph is the right choice.
+
+### When you need auditable conversation flow — use AutoGen AG2
+
+CrewAI's execution model is opaque — the manager's decisions are logged but not structured as an auditable record you can replay. AutoGen's `DiGraphGroupChat` models every message as a node in a directed graph that you can inspect, replay, and audit.
+
+For compliance-sensitive systems where you need to reconstruct exactly what each agent said and decided, AutoGen's conversation-centric model is more appropriate.
+
+### When you need cloud-native deployment — use Google ADK
+
+CrewAI runs in-process. Deploying it at scale requires you to build your own infrastructure for task queuing, scaling, and monitoring. Google's Agent Development Kit (ADK) integrates natively with Google Cloud's orchestration and observability stack.
+
+### When your conditional branching is complex — use LangGraph
+
+CrewAI Flows handle simple routing (publish vs revise). For pipelines with many branches, loops that need to converge on conditions, or routing logic that depends on multiple variables, LangGraph's explicit graph model is cleaner and easier to test.
+
+### When token budget is very tight — reassess hierarchical
+
+If cost is a hard constraint, run a sequential crew first. Measure `usage_metrics`. Only switch to hierarchical if the quality improvement justifies the 30–60% overhead, and use cheap models for workers.
+
+<Callout type="tip">
+CrewAI is an excellent fast-prototyping tool. The pattern that works well in practice: build with CrewAI to validate your pipeline structure and task definitions, measure quality and cost, then migrate critical paths to LangGraph when you need fine-grained control, checkpointing, or complex routing. The two frameworks are complementary, not competing.
+</Callout>
+
+## Framework comparison at a glance
+
+| Requirement | CrewAI | LangGraph | AutoGen AG2 | Google ADK |
+|---|---|---|---|---|
+| Fastest to a working prototype | ✓ | | | |
+| Checkpointing / resumability | | ✓ | | ✓ |
+| Auditable conversation record | | | ✓ | |
+| Complex conditional branching | | ✓ | | |
+| Cloud-native deployment | | | | ✓ |
+| Built-in quality validation | ✓ | manual | manual | |
+| Minimal token overhead | ✓ (seq) | ✓ | depends | depends |
+
+<Quiz
+  question="In a CrewAI Flow, what does a method decorated with @router return, and how is it used?"
+  options={[
+    { text: "A string key that determines which @listen branch fires next — only the @listen decorated with that key string will run", correct: true, explanation: "Correct. @router is a branching @listen. Its return value is a string key. CrewAI looks for a @listen decorated with that exact key string and fires it. If no matching @listen exists, the Flow ends at that step." },
+    { text: "A boolean — True means continue, False means stop the Flow", correct: false, explanation: "@router does not return a boolean. It returns a string key that maps to a specific @listen branch. Multiple branches can be defined, each activated by a different key string." },
+    { text: "Another crew to run next — the Flow switches to that crew's kickoff", correct: false, explanation: "@router does not return a crew object. It returns a string key. You can call a crew inside the @listen branch that the key routes to, but the router itself returns only the key." },
+    { text: "The processed output to pass to all subsequent @listen methods at once", correct: false, explanation: "@router routes to exactly one @listen branch based on the returned key. It does not broadcast output to all listeners." },
+  ]}
+/>
+
+<Quiz
+  question="Name two scenarios where you should choose LangGraph over CrewAI."
+  options={[
+    { text: "When you need checkpointing/resumability for long-running pipelines, and when your routing logic is too complex for @router", correct: true, explanation: "Correct. LangGraph has first-class checkpoint support and an explicit graph model that handles complex conditional branching cleanly. CrewAI lacks built-in checkpointing and Flows are limited to simple string-key routing." },
+    { text: "When you want to avoid writing agent backstories, and when you need the cheapest possible token usage", correct: false, explanation: "Neither reason favors LangGraph over CrewAI. LangGraph requires you to define graph nodes (equivalent effort to backstories), and token usage depends on your implementation in both frameworks." },
+    { text: "When you need more than 5 agents in a crew, and when you want verbose logging", correct: false, explanation: "CrewAI supports any number of agents — there's no 5-agent limit. Verbose logging is available in both frameworks. Neither scenario favors LangGraph." },
+    { text: "When you're using Python 3.10 or earlier, and when you need to run on Windows", correct: false, explanation: "Both frameworks support Python 3.10+ and Windows. These are not valid reasons to prefer LangGraph." },
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-20-crewai"
+  items={[
+    "I can build a multi-crew Flow using @start, @listen, and @router decorators",
+    "I understand how self.state works in a Flow and how to initialise it via kickoff(inputs=...)",
+    "I know the difference between short-term, long-term, and entity memory",
+    "I can apply at least three cost optimisation strategies to a CrewAI crew",
+    "I can name three specific scenarios where LangGraph or another framework is a better fit than CrewAI",
+  ]}
+  next="/modules/module-20-crewai/lesson-06-lab"
+/>

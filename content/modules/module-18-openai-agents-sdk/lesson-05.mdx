@@ -1,0 +1,364 @@
+---
+title: "Production: Tracing, Streaming, Cost, and Model-Agnostic Setup"
+module: "module-18-openai-agents-sdk"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Tracing, Streaming, Cost, and Model-Agnostic Setup
+
+Getting an agent working locally is the easy part. Getting it to behave reliably in production — with visibility, cost controls, streaming responses, and the ability to swap models — requires knowing four more subsystems of the SDK. This lesson covers all of them.
+
+<LearningObjectives items={[
+  "Read a trace in the OpenAI dashboard and identify agent turns, tool calls, and handoffs",
+  "Pipe traces to a custom processor (Langfuse, Datadog, or your own)",
+  "Stream agent output token by token using Runner.run_streamed",
+  "Switch an agent to Anthropic or another provider via LiteLLM",
+  "Pass typed context to tools and guardrails with RunContextWrapper",
+  "Set RunConfig(max_turns=10) and explain why it matters in production",
+]} />
+
+## Tracing: built-in observability
+
+Every `Runner.run()` call is automatically traced when `OPENAI_API_KEY` is set. No configuration needed.
+
+Traces appear at **platform.openai.com/traces** within seconds of a run completing. Each trace contains:
+- One **trace** per `Runner.run()` call
+- One **span** per agent turn (the LLM call)
+- One **span** per tool execution
+- One **span** per handoff
+- Duration and token counts for each span
+
+```python
+import os
+os.environ["OPENAI_API_KEY"] = "sk-..."  # Tracing is automatic once this is set
+
+from agents import Agent, Runner
+agent = Agent(name="Demo", instructions="Help with questions.")
+result = Runner.run_sync(agent, "What is the capital of France?")
+# → Trace appears in platform.openai.com/traces
+```
+
+<Quiz
+  question="Where do traces appear by default when OPENAI_API_KEY is set?"
+  options={[
+    { text: "In a local file called agents.log in the current directory.", correct: false, explanation: "There is no local log file by default. Traces go to the OpenAI platform dashboard." },
+    { text: "At platform.openai.com/traces in the OpenAI dashboard.", correct: true, explanation: "Correct. Every Runner.run() call produces a trace visible in the OpenAI platform under the Traces section." },
+    { text: "Only in the terminal — you must configure a dashboard separately.", correct: false, explanation: "Traces are sent to the OpenAI platform automatically. Terminal output is not structured trace data." },
+  ]}
+/>
+
+## Disabling tracing
+
+For local development or when you want to avoid sending data to OpenAI:
+
+```python
+from agents import Runner, RunConfig
+
+result = await Runner.run(
+    agent,
+    "What is the capital of France?",
+    run_config=RunConfig(tracing_disabled=True),
+)
+```
+
+## Custom trace processors
+
+Route traces to your own observability stack (Langfuse, Datadog, Honeycomb, etc.):
+
+```python
+from agents.tracing import add_trace_processor, TracingProcessor, Trace, Span
+
+class LangfuseProcessor(TracingProcessor):
+    """Send traces to Langfuse for evaluation and cost tracking."""
+
+    def __init__(self, langfuse_client):
+        self.client = langfuse_client
+
+    def on_trace_start(self, trace: Trace) -> None:
+        self.client.trace(id=trace.trace_id, name=trace.name)
+
+    def on_span_start(self, span: Span) -> None:
+        pass
+
+    def on_span_end(self, span: Span) -> None:
+        self.client.span(
+            trace_id=span.trace_id,
+            name=span.span_data.type,
+            input=getattr(span.span_data, "input", None),
+            output=getattr(span.span_data, "output", None),
+        )
+
+    def on_trace_end(self, trace: Trace) -> None:
+        self.client.flush()
+
+# Register once at application startup
+# langfuse = Langfuse(...)
+# add_trace_processor(LangfuseProcessor(langfuse))
+```
+
+Multiple processors can be registered simultaneously — all receive the same events.
+
+## Streaming
+
+For web applications and chat interfaces, you want to display tokens as they arrive rather than waiting for the full response:
+
+```python
+from agents import Agent, Runner
+import asyncio
+
+agent = Agent(
+    name="Research Agent",
+    instructions="Research topics thoroughly and explain clearly.",
+)
+
+async def stream_response(query: str) -> None:
+    result = Runner.run_streamed(agent, query)
+
+    async for event in result.stream_events():
+        # Raw response events carry token deltas
+        if event.type == "raw_response_event":
+            if hasattr(event.data, "delta") and event.data.delta:
+                print(event.data.delta, end="", flush=True)
+
+    print()  # Newline after streaming completes
+
+asyncio.run(stream_response("Explain how transformer attention works"))
+```
+
+The `stream_events()` async generator yields several event types. The most useful for UI streaming is `raw_response_event` — it carries the raw delta from the LLM as tokens are generated.
+
+Other event types you may want to handle:
+
+```python
+async for event in result.stream_events():
+    if event.type == "run_item_stream_event":
+        # A complete item finished: message, tool call, tool result, or handoff
+        item = event.item
+        if item.type == "tool_call_output_item":
+            print(f"\n[Tool result: {item.output[:100]}...]")
+    elif event.type == "agent_updated_stream_event":
+        # The active agent changed (handoff occurred)
+        print(f"\n[Now talking to: {event.new_agent.name}]")
+    elif event.type == "raw_response_event":
+        if hasattr(event.data, "delta") and event.data.delta:
+            print(event.data.delta, end="", flush=True)
+```
+
+<Callout type="tip">
+In a FastAPI or Django application, pipe streaming events directly to a Server-Sent Events (SSE) endpoint. The client receives tokens in real time, and the server never buffers the full response. This is the standard pattern for LLM-powered chat UIs.
+</Callout>
+
+## Model-agnostic setup
+
+The SDK ships with first-class support for non-OpenAI models through LiteLLM:
+
+```bash
+pip install litellm
+```
+
+```python
+from agents import Agent, Runner
+from agents.extensions.models.litellm_model import LitellmModel
+import os
+
+# Anthropic
+os.environ["ANTHROPIC_API_KEY"] = "sk-ant-..."
+
+agent = Agent(
+    name="Research Agent",
+    instructions="Research topics and summarise findings.",
+    model=LitellmModel(model="anthropic/claude-haiku-4-5-20251001"),
+)
+
+result = Runner.run_sync(agent, "What are the main approaches to RAG?")
+print(result.final_output)
+```
+
+The model string follows LiteLLM's format: `provider/model-name`. Other examples:
+
+```python
+# Google Gemini
+LitellmModel(model="gemini/gemini-2.0-flash")
+
+# Cohere
+LitellmModel(model="cohere/command-r-plus")
+
+# Local model via Ollama
+LitellmModel(model="ollama/llama3")
+
+# Keep OpenAI for the default
+# (just pass model="gpt-4o-mini" as a string — no LitellmModel needed)
+```
+
+Everything else — tools, handoffs, guardrails, the Runner loop — works identically regardless of model.
+
+<Quiz
+  question="How do you switch an agent from OpenAI to Anthropic models?"
+  options={[
+    { text: "Change the import: from agents.anthropic import Agent", correct: false, explanation: "There is no agents.anthropic module. The same Agent class works with all providers." },
+    { text: "Set model=LitellmModel(model='anthropic/claude-haiku-4-5-20251001') in the Agent constructor.", correct: true, explanation: "Correct. Install litellm, set ANTHROPIC_API_KEY, and pass a LitellmModel instance as the model parameter. Everything else stays the same." },
+    { text: "Use a different Runner: AnthropicRunner.run(agent, input)", correct: false, explanation: "There is no AnthropicRunner. The same Runner works with all model providers." },
+  ]}
+/>
+
+## Typed context with RunContextWrapper
+
+Context lets you pass application state (user ID, session data, database connections) to every tool and guardrail without threading it through function arguments:
+
+```python
+from agents import Agent, Runner, function_tool, RunContextWrapper
+from dataclasses import dataclass
+import asyncio
+
+@dataclass
+class AppContext:
+    user_id: str
+    session_id: str
+    tier: str  # "free" | "pro" | "enterprise"
+
+@function_tool
+def get_user_quota(ctx: RunContextWrapper[AppContext]) -> str:
+    """Return the current user's API quota based on their plan tier."""
+    # ctx.context is typed as AppContext
+    tier_limits = {"free": 100, "pro": 10_000, "enterprise": 1_000_000}
+    limit = tier_limits.get(ctx.context.tier, 0)
+    return f"User {ctx.context.user_id} on {ctx.context.tier} plan: {limit:,} requests/month"
+
+@function_tool
+def log_action(ctx: RunContextWrapper[AppContext], action: str) -> str:
+    """Log an action for audit purposes."""
+    print(f"AUDIT: user={ctx.context.user_id} session={ctx.context.session_id} action={action}")
+    return "Logged."
+
+agent = Agent[AppContext](
+    name="Account Manager",
+    instructions="Help users manage their accounts. Always check quota before recommending upgrades.",
+    tools=[get_user_quota, log_action],
+)
+
+async def main():
+    ctx = AppContext(user_id="u_abc123", session_id="sess_xyz", tier="pro")
+    result = await Runner.run(agent, "What's my current API limit?", context=ctx)
+    print(result.final_output)
+
+asyncio.run(main())
+```
+
+The context is passed through `Runner.run(..., context=ctx)`. Every `@function_tool` and guardrail that declares `ctx: RunContextWrapper[AppContext]` as its first parameter receives it automatically.
+
+## Cost tracking
+
+The SDK does not have built-in cost tracking. Use `result.raw_responses` to get token counts from each LLM call:
+
+```python
+result = Runner.run_sync(agent, "Research quantum computing")
+
+total_input_tokens = 0
+total_output_tokens = 0
+
+for response in result.raw_responses:
+    if hasattr(response, "usage") and response.usage:
+        total_input_tokens += response.usage.input_tokens
+        total_output_tokens += response.usage.output_tokens
+
+print(f"Input tokens: {total_input_tokens}")
+print(f"Output tokens: {total_output_tokens}")
+# Multiply by your model's per-token rate for cost
+```
+
+For production cost tracking, use a custom trace processor (shown above) that logs token counts per run.
+
+## RunConfig: safety and control
+
+`RunConfig` lets you configure the run without changing the agent:
+
+```python
+from agents import Runner, RunConfig
+
+result = await Runner.run(
+    agent,
+    user_input,
+    run_config=RunConfig(
+        max_turns=10,           # Stop after 10 agent turns — prevents infinite loops
+        tracing_disabled=False, # Keep tracing on (default)
+        model_settings=None,    # Override model settings (temperature, etc.)
+    ),
+)
+```
+
+<Callout type="tip">
+Set `RunConfig(max_turns=10)` in every production deployment. The default has no limit. A runaway agent loop — caused by a tool that always returns an error the agent keeps retrying, or a circular handoff — will exhaust your token budget before you notice. Ten turns is generous for most use cases; reduce it if your agents should always converge faster.
+</Callout>
+
+## Putting it together: a production-ready agent setup
+
+```python
+from agents import Agent, Runner, function_tool, RunConfig, InputGuardrail, GuardrailFunctionOutput, RunContextWrapper
+from agents.extensions.models.litellm_model import LitellmModel
+from agents.exceptions import InputGuardrailTripwireTriggered
+from dataclasses import dataclass
+from pydantic import BaseModel
+import asyncio
+import re
+
+@dataclass
+class RequestContext:
+    user_id: str
+    environment: str  # "production" | "staging"
+
+class SupportResponse(BaseModel):
+    answer: str
+    confidence: float
+    escalate: bool
+
+async def pii_guardrail(ctx: RunContextWrapper, agent: Agent, input: str) -> GuardrailFunctionOutput:
+    has_pii = bool(re.search(r"\b\d{3}-\d{2}-\d{4}\b", input))
+    return GuardrailFunctionOutput(output_info={}, tripwire_triggered=has_pii)
+
+@function_tool
+def search_kb(ctx: RunContextWrapper[RequestContext], query: str) -> str:
+    """Search the knowledge base for answers to customer questions."""
+    env = ctx.context.environment
+    return f"[{env}] KB result for '{query}': relevant article found."
+
+agent = Agent[RequestContext](
+    name="Support",
+    instructions="Help customers. Use search_kb before answering. Be honest about uncertainty.",
+    model=LitellmModel(model="anthropic/claude-haiku-4-5-20251001"),
+    tools=[search_kb],
+    input_guardrails=[InputGuardrail(guardrail_function=pii_guardrail)],
+    output_type=SupportResponse,
+)
+
+async def handle_support_request(user_id: str, message: str) -> str:
+    ctx = RequestContext(user_id=user_id, environment="production")
+    try:
+        result = await Runner.run(
+            agent,
+            message,
+            context=ctx,
+            run_config=RunConfig(max_turns=8),
+        )
+        response = result.final_output  # SupportResponse instance
+        if response.escalate:
+            return f"{response.answer}\n\n[Escalated to human agent]"
+        return response.answer
+    except InputGuardrailTripwireTriggered:
+        return "Please remove personal information from your message and try again."
+
+asyncio.run(handle_support_request("u_123", "How do I reset my password?"))
+```
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I know where traces appear by default and how to disable them",
+    "I can register a custom trace processor to route traces to another tool",
+    "I can stream agent output token by token with Runner.run_streamed",
+    "I can switch an agent to Anthropic using LitellmModel",
+    "I can pass typed context through RunContextWrapper to tools and guardrails",
+    "I set RunConfig(max_turns=10) and understand why it matters in production",
+  ]}
+  next="/modules/module-18-openai-agents-sdk/lesson-06-lab"
+/>

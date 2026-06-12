@@ -1,0 +1,212 @@
+---
+title: "Mental Model: Agents, Handoffs, Guardrails, and the Runner"
+module: "module-18-openai-agents-sdk"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Mental Model: Agents, Handoffs, Guardrails, and the Runner
+
+The OpenAI Agents SDK gives you four primitives — Agent, Handoff, Guardrail, and Runner — and a loop that wires them together. Once you have a clear mental model of these four pieces, the rest of the SDK is just configuration.
+
+<LearningObjectives items={[
+  "Name the four core primitives and the role each plays",
+  "Trace the execution path of the Runner loop step by step",
+  "Explain what makes Handoffs different from tool calls",
+  "Compare the SDK's approach to LangGraph and CrewAI",
+  "Change an agent to use a non-OpenAI model in one line",
+]} />
+
+## The four primitives
+
+### 1. Agent
+
+An Agent is an LLM with a job description. You define it with three things: a name, a system prompt (instructions), and a list of tools or handoffs it can use.
+
+```python
+from agents import Agent
+
+agent = Agent(
+    name="Research Assistant",
+    instructions="You help users research topics. Be concise and cite sources.",
+    tools=[],      # function_tool-decorated functions
+    handoffs=[],   # other agents this agent can transfer to
+)
+```
+
+The agent itself does nothing until the Runner executes it. It is a declaration, not a running process.
+
+### 2. Runner
+
+The Runner is the execution engine. You hand it an agent and an input, and it runs the loop:
+
+1. Call the LLM with the current messages
+2. If the response contains a **tool call**, execute the tool and append the result to the messages, then go back to step 1
+3. If the response contains a **handoff**, switch to the target agent and go back to step 1 with that agent
+4. If the response is a plain text message (no tool call, no handoff), that is the final output — return it
+
+```python
+from agents import Runner
+
+# Synchronous (blocks until done)
+result = Runner.run_sync(agent, "What is quantum entanglement?")
+print(result.final_output)
+
+# Asynchronous (use inside async functions)
+result = await Runner.run(agent, "What is quantum entanglement?")
+print(result.final_output)
+```
+
+The Runner manages the loop for you. You never write `while True: call_llm()` — the SDK does it.
+
+### 3. Handoff
+
+A Handoff is a transfer of control from one agent to another. When an agent triggers a handoff, it stops executing. The second agent takes over the conversation from that point forward.
+
+```python
+from agents import Agent, handoff
+
+specialist = Agent(
+    name="Tax Specialist",
+    instructions="You are an expert in US tax law. Answer questions precisely.",
+)
+
+router = Agent(
+    name="Router",
+    instructions="Route tax questions to the Tax Specialist.",
+    handoffs=[handoff(specialist)],
+)
+```
+
+From the outside you call `Runner.run(router, user_message)`. The Runner starts with `router`, which decides to hand off, and then runs `specialist` to completion. The result you get back is the specialist's response.
+
+### 4. Guardrail
+
+A Guardrail is a validation function that runs alongside or after the agent. There are two kinds:
+
+- **Input guardrail**: runs in parallel with the first agent call. If it fails, the agent call is cancelled.
+- **Output guardrail**: runs after the agent produces a final response. If it fails, the run is aborted.
+
+```python
+from agents import InputGuardrail, GuardrailFunctionOutput, RunContextWrapper
+
+async def length_check(ctx: RunContextWrapper, agent: Agent, input: str) -> GuardrailFunctionOutput:
+    too_long = len(input) > 2000
+    return GuardrailFunctionOutput(
+        output_info={"length": len(input)},
+        tripwire_triggered=too_long,
+    )
+
+agent = Agent(
+    name="Assistant",
+    instructions="Help with questions.",
+    input_guardrails=[InputGuardrail(guardrail_function=length_check)],
+)
+```
+
+If `tripwire_triggered=True`, the SDK raises `InputGuardrailTripwireTriggered` and you can catch it to return a user-friendly message.
+
+<Callout type="insight">
+Handoffs are the key innovation in this SDK. In most frameworks — LangGraph, CrewAI, AutoGen — an orchestrator stays in control and delegates tasks to sub-agents, then collects their results. In the OpenAI Agents SDK, an agent can fully hand off to another agent: the first agent's job is completely done. There is no manager waiting for a return value. This makes it natural to build systems where the front-end agent has no domain knowledge at all — just routing logic.
+</Callout>
+
+## How the loop works end-to-end
+
+Here is the full execution flow for a system with a triage agent and two specialists:
+
+```
+User input → Runner
+  → Triage agent receives input
+  → Triage agent emits tool call: transfer_to_billing_agent
+  → Runner detects handoff → switches active agent to Billing agent
+  → Billing agent receives the same conversation history
+  → Billing agent calls lookup_invoice tool
+  → Runner executes tool → appends result to messages
+  → Billing agent produces final text response
+  → Runner returns result to caller
+```
+
+Each step in this flow — agent turn, tool execution, handoff — becomes a span in the built-in trace. You can watch the whole thing replay in the OpenAI dashboard.
+
+<Quiz
+  question="What happens when an agent triggers a handoff — does the first agent keep running?"
+  options={[
+    { text: "No. The first agent stops. The second agent takes over from that point.", correct: true, explanation: "Handoffs are a full transfer of control. The calling agent emits the handoff and its execution ends. The Runner then drives the target agent." },
+    { text: "Yes. The first agent continues in the background while the second agent runs.", correct: false, explanation: "This is how CrewAI's hierarchical delegation works, but not how OpenAI Agents SDK handoffs work. The first agent stops." },
+    { text: "Yes. The first agent waits for the second to finish and then receives the result.", correct: false, explanation: "Handoffs are not tool calls. There is no return value to the first agent. It simply transfers control and ends." },
+  ]}
+/>
+
+## Handoffs vs. tools
+
+The most common confusion for new SDK users: when to use a tool and when to use a handoff.
+
+| | Tool | Handoff |
+|---|---|---|
+| Who runs it | The same agent | A different agent |
+| Who sees the result | The calling agent | The second agent takes over |
+| When to use | Need data or side effects, then continue | Need domain expertise for the rest of the conversation |
+| Example | `lookup_invoice(id)` → agent formats the result | User has a billing question → Billing agent owns the rest |
+
+A tool gives the agent information and lets it continue. A handoff ends the agent's role.
+
+<Quiz
+  question="A user asks a general assistant to book a flight. The booking logic is complex — it needs to check availability, compare prices, and confirm. Should you implement this as a tool or a handoff to a Booking Agent?"
+  options={[
+    { text: "Tool — because the general assistant needs to confirm the booking to the user.", correct: false, explanation: "If the booking logic is complex enough to involve multiple steps and domain knowledge, a handoff makes sense. The Booking Agent can handle the entire sub-conversation." },
+    { text: "Handoff — because the booking agent should own the entire booking sub-conversation.", correct: true, explanation: "When the specialist needs to conduct a multi-turn sub-conversation (checking availability, presenting options, confirming), a handoff is cleaner. The Booking Agent takes over until the booking is complete." },
+    { text: "Neither — complex logic should be hardcoded into the general assistant's instructions.", correct: false, explanation: "Hardcoding domain logic into a single agent's instructions does not scale. Separate agents are easier to test, update, and reason about." },
+  ]}
+/>
+
+## Comparison with other frameworks
+
+Understanding where this SDK fits helps you choose it deliberately.
+
+**vs. LangGraph**: LangGraph requires you to define a state schema and a graph of nodes and edges. Flow is explicit — you decide what happens after each node. The OpenAI Agents SDK has no graph. Flow is controlled by the agents themselves (through handoffs) and the Runner. This is simpler to start with and less flexible for complex branching.
+
+**vs. CrewAI**: CrewAI's Process.hierarchical keeps the manager agent in the loop — it delegates tasks and receives results. Handoffs in the OpenAI Agents SDK are one-way: the first agent ends. This makes triage patterns very clean but makes it harder to aggregate results from multiple specialists.
+
+**vs. raw Anthropic SDK**: The raw SDK gives you full control over the message loop. The OpenAI Agents SDK manages the loop for you and adds handoffs and guardrails as first-class concepts. Use the raw SDK when you need maximum control; use the Agents SDK when you want a faster path to multi-agent systems.
+
+## Model agnosticism
+
+Despite the name, the OpenAI Agents SDK works with Anthropic, Google, and other providers through LiteLLM:
+
+```python
+from agents.extensions.models.litellm_model import LitellmModel
+
+agent = Agent(
+    name="Assistant",
+    instructions="Help with questions.",
+    model=LitellmModel(model="anthropic/claude-haiku-4-5-20251001"),
+)
+```
+
+The rest of the code — tools, handoffs, guardrails, Runner — works identically. The model string is the only change.
+
+<Callout type="tip">
+Install the SDK with: `pip install openai-agents`. For non-OpenAI models, also install: `pip install litellm`. The full import set for the concepts in this module is: `from agents import Agent, Runner, function_tool, handoff, InputGuardrail, OutputGuardrail, GuardrailFunctionOutput, RunContextWrapper`.
+</Callout>
+
+## Summary
+
+The four primitives and their relationships:
+
+- **Agent** = LLM + instructions + tools + handoffs (a declaration)
+- **Runner** = the loop that drives agents (tool calls → execute → continue; handoffs → switch agent; text → return)
+- **Handoff** = one-way transfer of control from one agent to another
+- **Guardrail** = validation that runs in parallel (input) or after (output) the agent
+
+The SDK's core insight is that agents should be able to fully hand off to specialists, rather than always routing through a central orchestrator. This leads to cleaner, more testable systems where each agent has a single responsibility.
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I can name the four core primitives and explain what each one does",
+    "I can trace the Runner loop through a tool call and a handoff",
+    "I understand the difference between a handoff and a tool call",
+    "I know how to switch an agent to a non-OpenAI model",
+  ]}
+  next="/modules/module-18-openai-agents-sdk/lesson-02"
+/>

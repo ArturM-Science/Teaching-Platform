@@ -1,0 +1,386 @@
+---
+title: "State and Memory: Sessions, Storage, and Persistence"
+module: "module-17-google-adk"
+lesson: 3
+slug: "lesson-03"
+---
+
+# State and Memory: Sessions, Storage, and Persistence
+
+Every agent needs memory — within a conversation and across conversations. ADK provides two distinct mechanisms for this, and understanding the difference between them prevents the most common bugs in production ADK systems.
+
+<LearningObjectives items={[
+  "Distinguish between short-term session state and long-term cross-session memory",
+  "Read and write session state from inside a tool using tool_context",
+  "Configure InMemorySessionService for development",
+  "Configure DatabaseSessionService with SQLite for local production",
+  "Configure DatabaseSessionService with Cloud SQL for multi-instance deployment",
+  "Choose a session ID strategy for cross-session continuity",
+]} />
+
+## Two memory scopes
+
+ADK separates memory into two orthogonal concerns:
+
+**Short-term (session state)**: memory that lives for one session. It is available to every agent and tool in the session, is updated after every tool call, and disappears when the session ends. This is where you store intermediate results, partial work, and data that flows between agents in a pipeline.
+
+**Long-term (cross-session memory)**: memory that persists across sessions. Managed by a `MemoryService`, it stores facts, summaries, and user preferences that should be available in future sessions. This is where you store things like "this user prefers metric units" or "previous research on topic X found these sources."
+
+Most ADK systems start with just short-term session state. Long-term memory is added when you need cross-session continuity.
+
+```
+Session state (short-term):
+  session.state = {
+      "research_results": [...],
+      "user_query": "...",
+      "draft_report": "...",
+  }
+  → Shared by all agents in this session
+  → Automatically checkpointed after each tool call
+  → Gone when session ends
+
+Memory service (long-term):
+  → User-level facts stored across sessions
+  → Queried at session start, injected into context
+  → Persists in a separate storage backend
+```
+
+## Reading and writing session state in tools
+
+Tools access session state via `tool_context`. This is an object ADK passes to your tool function as a special parameter — you declare it in your function signature and ADK injects it automatically.
+
+```python
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+
+@tool
+def store_research_results(results: list, topic: str, tool_context: ToolContext) -> dict:
+    """Store research results in session state for downstream agents.
+    
+    Args:
+        results: List of research result strings.
+        topic: The research topic these results are for.
+        tool_context: Injected by ADK — do not pass this manually.
+    
+    Returns:
+        A dict with 'stored' (bool) and 'count' (int).
+    """
+    # Write to session state
+    tool_context.state["research_results"] = results
+    tool_context.state["research_topic"] = topic
+    tool_context.state["result_count"] = len(results)
+    
+    return {"stored": True, "count": len(results)}
+
+
+@tool
+def get_research_results(tool_context: ToolContext) -> dict:
+    """Retrieve previously stored research results from session state.
+    
+    Args:
+        tool_context: Injected by ADK — do not pass this manually.
+    
+    Returns:
+        A dict with 'results' list and 'topic' string, or 'error' if none stored.
+    """
+    results = tool_context.state.get("research_results")
+    topic = tool_context.state.get("research_topic")
+    
+    if results is None:
+        return {"error": "No research results found in session state"}
+    
+    return {"results": results, "topic": topic, "count": len(results)}
+```
+
+<Callout type="insight">
+ADK automatically checkpoints session state after every tool call. You do not need to explicitly save — write to `tool_context.state` and the value is persisted (to whatever backend the session service uses) before the next tool call begins. This is the "every tool call creates an automatic checkpoint" guarantee that makes ADK safe for long-running pipelines.
+</Callout>
+
+State keys are plain strings. There is no schema enforcement — the session state is just a Python dict. By convention, use underscore-separated lowercase keys and document what each key contains in your agent's instruction or in a code comment.
+
+## InMemorySessionService: development only
+
+```python
+from google.adk.sessions import InMemorySessionService
+import asyncio
+
+session_service = InMemorySessionService()
+
+async def setup():
+    session = await session_service.create_session(
+        app_name="my_app",
+        user_id="user_123",
+    )
+    return session
+
+session = asyncio.run(setup())
+print(f"Session created: {session.id}")
+```
+
+`InMemorySessionService` is the right choice for:
+- Unit tests and integration tests
+- Local development and experimentation
+- Scripts that run once and exit
+
+It is the wrong choice for:
+- Any system that needs to survive a process restart
+- Multi-process deployments
+- Production systems where sessions must persist across deployments
+
+<Quiz
+  question="What happens to session state when you use InMemorySessionService and restart your Python process?"
+  options={[
+    { text: "The state is saved to a temporary file and reloaded on restart", correct: false, explanation: "InMemorySessionService stores everything in memory only. There is no file backing. All state is lost when the process exits." },
+    { text: "All session state is lost permanently", correct: true, explanation: "InMemorySessionService keeps everything in a Python dict in memory. When the process exits, the dict is garbage collected. There is no recovery. Use DatabaseSessionService for anything that needs to survive restarts." },
+    { text: "The state is cached in Redis and available after restart", correct: false, explanation: "InMemorySessionService has no external dependencies and no Redis integration. It is purely in-process memory." },
+  ]}
+/>
+
+## DatabaseSessionService: production persistence
+
+For production, ADK provides `DatabaseSessionService`, which persists sessions to a relational database. The underlying ORM handles schema creation automatically on first run.
+
+### SQLite for local production
+
+SQLite is file-based, requires no server, and works on any machine. It is the right choice for single-process production deployments and local testing of the persistence layer.
+
+```python
+from google.adk.sessions import DatabaseSessionService
+
+# SQLite — file created automatically if it doesn't exist
+session_service = DatabaseSessionService(
+    db_url="sqlite:///./sessions.db"
+)
+```
+
+The `db_url` format is a SQLAlchemy connection string. ADK uses SQLAlchemy under the hood, so any SQLAlchemy-compatible database works. The `sessions.db` file is created in the current directory on first use.
+
+### Cloud SQL for multi-instance deployment
+
+When you deploy to Vertex AI or run multiple instances, you need a shared database. Cloud SQL (Postgres) is the recommended choice.
+
+```python
+import os
+from google.adk.sessions import DatabaseSessionService
+
+# Cloud SQL — connection string from environment variable
+session_service = DatabaseSessionService(
+    db_url=os.environ["DATABASE_URL"]
+)
+
+# DATABASE_URL format for Postgres:
+# postgresql://user:password@host:5432/dbname
+# For Cloud SQL with the Cloud SQL connector:
+# postgresql+pg8000://user:password@/dbname?host=/cloudsql/project:region:instance
+```
+
+<Callout type="tip">
+Start with `InMemorySessionService` in dev. Switch to `DatabaseSessionService("sqlite:///sessions.db")` as soon as you want sessions to survive restarts. Only move to Cloud SQL when you need multi-instance deployment. The agent code does not change at any of these transitions — only the session service constructor changes.
+</Callout>
+
+### The agent code does not change
+
+This is a key ADK design principle: the agent, the tools, and the runner are completely decoupled from the session backend. You can swap session services without touching agent code.
+
+```python
+import os
+from google.adk.sessions import InMemorySessionService, DatabaseSessionService
+
+# Switch on environment
+ENV = os.environ.get("APP_ENV", "development")
+
+if ENV == "development":
+    session_service = InMemorySessionService()
+elif ENV == "local_production":
+    session_service = DatabaseSessionService(db_url="sqlite:///./sessions.db")
+else:
+    session_service = DatabaseSessionService(db_url=os.environ["DATABASE_URL"])
+
+# Everything downstream uses session_service — no changes needed
+runner = Runner(agent=my_agent, app_name="my_app", session_service=session_service)
+```
+
+<Quiz
+  question="How does a tool write a value to session state in ADK?"
+  options={[
+    { text: "By calling session_service.set_state(key, value) directly", correct: false, explanation: "Tools do not have direct access to the session service. They use tool_context, which ADK injects into the tool function at call time." },
+    { text: "By returning a special dict with a '__state__' key", correct: false, explanation: "ADK does not use a magic return key for state mutation. State is written via tool_context.state, which is a dict you can read and write directly." },
+    { text: "By writing to tool_context.state[key] inside the tool function", correct: true, explanation: "ADK injects a ToolContext object into tool functions that declare it as a parameter. The tool writes to tool_context.state dict, and ADK persists that state to the session backend after the tool call completes." },
+  ]}
+/>
+
+## Session ID strategy
+
+The session ID is the key used to look up a session across calls. For cross-session continuity (where a user's next conversation picks up where the previous one left off), use a stable, user-derived session ID.
+
+```python
+import hashlib
+
+def stable_session_id(user_id: str, app_name: str) -> str:
+    """Generate a stable session ID for a user in a given app.
+    
+    Using a hash of user_id + app_name gives a stable ID that
+    is the same every time the same user uses the same app.
+    """
+    combined = f"{app_name}:{user_id}"
+    return hashlib.sha256(combined.encode()).hexdigest()[:32]
+
+
+async def get_or_create_session(session_service, user_id: str, app_name: str):
+    """Get an existing session or create a new one."""
+    session_id = stable_session_id(user_id, app_name)
+    
+    # Try to get the existing session
+    session = await session_service.get_session(
+        app_name=app_name,
+        user_id=user_id,
+        session_id=session_id,
+    )
+    
+    if session is None:
+        # First time — create it
+        session = await session_service.create_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+    
+    return session
+```
+
+With `DatabaseSessionService` and a stable session ID, a user can close the app, come back tomorrow, and the session state (including tool results, intermediate data, and conversation history) is exactly as they left it.
+
+## Long-term memory with MemoryService
+
+For facts that should persist and be retrievable across multiple different sessions (not just the current one), ADK provides `MemoryService`. This is separate from session state — it is a semantic store you query with natural language.
+
+```python
+from google.adk.memory import InMemoryMemoryService
+
+memory_service = InMemoryMemoryService()
+
+agent = LlmAgent(
+    name="persistent_assistant",
+    model="gemini-2.0-flash",
+    tools=[my_tools],
+    instruction="You are a helpful assistant with persistent memory.",
+    memory_service=memory_service,  # Attach memory service to agent
+)
+```
+
+When a `MemoryService` is attached, the agent can store and retrieve facts across sessions. ADK automatically queries the memory service at the start of each session and injects relevant facts into the context.
+
+<Callout type="note">
+`InMemoryMemoryService` is also ephemeral — it is lost on restart, just like `InMemorySessionService`. For production long-term memory, use `VertexAiMemoryBankService` (Vertex AI managed) or implement a custom `MemoryService` backed by your preferred vector store. Long-term memory is an advanced topic — most systems get significant value from session state alone.
+</Callout>
+
+## Putting it together: persistence-aware agent
+
+```python
+import asyncio
+import os
+from google.adk.agents import LlmAgent
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+from google.adk.sessions import DatabaseSessionService
+from google.adk.runners import Runner
+from google.genai.types import Content, Part
+
+
+@tool
+def save_note(content: str, tag: str, tool_context: ToolContext) -> dict:
+    """Save a note to the session for later retrieval.
+    
+    Args:
+        content: The note content to save.
+        tag: A short tag to categorise the note.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        Confirmation dict with note_id.
+    """
+    notes = tool_context.state.get("notes", [])
+    note_id = len(notes) + 1
+    notes.append({"id": note_id, "content": content, "tag": tag})
+    tool_context.state["notes"] = notes
+    return {"saved": True, "note_id": note_id, "total_notes": len(notes)}
+
+
+@tool
+def list_notes(tag: str = "", tool_context: ToolContext = None) -> dict:
+    """List all saved notes, optionally filtered by tag.
+    
+    Args:
+        tag: Optional tag to filter by. Leave empty to list all notes.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'notes' list.
+    """
+    all_notes = tool_context.state.get("notes", [])
+    if tag:
+        filtered = [n for n in all_notes if n["tag"] == tag]
+    else:
+        filtered = all_notes
+    return {"notes": filtered, "count": len(filtered)}
+
+
+note_agent = LlmAgent(
+    name="note_keeper",
+    model="gemini-2.0-flash",
+    tools=[save_note, list_notes],
+    instruction=(
+        "You are a helpful note-taking assistant. "
+        "When the user wants to save something, use save_note. "
+        "When the user asks what they've saved, use list_notes. "
+        "Notes persist across sessions — remind users of this capability."
+    ),
+)
+
+
+async def main():
+    # SQLite-backed session service — notes survive restarts
+    session_service = DatabaseSessionService(db_url="sqlite:///./notes.db")
+    
+    session = await session_service.create_session(
+        app_name="note_app",
+        user_id="demo_user",
+    )
+
+    runner = Runner(
+        agent=note_agent,
+        app_name="note_app",
+        session_service=session_service,
+    )
+
+    async def chat(message: str):
+        content = Content(parts=[Part(text=message)])
+        async for event in runner.run_async(
+            user_id="demo_user",
+            session_id=session.id,
+            new_message=content,
+        ):
+            if event.is_final_response():
+                text = event.content.parts[0].text if event.content and event.content.parts else ""
+                print(f"Agent: {text}")
+
+    await chat("Save a note: 'Review ADK memory docs' tagged as 'todo'")
+    await chat("Save a note: 'Gemini 2.0 Flash is cheapest' tagged as 'research'")
+    await chat("What todo notes do I have?")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I understand the difference between short-term session state and long-term memory",
+    "I can write a tool that reads and writes tool_context.state",
+    "I know when to use InMemorySessionService vs DatabaseSessionService",
+    "I can configure DatabaseSessionService with SQLite and with a Postgres URL",
+    "I can implement a stable session ID strategy for cross-session continuity",
+  ]}
+  next="/modules/module-17-google-adk/lesson-04"
+/>

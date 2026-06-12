@@ -1,0 +1,343 @@
+---
+title: "Your First Agent: Tools, Structured Output, and the Run Loop"
+module: "module-18-openai-agents-sdk"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Your First Agent: Tools, Structured Output, and the Run Loop
+
+You can have a working agent in under 30 lines. This lesson walks through every part of that code — tools, the run loop, multi-turn conversations, and typed outputs — so you understand exactly what the SDK is doing for you.
+
+<LearningObjectives items={[
+  "Write a @function_tool with proper type annotations and docstring",
+  "Run an agent synchronously with Runner.run_sync and read final_output",
+  "Carry conversation history forward with result.to_input_list()",
+  "Define a Pydantic output schema and use output_type for structured responses",
+  "Explain what happens at each step of the Runner loop",
+]} />
+
+## Installing and importing
+
+```bash
+pip install openai-agents pydantic
+export OPENAI_API_KEY="sk-..."
+```
+
+The core imports you need for this lesson:
+
+```python
+from agents import Agent, Runner, function_tool
+from pydantic import BaseModel
+import asyncio
+```
+
+## The `@function_tool` decorator
+
+A tool is just a Python function decorated with `@function_tool`. The SDK reads the function's docstring to generate the description and the type annotations to generate the JSON schema. Both are required.
+
+```python
+from agents import function_tool
+
+@function_tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely.
+
+    Use this for any arithmetic the user needs — percentages, totals, conversions.
+    """
+    try:
+        # Restrict builtins to prevent arbitrary code execution
+        return str(eval(expression, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+When the agent decides to call this tool, the SDK:
+1. Extracts the arguments from the LLM's tool call JSON
+2. Calls `calculate(expression=...)` with those arguments
+3. Appends the return value to the conversation as a tool result message
+4. Calls the LLM again with the updated message list
+
+You never write that loop yourself. It is the Runner's job.
+
+<Callout type="warning">
+`@function_tool` requires type annotations on **every** parameter. If you omit one, the SDK raises a schema generation error at import time — not at runtime when you call the tool. This is a common stumbling block. Always annotate: `def my_tool(query: str, limit: int) -> str:`, not `def my_tool(query, limit):`.
+</Callout>
+
+## A complete working agent
+
+Here is a minimal but fully functional agent with one tool:
+
+```python
+from agents import Agent, Runner, function_tool
+import asyncio
+
+@function_tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely.
+
+    Use this for any arithmetic the user needs — percentages, totals, conversions.
+    """
+    try:
+        return str(eval(expression, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"Error: {e}"
+
+agent = Agent(
+    name="Math Tutor",
+    instructions=(
+        "You help students with math problems. "
+        "Use the calculate tool for any arithmetic — do not compute in your head. "
+        "Show your reasoning step by step."
+    ),
+    tools=[calculate],
+)
+
+result = Runner.run_sync(agent, "What is 15% of 847?")
+print(result.final_output)
+# → "15% of 847 is 127.05. Here's how: 847 × 0.15 = 127.05"
+```
+
+`Runner.run_sync` is a convenience wrapper around `asyncio.run(Runner.run(...))`. Use it in scripts and notebooks. Inside an async function, use `await Runner.run(agent, input)` directly.
+
+## What `result` contains
+
+After a run, `result` has several useful attributes:
+
+```python
+result = Runner.run_sync(agent, "What is 15% of 847?")
+
+result.final_output        # str — the agent's final text response
+result.to_input_list()     # list — the full message history, ready for the next turn
+result.raw_responses       # list — raw API response objects (useful for token counts)
+```
+
+`final_output` is always a string unless you set `output_type` (covered below).
+
+## Multi-turn conversations
+
+To continue a conversation across multiple calls, convert the result to an input list and append new messages:
+
+```python
+from agents import Agent, Runner, function_tool
+import asyncio
+
+@function_tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely."""
+    try:
+        return str(eval(expression, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"Error: {e}"
+
+agent = Agent(
+    name="Math Tutor",
+    instructions="Help with math. Use calculate for arithmetic.",
+    tools=[calculate],
+)
+
+# Turn 1
+result = Runner.run_sync(agent, "What is 15% of 847?")
+print("Turn 1:", result.final_output)
+
+# Turn 2 — carry history forward
+history = result.to_input_list()
+history.append({"role": "user", "content": "Now what is that amount doubled?"})
+result2 = Runner.run_sync(agent, history)
+print("Turn 2:", result2.final_output)
+```
+
+`to_input_list()` returns the full conversation — the original user message, all tool calls and results, and the agent's final response — formatted as the input format the Runner expects. Appending a new user message and passing the list back to the Runner continues the conversation naturally.
+
+<Quiz
+  question="What does result.to_input_list() return and why is it useful for multi-turn conversations?"
+  options={[
+    { text: "A list of the agent's responses so far, formatted as strings.", correct: false, explanation: "to_input_list() returns the full conversation history in the input format the Runner expects — not just agent responses." },
+    { text: "The complete conversation history (user messages, tool calls, tool results, agent responses) formatted as Runner input.", correct: true, explanation: "Correct. You append a new user message to this list and pass it back to Runner.run() to continue the conversation with full context." },
+    { text: "A list of tool results from the last run, useful for debugging.", correct: false, explanation: "Tool results are included, but so is everything else in the conversation. The purpose is to carry full context forward to the next turn." },
+  ]}
+/>
+
+## Structured output with Pydantic
+
+By default, `result.final_output` is a string. If you need a typed, structured response — a research summary, an extracted entity, a decision with reasoning — set `output_type` to a Pydantic model:
+
+```python
+from agents import Agent, Runner
+from pydantic import BaseModel
+
+class ResearchSummary(BaseModel):
+    title: str
+    key_findings: list[str]
+    confidence: float  # 0.0 to 1.0
+    sources_needed: bool
+
+agent = Agent(
+    name="Research Agent",
+    instructions=(
+        "Produce structured research summaries. "
+        "Be honest about confidence — use 0.5 for uncertain areas."
+    ),
+    output_type=ResearchSummary,
+)
+
+result = Runner.run_sync(agent, "Summarise the current state of quantum computing")
+summary = result.final_output  # This is a ResearchSummary instance, not a string
+
+print(summary.title)
+print(summary.key_findings)  # typed list[str]
+print(f"Confidence: {summary.confidence:.0%}")
+print(f"Needs more sources: {summary.sources_needed}")
+```
+
+When `output_type` is set, the SDK instructs the model to respond in the schema's JSON format and validates the response against the Pydantic model before returning. If the model produces invalid JSON, the SDK retries automatically.
+
+The practical benefit: your downstream code can use `summary.key_findings` as a typed list instead of parsing text with regex or `split()`.
+
+<Quiz
+  question="When output_type=ResearchSummary is set, what is the type of result.final_output?"
+  options={[
+    { text: "A string containing JSON that you parse manually.", correct: false, explanation: "The SDK parses and validates the JSON for you. You get a ResearchSummary instance, not a raw string." },
+    { text: "A ResearchSummary Pydantic model instance with validated fields.", correct: true, explanation: "Correct. The SDK validates the model's output against the Pydantic schema. result.final_output is a ResearchSummary you can access with dot notation." },
+    { text: "A dict that you convert to ResearchSummary yourself.", correct: false, explanation: "The SDK handles parsing and model instantiation. You receive the typed Pydantic object directly." },
+  ]}
+/>
+
+## Multiple tools on one agent
+
+An agent can have several tools. The model decides which one to call based on the instructions and the tool docstrings:
+
+```python
+from agents import Agent, Runner, function_tool
+from datetime import datetime
+import json
+
+@function_tool
+def get_current_time(timezone: str) -> str:
+    """Get the current time in a given timezone (e.g., 'UTC', 'US/Eastern')."""
+    # Simplified — production code would use pytz or zoneinfo
+    return datetime.utcnow().strftime(f"%Y-%m-%d %H:%M UTC (requested timezone: {timezone})")
+
+@function_tool
+def parse_json(text: str) -> str:
+    """Parse and pretty-print a JSON string to check if it is valid."""
+    try:
+        parsed = json.loads(text)
+        return json.dumps(parsed, indent=2)
+    except json.JSONDecodeError as e:
+        return f"Invalid JSON: {e}"
+
+@function_tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely."""
+    try:
+        return str(eval(expression, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"Error: {e}"
+
+agent = Agent(
+    name="Developer Assistant",
+    instructions="Help developers with quick calculations, time zones, and JSON validation.",
+    tools=[calculate, get_current_time, parse_json],
+)
+
+result = Runner.run_sync(agent, "Is this valid JSON? {'key': 'value'}")
+print(result.final_output)
+```
+
+The model chooses tools based on the question. It may call one tool, multiple tools in sequence, or no tools at all for a simple question it can answer directly.
+
+## Runner internals: what the loop actually does
+
+Understanding the loop helps you debug unexpected behaviour:
+
+```
+Runner.run(agent, input)
+  │
+  ├─ Format input as messages list
+  │
+  ├─ [Loop starts]
+  │    │
+  │    ├─ Call LLM with current messages + agent's system prompt
+  │    │
+  │    ├─ Response has tool_calls?
+  │    │    ├─ Yes → execute each tool → append results → continue loop
+  │    │    └─ No ↓
+  │    │
+  │    ├─ Response triggers a handoff?
+  │    │    ├─ Yes → switch active agent → continue loop
+  │    │    └─ No ↓
+  │    │
+  │    └─ Plain text response → DONE → return result
+  │
+  └─ result.final_output = the final text (or Pydantic model if output_type set)
+```
+
+One important implication: if an agent calls three tools in one response, the Runner executes all three before calling the LLM again. Tool calls within a single response are parallel by design.
+
+<Callout type="note">
+`Runner.run_sync` is built for scripts and tests. In production web applications, use `await Runner.run(agent, input)` inside an async request handler. The async version does not block the event loop while waiting for LLM responses.
+</Callout>
+
+## Putting it together: a research agent with structured output and tools
+
+```python
+from agents import Agent, Runner, function_tool
+from pydantic import BaseModel
+import asyncio
+
+class AnalysisResult(BaseModel):
+    topic: str
+    summary: str
+    key_points: list[str]
+    follow_up_questions: list[str]
+
+@function_tool
+def search_knowledge_base(query: str) -> str:
+    """Search the internal knowledge base for information on a topic."""
+    # In production, this would call a vector DB or search API
+    return f"[Mock result for '{query}': relevant information would appear here]"
+
+@function_tool
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely."""
+    try:
+        return str(eval(expression, {"__builtins__": {}}, {}))
+    except Exception as e:
+        return f"Error: {e}"
+
+agent = Agent(
+    name="Research Analyst",
+    instructions=(
+        "You are a research analyst. Use search_knowledge_base to find information "
+        "before summarising. Always provide 3-5 key points and 2-3 follow-up questions."
+    ),
+    tools=[search_knowledge_base, calculate],
+    output_type=AnalysisResult,
+)
+
+async def main():
+    result = await Runner.run(agent, "Analyse the impact of LLMs on software development")
+    analysis = result.final_output
+    print(f"Topic: {analysis.topic}")
+    print(f"Summary: {analysis.summary}")
+    for i, point in enumerate(analysis.key_points, 1):
+        print(f"  {i}. {point}")
+    print("\nFollow-up questions:")
+    for q in analysis.follow_up_questions:
+        print(f"  - {q}")
+
+asyncio.run(main())
+```
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I wrote a @function_tool with type annotations and a docstring",
+    "I ran an agent with Runner.run_sync and printed final_output",
+    "I used result.to_input_list() to continue a multi-turn conversation",
+    "I defined a Pydantic model and set it as output_type",
+    "I understand why the Runner loop calls the LLM again after each tool call",
+  ]}
+  next="/modules/module-18-openai-agents-sdk/lesson-03"
+/>

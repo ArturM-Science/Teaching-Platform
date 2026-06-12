@@ -1,0 +1,503 @@
+---
+title: "Multi-Agent Patterns: SequentialAgent, ParallelAgent, and Subagents"
+module: "module-17-google-adk"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Multi-Agent Patterns: SequentialAgent, ParallelAgent, and Subagents
+
+Single agents hit a ceiling quickly. The real power of ADK emerges when you compose agents into pipelines, fan-out patterns, and hierarchical orchestrators. This lesson covers every composition pattern you will use in production ADK systems.
+
+<LearningObjectives items={[
+  "Build a SequentialAgent pipeline where each stage reads the previous stage's output",
+  "Build a ParallelAgent fan-out where multiple agents search concurrently",
+  "Use an LlmAgent as an orchestrator that delegates to sub-agents dynamically",
+  "Compose SequentialAgent and ParallelAgent into nested structures",
+  "Register a remote agent as an A2A tool using AgentTool",
+  "Choose between SequentialAgent and LlmAgent orchestrator based on predictability requirements",
+]} />
+
+## SequentialAgent: deterministic pipelines
+
+`SequentialAgent` runs its sub-agents in the order you list them. Each sub-agent finishes completely before the next begins. The shared session state is the data bus — each stage reads what the previous stage wrote.
+
+```python
+from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+
+
+@tool
+def plan_research(question: str, tool_context: ToolContext) -> dict:
+    """Break a research question into specific sub-questions.
+    
+    Args:
+        question: The main research question.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'sub_questions' list.
+    """
+    # In a real system, this might call an LLM or use a template
+    sub_questions = [
+        f"What are the key facts about: {question}",
+        f"What are recent developments in: {question}",
+        f"What are the main controversies or open questions about: {question}",
+    ]
+    tool_context.state["research_plan"] = sub_questions
+    tool_context.state["original_question"] = question
+    return {"sub_questions": sub_questions}
+
+
+@tool
+def fetch_research(tool_context: ToolContext) -> dict:
+    """Fetch research results for all planned sub-questions.
+    
+    Args:
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'results' dict mapping sub_question to findings.
+    """
+    plan = tool_context.state.get("research_plan", [])
+    if not plan:
+        return {"error": "No research plan found in session state"}
+    
+    # In a real system, this would call a search API
+    results = {q: f"[Stub findings for: {q}]" for q in plan}
+    tool_context.state["research_findings"] = results
+    return {"results": results}
+
+
+@tool
+def synthesise_findings(tool_context: ToolContext) -> dict:
+    """Synthesise all research findings into a final report.
+    
+    Args:
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'report' string.
+    """
+    question = tool_context.state.get("original_question", "Unknown question")
+    findings = tool_context.state.get("research_findings", {})
+    
+    if not findings:
+        return {"error": "No research findings found in session state"}
+    
+    sections = [f"## Research Report: {question}\n"]
+    for sub_q, finding in findings.items():
+        sections.append(f"### {sub_q}\n{finding}\n")
+    
+    report = "\n".join(sections)
+    tool_context.state["final_report"] = report
+    return {"report": report}
+
+
+# Each agent is responsible for one stage of the pipeline
+planner_agent = LlmAgent(
+    name="planner",
+    model="gemini-2.0-flash",
+    tools=[plan_research],
+    instruction=(
+        "You are a research planner. When given a question, use plan_research "
+        "to break it into specific sub-questions and store them in session state."
+    ),
+)
+
+researcher_agent = LlmAgent(
+    name="researcher",
+    model="gemini-2.0-flash",
+    tools=[fetch_research],
+    instruction=(
+        "You are a researcher. Use fetch_research to retrieve findings for all "
+        "planned sub-questions. The plan is already in session state."
+    ),
+)
+
+synthesiser_agent = LlmAgent(
+    name="synthesiser",
+    model="gemini-2.0-flash",
+    tools=[synthesise_findings],
+    instruction=(
+        "You are a synthesis expert. Use synthesise_findings to combine all "
+        "research into a coherent report. The findings are in session state."
+    ),
+)
+
+# Wire them into a sequential pipeline
+research_pipeline = SequentialAgent(
+    name="research_pipeline",
+    sub_agents=[planner_agent, researcher_agent, synthesiser_agent],
+)
+```
+
+When you run `research_pipeline`, ADK runs `planner_agent` first, then `researcher_agent`, then `synthesiser_agent` — in that order, every time. The pipeline is completely deterministic. No LLM decides the order.
+
+<Callout type="insight">
+`SequentialAgent` adds zero LLM calls for routing. The order is fixed at construction time. Compare this to an `LlmAgent` orchestrator, which makes an LLM call for every routing decision. For pipelines where the order never changes, `SequentialAgent` is faster and cheaper.
+</Callout>
+
+## ParallelAgent: concurrent fan-out
+
+`ParallelAgent` runs all its sub-agents at the same time. All branches share the same session state — any branch can read what was written before the parallel block, and all branches' writes are available after the parallel block completes.
+
+```python
+from google.adk.agents import LlmAgent, ParallelAgent
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+
+
+@tool
+def search_web(query: str, tool_context: ToolContext) -> dict:
+    """Search the web for a query and store results in session state.
+    
+    Args:
+        query: The search query.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'results' list.
+    """
+    results = [f"Web result 1 for '{query}'", f"Web result 2 for '{query}'"]
+    tool_context.state["web_results"] = results
+    return {"results": results, "source": "web"}
+
+
+@tool
+def search_academic(query: str, tool_context: ToolContext) -> dict:
+    """Search academic databases for a query and store results in session state.
+    
+    Args:
+        query: The search query.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'results' list.
+    """
+    results = [f"Academic paper 1 on '{query}'", f"Academic paper 2 on '{query}'"]
+    tool_context.state["academic_results"] = results
+    return {"results": results, "source": "academic"}
+
+
+web_searcher = LlmAgent(
+    name="web_searcher",
+    model="gemini-2.0-flash",
+    tools=[search_web],
+    instruction=(
+        "You are a web search specialist. Use the original_question from session state "
+        "as your query. Call search_web with it."
+    ),
+)
+
+academic_searcher = LlmAgent(
+    name="academic_searcher",
+    model="gemini-2.0-flash",
+    tools=[search_academic],
+    instruction=(
+        "You are an academic search specialist. Use the original_question from session state "
+        "as your query. Call search_academic with it."
+    ),
+)
+
+# Both searchers run at the same time
+parallel_search = ParallelAgent(
+    name="parallel_search",
+    sub_agents=[web_searcher, academic_searcher],
+)
+```
+
+After `parallel_search` completes, both `session.state["web_results"]` and `session.state["academic_results"]` are available. A downstream agent can read both.
+
+<Quiz
+  question="In a ParallelAgent, do sub-agents share the same session state?"
+  options={[
+    { text: "No — each sub-agent gets its own isolated copy of session state", correct: false, explanation: "Sub-agents in a ParallelAgent share the same session state. They can all read from it and write to it. This is how results from parallel branches are collected — each branch writes to a different key." },
+    { text: "Yes — all sub-agents read from and write to the same session state", correct: true, explanation: "Session state is shared across all agents in a session, including parallel branches. Use different state keys for each branch to avoid overwriting each other's results." },
+    { text: "State is merged after all branches complete, with last-write-wins", correct: false, explanation: "State writes happen as tools complete, not after all branches finish. This is why branches should write to different keys — if two branches write to the same key concurrently, the result is non-deterministic." },
+  ]}
+/>
+
+## Nesting: SequentialAgent containing ParallelAgent
+
+The real power comes from nesting. A `SequentialAgent` can contain a `ParallelAgent` as one of its steps. This creates a fan-out/fan-in pattern: do some work, run a bunch of things in parallel, then collect results and continue.
+
+```python
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+
+
+# Step 1: Plan the search
+planner = LlmAgent(
+    name="planner",
+    model="gemini-2.0-flash",
+    tools=[plan_research],
+    instruction="Break the question into sub-questions and store in session state.",
+)
+
+# Step 2: Fan out — search multiple sources in parallel
+parallel_search = ParallelAgent(
+    name="parallel_search",
+    sub_agents=[web_searcher, academic_searcher],
+)
+
+# Step 3: Synthesise all results
+synthesiser = LlmAgent(
+    name="synthesiser",
+    model="gemini-2.0-flash",
+    tools=[synthesise_findings],
+    instruction=(
+        "Combine web_results and academic_results from session state into a report. "
+        "Call synthesise_findings."
+    ),
+)
+
+# The full pipeline: plan → [web_search || academic_search] → synthesise
+full_pipeline = SequentialAgent(
+    name="full_research_pipeline",
+    sub_agents=[planner, parallel_search, synthesiser],
+)
+```
+
+This is the canonical ADK research pipeline pattern. The planner runs first, then both searchers run concurrently, then the synthesiser runs once both are done.
+
+## LlmAgent as orchestrator: dynamic delegation
+
+When the order of sub-agents is not fixed — when an LLM needs to decide which sub-agent to call, in what order, and whether to repeat steps — you make an `LlmAgent` the orchestrator and register sub-agents as its tools.
+
+```python
+from google.adk.agents import LlmAgent
+
+
+# Sub-agents that the orchestrator can invoke
+web_searcher = LlmAgent(
+    name="web_searcher",
+    model="gemini-2.0-flash",
+    tools=[search_web],
+    instruction="Search the web for the given query and return results.",
+)
+
+critic = LlmAgent(
+    name="critic",
+    model="gemini-2.0-flash",
+    tools=[critique_research],
+    instruction="Review research findings and identify gaps or inaccuracies.",
+)
+
+# Orchestrator treats sub-agents as callable tools
+orchestrator = LlmAgent(
+    name="orchestrator",
+    model="gemini-2.0-pro",  # Use a stronger model for orchestration
+    sub_agents=[web_searcher, critic],
+    instruction=(
+        "You are a research orchestrator. Given a user's question:\n"
+        "1. Call web_searcher to gather initial findings\n"
+        "2. Call critic to review the findings\n"
+        "3. If the critic identifies gaps, call web_searcher again with refined queries\n"
+        "4. Continue until the critic approves or you have done 3 rounds\n"
+        "5. Synthesise the final answer yourself"
+    ),
+)
+```
+
+With `sub_agents` on an `LlmAgent`, each sub-agent is exposed to the orchestrator as a callable tool. The LLM can call any of them, call them multiple times, or skip them based on context. This is flexible but adds an LLM call for every routing decision.
+
+<Quiz
+  question="What is the key difference between an LlmAgent with sub_agents as tools vs a SequentialAgent?"
+  options={[
+    { text: "SequentialAgent can have more sub-agents than LlmAgent", correct: false, explanation: "Both types have no hard limit on the number of sub-agents. The difference is about control flow, not capacity." },
+    { text: "LlmAgent orchestrator uses an LLM to decide which sub-agent to call and when; SequentialAgent always runs all sub-agents in a fixed order", correct: true, explanation: "This is the core trade-off. SequentialAgent is deterministic and cheap (no LLM calls for routing). LlmAgent orchestrator is flexible (can repeat, skip, or reorder) but costs an LLM call for every routing decision." },
+    { text: "SequentialAgent cannot write to session state, but LlmAgent can", correct: false, explanation: "Both can write to session state. Session state is shared across all agent types — any tool running inside any agent type can write to tool_context.state." },
+  ]}
+/>
+
+## When to use which
+
+| Situation | Use |
+|---|---|
+| Steps always happen in the same order | `SequentialAgent` |
+| Multiple independent tasks can run at the same time | `ParallelAgent` |
+| The order or number of steps depends on intermediate results | `LlmAgent` orchestrator |
+| Some steps are fixed order but one step fans out | `SequentialAgent` wrapping a `ParallelAgent` |
+| A human needs to approve before proceeding | `LlmAgent` orchestrator (can pause and ask) |
+
+<Callout type="insight">
+`SequentialAgent` is deterministic — great for pipelines where the flow never changes. `LlmAgent` as orchestrator is flexible but adds LLM calls for routing decisions. Choose based on whether you need the adaptability. In practice, most production systems use a mix: a fixed outer pipeline (`SequentialAgent`) with one or two adaptive inner steps (`LlmAgent` orchestrator).
+</Callout>
+
+## A2A cross-framework calls with AgentTool
+
+The A2A protocol turns remote agents into local tools. `AgentTool` wraps an HTTP endpoint and presents it to the orchestrator LLM as a callable tool.
+
+```python
+from google.adk.tools.agent_tool import AgentTool
+from google.adk.agents import LlmAgent
+
+
+# A LangGraph agent running as a separate service
+langgraph_researcher = AgentTool(
+    url="http://langgraph-service:8000/agent",
+    description=(
+        "A specialised LangGraph research agent. "
+        "Call with a research question string. "
+        "Returns a detailed research report with citations."
+    ),
+)
+
+# A CrewAI agent running as a separate service  
+crewai_writer = AgentTool(
+    url="http://crewai-service:8001/agent",
+    description=(
+        "A CrewAI writing crew. "
+        "Call with research findings and a target audience. "
+        "Returns a polished article draft."
+    ),
+)
+
+# ADK orchestrator that calls both remote agents
+orchestrator = LlmAgent(
+    name="cross_framework_orchestrator",
+    model="gemini-2.0-pro",
+    tools=[langgraph_researcher, crewai_writer],
+    instruction=(
+        "You coordinate research and writing across specialised systems.\n"
+        "1. Call langgraph_researcher with the user's question\n"
+        "2. Pass the findings to crewai_writer with target_audience='general public'\n"
+        "3. Return the final article to the user"
+    ),
+)
+```
+
+The remote agents do not need to know they are being called by an ADK orchestrator. They expose a standard A2A HTTP endpoint; the orchestrator calls it. Neither side is coupled to the other's framework.
+
+<Callout type="note">
+For `AgentTool` to work, the remote agent must be running and accessible at the given URL. In development, you can run both agents locally on different ports. In production, they would be separate services, potentially in different cloud accounts or even different organisations.
+</Callout>
+
+## Complete composition example
+
+Here is a realistic research system that uses all three patterns:
+
+```python
+import asyncio
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+from google.adk.sessions import InMemorySessionService
+from google.adk.runners import Runner
+from google.genai.types import Content, Part
+
+
+@tool
+def extract_topics(question: str, tool_context: ToolContext) -> dict:
+    """Extract key topics from a research question."""
+    topics = question.split()[:5]  # Simplified extraction
+    tool_context.state["topics"] = topics
+    tool_context.state["original_question"] = question
+    return {"topics": topics}
+
+
+@tool
+def search_by_topic(topic: str, tool_context: ToolContext) -> dict:
+    """Search for information on a specific topic."""
+    result = f"Findings about '{topic}': [stub data]"
+    existing = tool_context.state.get("topic_findings", {})
+    existing[topic] = result
+    tool_context.state["topic_findings"] = existing
+    return {"topic": topic, "finding": result}
+
+
+@tool
+def write_report(tool_context: ToolContext) -> dict:
+    """Write a final report from all collected findings."""
+    question = tool_context.state.get("original_question", "")
+    findings = tool_context.state.get("topic_findings", {})
+    report = f"# Report: {question}\n\n"
+    for topic, finding in findings.items():
+        report += f"## {topic}\n{finding}\n\n"
+    tool_context.state["final_report"] = report
+    return {"report": report}
+
+
+# Sub-agents for parallel search
+topic_searcher_1 = LlmAgent(
+    name="topic_searcher_1",
+    model="gemini-2.0-flash",
+    tools=[search_by_topic],
+    instruction="Search for the first topic in the topics list from session state.",
+)
+
+topic_searcher_2 = LlmAgent(
+    name="topic_searcher_2",
+    model="gemini-2.0-flash",
+    tools=[search_by_topic],
+    instruction="Search for the second topic in the topics list from session state.",
+)
+
+# Agents for sequential pipeline
+extractor = LlmAgent(
+    name="extractor",
+    model="gemini-2.0-flash",
+    tools=[extract_topics],
+    instruction="Extract key topics from the question. Call extract_topics.",
+)
+
+parallel_searchers = ParallelAgent(
+    name="parallel_searchers",
+    sub_agents=[topic_searcher_1, topic_searcher_2],
+)
+
+writer = LlmAgent(
+    name="writer",
+    model="gemini-2.0-flash",
+    tools=[write_report],
+    instruction="Write the final report using all findings. Call write_report.",
+)
+
+# Full pipeline: extract → [search1 || search2] → write
+full_system = SequentialAgent(
+    name="full_research_system",
+    sub_agents=[extractor, parallel_searchers, writer],
+)
+
+
+async def main():
+    session_service = InMemorySessionService()
+    session = await session_service.create_session(
+        app_name="research_app",
+        user_id="demo_user",
+    )
+
+    runner = Runner(
+        agent=full_system,
+        app_name="research_app",
+        session_service=session_service,
+    )
+
+    message = Content(parts=[Part(text="Research the impact of large language models on software development")])
+
+    async for event in runner.run_async(
+        user_id="demo_user",
+        session_id=session.id,
+        new_message=message,
+    ):
+        if event.is_final_response():
+            text = event.content.parts[0].text if event.content and event.content.parts else ""
+            print(f"Final response:\n{text}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I can build a SequentialAgent pipeline where each stage uses session state to pass data",
+    "I can build a ParallelAgent that runs multiple searchers concurrently",
+    "I understand when to use LlmAgent as orchestrator vs SequentialAgent",
+    "I can nest SequentialAgent and ParallelAgent for fan-out/fan-in patterns",
+    "I can register a remote agent as an A2A tool using AgentTool",
+  ]}
+  next="/modules/module-17-google-adk/lesson-05"
+/>

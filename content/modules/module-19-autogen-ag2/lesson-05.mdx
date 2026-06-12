@@ -1,0 +1,304 @@
+---
+title: "Production: Cost, Reliability, and the Speaker Selection Trade-off"
+module: "module-19-autogen-ag2"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Cost, Reliability, and the Speaker Selection Trade-off
+
+A GroupChat that works in a notebook is not the same as one that works in production. In a notebook, you run it once, watch it, and call it done. In production, it runs hundreds of times a day, costs real money, occasionally hangs, and needs to produce a trace you can audit when something goes wrong.
+
+This lesson addresses the gap between "it works" and "it works reliably, cheaply, and observably."
+
+<LearningObjectives items={[
+  "Calculate the actual number of LLM calls in a GroupChat run",
+  "Understand how token accumulation increases cost over conversation rounds",
+  "Apply specific techniques to reduce cost without sacrificing quality",
+  "Set up belt-and-braces termination and error handling",
+  "Implement basic observability by logging chat history to JSON",
+  "Identify when AutoGen is the wrong tool and LangGraph is better",
+]} />
+
+---
+
+## The cost model
+
+Every GroupChat round has a predictable cost structure. Understanding it lets you estimate and control spend.
+
+### LLM calls per round
+
+With `speaker_selection_method="auto"` and N agents in a GroupChat:
+
+- 1 agent response per round (the agent who speaks)
+- 1 routing call per round (the GroupChatManager deciding who speaks next)
+
+For a 4-agent GroupChat running 10 rounds:
+
+```
+10 rounds × (1 agent response + 1 routing call) = 20 LLM calls minimum
+```
+
+This is the minimum — it assumes every round produces exactly one agent response. In practice, tool calls, nested chats, and re-prompting add more.
+
+With `speaker_selection_method="round_robin"`:
+
+```
+10 rounds × 1 agent response = 10 LLM calls
+```
+
+The routing call disappears. For long-running GroupChats, this is a significant saving.
+
+### Token accumulation
+
+Every agent in AutoGen sees the full conversation history when generating its response. This means:
+
+- Round 1: each prompt contains the system message + 1 prior message
+- Round 5: each prompt contains the system message + 4 prior messages
+- Round 10: each prompt contains the system message + 9 prior messages
+
+By round 10, the input token count for each agent call is roughly 10× what it was in round 1. For a task that runs 12 rounds with substantial per-round content, the last few rounds may cost more than the first several combined.
+
+<Callout type="warning">
+Token accumulation is AutoGen's biggest hidden cost. In a 12-round conversation, the agent in round 12 sees all 11 prior rounds. For long conversations or conversations with verbose agents, the context window fills before the task finishes. Always set `max_round` conservatively and monitor token counts per round during development. If you are hitting context limits, switch to `summary_method="reflection_with_llm"` on nested chats to compress context.
+</Callout>
+
+---
+
+## Techniques to reduce cost
+
+### 1. Use round_robin when the order is known
+
+If your agents always follow a predictable sequence — Planner, Researcher, Critic, Synthesiser — use `round_robin`. It is free routing.
+
+```python
+groupchat = GroupChat(
+    agents=[orchestrator, planner, researcher, critic, synthesiser],
+    max_round=8,
+    speaker_selection_method="round_robin",
+)
+```
+
+### 2. Use cheaper models for routing and critique
+
+You do not need your most powerful model for every agent. Use `gpt-4o-mini` or `claude-haiku` for agents whose job is classification or critique, and reserve `gpt-4o` or `claude-opus` for generation.
+
+```python
+cheap_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+expensive_config = {
+    "config_list": [{"model": "gpt-4o", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+critic = AssistantAgent(name="Critic", llm_config=cheap_config, ...)
+synthesiser = AssistantAgent(name="Synthesiser", llm_config=expensive_config, ...)
+```
+
+### 3. Cap per-agent turn budget
+
+`max_consecutive_auto_reply` on the UserProxyAgent limits how many turns the system runs without human input. Set it tightly:
+
+```python
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=6,  # not 10 or 15 — be conservative
+    ...
+)
+```
+
+### 4. Use summarisation on nested chats
+
+When a nested chat runs for multiple turns, its full transcript gets injected back into the outer conversation. Over many rounds, this compounds. Use `"reflection_with_llm"` to compress:
+
+```python
+{
+    "recipient": reviewer,
+    "message": ...,
+    "max_turns": 4,
+    "summary_method": "reflection_with_llm",  # compress 4 turns to 1 summary
+}
+```
+
+---
+
+## Reliability: belt-and-braces termination
+
+Never rely on a single termination mechanism. Use both:
+
+```python
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=8,                          # hard upper bound
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),  # primary exit
+    code_execution_config=False,
+)
+
+groupchat = GroupChat(
+    agents=[orchestrator, ...],
+    max_round=10,          # second hard upper bound — different from max_consecutive_auto_reply
+    ...
+)
+```
+
+`max_consecutive_auto_reply` is per-agent; `max_round` is per-chat. Both fire independently. Together they prevent the chat from running forever regardless of how termination logic is coded.
+
+### Wrapping initiate_chat in error handling
+
+`initiate_chat` can raise if an agent fails to respond, if the API times out, or if the context window is exceeded. Always wrap it:
+
+```python
+try:
+    orchestrator.initiate_chat(
+        manager,
+        message="Analyse the business case for deploying an AI agent to handle support tickets.",
+    )
+except Exception as e:
+    print(f"Chat failed: {type(e).__name__}: {e}")
+    # Save whatever history we have before the failure
+    messages = orchestrator.chat_messages.get(manager, [])
+    print(f"Recovered {len(messages)} messages before failure.")
+```
+
+---
+
+## Observability: logging chat history
+
+AutoGen has no built-in tracing. Wire it manually by saving `chat_messages` to a file after every run.
+
+```python
+import json
+import datetime
+
+def save_trace(orchestrator, manager, run_id: str = None):
+    run_id = run_id or datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    messages = orchestrator.chat_messages.get(manager, [])
+    path = f"trace_{run_id}.json"
+    with open(path, "w") as f:
+        json.dump(messages, f, indent=2)
+    print(f"Trace saved: {path} ({len(messages)} messages)")
+    return path
+
+# After initiate_chat:
+save_trace(orchestrator, manager)
+```
+
+Each trace file is a list of message dicts that you can inspect, diff, or feed into an evaluation pipeline.
+
+### Using Langfuse for structured tracing
+
+For production workloads, Langfuse provides LLM-aware tracing with cost tracking per call. Wire it via a custom AutoGen callback:
+
+```python
+# pip install langfuse
+from langfuse import Langfuse
+
+langfuse = Langfuse(
+    public_key=os.environ["LANGFUSE_PUBLIC_KEY"],
+    secret_key=os.environ["LANGFUSE_SECRET_KEY"],
+)
+
+# Create a trace per run
+trace = langfuse.trace(name="autogen-groupchat", metadata={"task": "support-analysis"})
+
+# After the run, flush
+langfuse.flush()
+```
+
+Full AutoGen-Langfuse integration is available via the Langfuse documentation. The key insight is that AutoGen's message dicts contain everything Langfuse needs: role, content, and agent name.
+
+---
+
+## Estimating cost before a run
+
+Before running an expensive GroupChat, estimate the cost:
+
+```python
+def estimate_cost(
+    n_agents: int,
+    n_rounds: int,
+    avg_tokens_per_message: int,
+    cost_per_1k_tokens: float,
+    speaker_selection: str = "auto",
+) -> float:
+    routing_calls = n_rounds if speaker_selection == "auto" else 0
+    agent_calls = n_rounds
+    total_calls = agent_calls + routing_calls
+    # Token accumulation: average context grows with round number
+    avg_context_multiplier = (1 + n_rounds) / 2
+    total_tokens = total_calls * avg_tokens_per_message * avg_context_multiplier
+    return (total_tokens / 1000) * cost_per_1k_tokens
+
+# Example: 4 agents, 12 rounds, 500 tokens avg per message, $0.15/1k tokens (gpt-4o-mini)
+print(f"Estimated cost: ${estimate_cost(4, 12, 500, 0.15):.4f}")
+```
+
+This is an approximation — real costs depend on actual message lengths — but it gives you an order-of-magnitude before committing to a run.
+
+---
+
+## When NOT to use AutoGen
+
+AutoGen is not always the right tool. Be honest about its limitations before committing to it.
+
+| Need | Problem with AutoGen | Better choice |
+|---|---|---|
+| Checkpoint and resume after failure | No built-in checkpointing | LangGraph with `MemorySaver` |
+| Strict typed state across agents | No typed state — conversation history is the state | LangGraph |
+| Human-in-the-loop at specific graph nodes | Possible but awkward | LangGraph `interrupt_before` |
+| Cloud-native deployment and scaling | No built-in deployment model | ADK, LangGraph Platform |
+| Parallel agent execution | Sequential only (even in GroupChat) | LangGraph with parallel branches |
+
+AutoGen is the right tool when you want rapid prototyping, natural conversational agent interaction, or the nested chat pattern for quality-control pipelines. It is the wrong tool when you need production-grade state persistence, typed data contracts between agents, or deterministic routing with full auditability.
+
+<Callout type="note">
+The most common mistake in production AutoGen deployments is treating the conversation history as reliable state. It is not — it is just a list of strings. Any agent can produce output that confuses a downstream agent's parsing. For critical data handoffs between agents, validate the output structure explicitly in your Python code, not in the system message alone.
+</Callout>
+
+---
+
+<Quiz
+  question="With 4 agents, 12 rounds, and speaker_selection_method='auto', what is the minimum number of LLM calls?"
+  options={[
+    { text: "12 — one per round", correct: false, explanation: "That would be the count with round_robin. With 'auto', each round adds a routing call on top of the agent response." },
+    { text: "24 — one agent response plus one routing call per round", correct: true, explanation: "Correct. With 'auto' selection, each round incurs one agent response call and one GroupChatManager routing call. 12 rounds × 2 calls = 24 minimum." },
+    { text: "48 — one call per agent per round", correct: false, explanation: "Only one agent speaks per round in a GroupChat. The 4-agent count affects routing complexity but not the number of response calls per round." },
+    { text: "13 — 12 agent responses plus 1 routing call at the start", correct: false, explanation: "The routing call fires every round, not just once. With 'auto', there is one routing call per round throughout the conversation." },
+  ]}
+/>
+
+<Quiz
+  question="What is the risk of NOT setting max_round on a GroupChat?"
+  options={[
+    { text: "The GroupChat will raise an AttributeError at runtime", correct: false, explanation: "max_round has a default value (typically 10). Not setting it does not cause an error. It leaves you dependent on is_termination_msg alone." },
+    { text: "If is_termination_msg never fires — due to a bug or the LLM not following the format — the chat runs indefinitely and accumulates unbounded cost", correct: true, explanation: "Correct. max_round is the emergency brake. Without it, a malformed termination string, a confused agent, or a formatting bug in the LLM's output means the chat runs until you manually stop it or exhaust your API budget." },
+    { text: "The chat terminates after exactly 10 rounds regardless of termination conditions", correct: false, explanation: "Not setting max_round does not force termination at 10 rounds. It uses whatever the framework default is, which varies by version. Always set it explicitly." },
+    { text: "Only round_robin selection is available when max_round is not set", correct: false, explanation: "speaker_selection_method and max_round are independent parameters. Not setting one has no effect on the other." },
+  ]}
+/>
+
+---
+
+## Summary
+
+Running AutoGen in production means accounting for the full cost model (agent calls + routing calls × token accumulation), setting belt-and-braces termination (both `is_termination_msg` and `max_round`), wrapping `initiate_chat` in error handling, and saving traces to JSON for auditability.
+
+The speaker selection choice is the single biggest lever on cost: `round_robin` eliminates routing calls entirely; `auto` adds one per round. For long-running GroupChats, `round_robin` with a well-designed agent order is almost always preferable.
+
+AutoGen is not a general-purpose production orchestrator. Know when LangGraph or a different tool is the right answer.
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "I can calculate the number of LLM calls for a GroupChat run",
+    "I understand token accumulation and can describe why round 10 costs more than round 1",
+    "I set both is_termination_msg and max_round in every GroupChat",
+    "I save chat_messages to a JSON trace after every production run",
+    "I can name at least two scenarios where LangGraph is a better choice than AutoGen",
+  ]}
+  next="/modules/module-19-autogen-ag2/lesson-06-lab"
+/>

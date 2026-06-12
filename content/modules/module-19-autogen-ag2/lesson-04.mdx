@@ -1,0 +1,280 @@
+---
+title: "AG2: DiGraphGroupChat and Event-Driven Architecture"
+module: "module-19-autogen-ag2"
+lesson: 4
+slug: "lesson-04"
+---
+
+# AG2: DiGraphGroupChat and Event-Driven Architecture
+
+AutoGen's `GroupChat` with `speaker_selection_method="auto"` is flexible. It is also non-deterministic. Run the same task twice and you may get a different conversation flow each time — a different agent speaks first, a different order of critique and response, a different number of rounds before termination. For prototyping and exploration, this is fine. For production systems that need auditing, compliance, or reproducible behaviour, it is a problem.
+
+AG2 is the community fork of AutoGen (version 0.4+) that addresses this by adding explicit graph support. Its `DiGraphGroupChat` uses a NetworkX directed graph to define exactly which agents can speak after which other agents — making every routing decision inspectable in code rather than opaque inside an LLM call.
+
+<LearningObjectives items={[
+  "Explain why AutoGen's 'auto' speaker selection is non-deterministic and what problems this causes",
+  "Build a DiGraphGroupChat with a NetworkX directed graph",
+  "Add loop edges and conditional exit paths to the conversation graph",
+  "Configure a SwarmAgent for explicit, handoff-based routing",
+  "Choose between AutoGen v0.2 GroupChat, AG2 DiGraphGroupChat, and AG2 SwarmAgent for a given use case",
+]} />
+
+---
+
+## Why explicit graphs matter
+
+Consider a three-agent system: Planner → Researcher → Critic. With `"auto"` selection, the GroupChatManager might decide:
+
+- Round 1: Planner speaks
+- Round 2: Researcher speaks
+- Round 3: Critic speaks
+- Round 4: Planner speaks again (it re-evaluated the plan based on the critique)
+- Round 5: Researcher speaks again
+
+This is reasonable behaviour. But it means if you re-run the same task with a slightly different phrasing, you might get:
+
+- Round 2: Critic speaks (before the Researcher has produced anything to critique)
+- Round 3: Researcher speaks
+
+This is a problem. The Critic has nothing to critique yet. The conversation degrades.
+
+With a directed graph, you specify that Critic can only speak after Researcher has spoken. The manager does not get to decide otherwise. The routing is enforced by the graph structure, not by an LLM call.
+
+<Callout type="insight">
+AG2's DiGraphGroupChat is LangGraph's core insight applied to the AutoGen agent model. The AutoGen community realised that for production systems, "the LLM decides who speaks" is not auditable enough. The graph makes every routing decision inspectable: you can read the code and know exactly which agent sequences are possible, regardless of what any LLM decides.
+</Callout>
+
+---
+
+## Installing AG2
+
+AG2 is a separate package from AutoGen v0.2. Install it alongside or instead of `pyautogen`:
+
+```bash
+pip install ag2
+```
+
+AG2 is backwards-compatible with AutoGen v0.2 agents in most cases. You can import `AssistantAgent` and `UserProxyAgent` from either package. The new classes (`DiGraphGroupChat`, `SwarmAgent`) live in the `ag2` package.
+
+---
+
+## Building a DiGraphGroupChat
+
+You define the conversation graph using NetworkX, then pass it to `DiGraphGroupChat`.
+
+```python
+import networkx as nx
+from autogen import AssistantAgent, UserProxyAgent
+from autogen import DiGraphGroupChat, GroupChatManager
+import os
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+planner = AssistantAgent(
+    name="Planner",
+    system_message=(
+        "You create a research plan: 3 bullet points describing what to investigate. "
+        "After the Critic approves the plan, say 'PLAN_APPROVED: Planner'."
+    ),
+    llm_config=llm_config,
+)
+
+researcher = AssistantAgent(
+    name="Researcher",
+    system_message="Execute the plan. Write detailed findings for each bullet point.",
+    llm_config=llm_config,
+)
+
+critic = AssistantAgent(
+    name="Critic",
+    system_message=(
+        "Critique the output from the Planner or Researcher. "
+        "If the plan is sufficient, say 'Plan approved.' "
+        "If research is complete and thorough, say 'FINAL_ANSWER: ' followed by a summary."
+    ),
+    llm_config=llm_config,
+)
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=12,
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+
+# Define the conversation graph
+graph = nx.DiGraph()
+graph.add_edge("Orchestrator", "Planner")   # Orchestrator starts → Planner speaks first
+graph.add_edge("Planner", "Critic")          # After Planner → Critic always speaks
+graph.add_edge("Critic", "Planner")          # After Critic (if plan not approved) → Planner revises
+graph.add_edge("Critic", "Researcher")       # After Critic (if plan approved) → Researcher executes
+
+groupchat = DiGraphGroupChat(
+    agents=[orchestrator, planner, researcher, critic],
+    graph=graph,
+    max_round=10,
+)
+
+manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+
+orchestrator.initiate_chat(
+    manager,
+    message="Research the key bottlenecks in deploying LLMs to production.",
+)
+```
+
+The graph has two outgoing edges from Critic: back to Planner (revision loop) and forward to Researcher (approved, proceed). The GroupChatManager reads the graph and only picks from the valid successors of the current speaker. It still uses an LLM call to choose between multiple valid successors, but it cannot choose an invalid one.
+
+---
+
+## Loop edges and conditional exits
+
+The power of the directed graph is in its loop and branching structure.
+
+**A simple linear pipeline** (no loops):
+```python
+graph.add_edge("Planner", "Researcher")
+graph.add_edge("Researcher", "Critic")
+# Critic has no outgoing edges — conversation ends when Critic speaks
+```
+
+**A revision loop** (Critic sends work back):
+```python
+graph.add_edge("Planner", "Critic")
+graph.add_edge("Critic", "Planner")   # revision loop
+graph.add_edge("Critic", "Synthesiser")  # exit when approved
+```
+
+When Critic has two valid successors (Planner and Synthesiser), the GroupChatManager still uses an LLM call to decide which to take based on the conversation context. But it cannot skip to a node that is not a valid successor.
+
+**A fan-out** (one agent triggers multiple parallel agents — sequential in AutoGen):
+```python
+graph.add_edge("Planner", "ResearcherA")
+graph.add_edge("Planner", "ResearcherB")
+graph.add_edge("ResearcherA", "Synthesiser")
+graph.add_edge("ResearcherB", "Synthesiser")
+```
+
+AutoGen does not run agents truly in parallel — it runs them sequentially. But the graph expresses that either ResearcherA or ResearcherB (or both) must speak before the Synthesiser.
+
+---
+
+## SwarmAgent: explicit handoffs
+
+AG2 also introduces `SwarmAgent`, which takes explicit handoffs further — modelling agent-to-agent transfer as a deliberate action, not a routing decision.
+
+This pattern is similar to OpenAI Agents SDK handoffs. Each agent has a set of `after_work` functions that represent the agents it can hand off to. When an agent finishes, it explicitly chooses which handoff to make.
+
+```python
+from autogen.agentchat.contrib.swarm_agent import SwarmAgent, initiate_swarm_chat
+import os
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+billing = SwarmAgent(
+    "BillingAgent",
+    system_message="Handle billing questions. Resolve and say 'RESOLVED: Billing'.",
+    llm_config=llm_config,
+)
+
+tech = SwarmAgent(
+    "TechAgent",
+    system_message="Handle technical issues. Resolve and say 'RESOLVED: Tech'.",
+    llm_config=llm_config,
+)
+
+triage = SwarmAgent(
+    "TriageAgent",
+    system_message=(
+        "Classify the customer request: billing or technical. "
+        "Use the appropriate handoff function to transfer the customer."
+    ),
+    llm_config=llm_config,
+    functions=[billing.swarm_after_work, tech.swarm_after_work],
+)
+
+user_agent = UserProxyAgent(
+    name="Customer",
+    human_input_mode="NEVER",
+    is_termination_msg=lambda msg: "RESOLVED:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+
+initiate_swarm_chat(
+    initial_agent=triage,
+    agents=[triage, billing, tech],
+    user_agent=user_agent,
+    messages="My invoice has a charge I don't recognise.",
+    max_rounds=6,
+)
+```
+
+The Triage agent calls `billing.swarm_after_work` or `tech.swarm_after_work` as a function — an explicit, auditable handoff that appears in the conversation history as a tool call.
+
+<Callout type="note">
+SwarmAgent is conceptually similar to OpenAI Agents SDK handoffs and Claude's `allowed_tools: ['Agent']` pattern. All three represent the same idea: explicit, inspectable control transfer rather than implicit LLM-driven routing. If you have used any of these, SwarmAgent will feel familiar.
+</Callout>
+
+---
+
+## Choosing between AutoGen v0.2, DiGraphGroupChat, and SwarmAgent
+
+| Need | Best choice |
+|---|---|
+| Rapid prototyping, flexible agent dialogue | AutoGen v0.2 GroupChat, `"auto"` |
+| Fixed-order agent sequence | AutoGen v0.2 GroupChat, `"round_robin"` |
+| Auditable routing, loop and branch control | AG2 DiGraphGroupChat |
+| Explicit agent-to-agent handoffs | AG2 SwarmAgent |
+| Typed state, checkpointing, resumability | LangGraph |
+
+These are not mutually exclusive. A production system might use DiGraphGroupChat for the outer conversation structure and nested chats (Lesson 3) for sub-tasks within individual agent turns.
+
+---
+
+<Quiz
+  question="What library does DiGraphGroupChat use for the conversation graph structure?"
+  options={[
+    { text: "NetworkX — a standard Python graph library", correct: true, explanation: "Correct. DiGraphGroupChat takes a networkx.DiGraph as its graph parameter. This means you can use any NetworkX graph construction API to define the conversation structure." },
+    { text: "LangGraph — it reuses LangGraph's graph engine", correct: false, explanation: "DiGraphGroupChat is part of the AG2 package, not LangGraph. It uses NetworkX for the graph structure, not LangGraph's state machine engine." },
+    { text: "AutoGen's own built-in graph module", correct: false, explanation: "AutoGen does not have its own graph library. It uses NetworkX, which is a widely-used, mature Python graph library available via pip." },
+    { text: "PyTorch Geometric — the standard for graph neural networks", correct: false, explanation: "PyTorch Geometric is for graph neural networks and machine learning on graphs. DiGraphGroupChat uses NetworkX, which models conversation routing as a directed graph, not as a neural network." },
+  ]}
+/>
+
+<Quiz
+  question="What is the main benefit of DiGraphGroupChat over GroupChat with speaker_selection_method='auto'?"
+  options={[
+    { text: "DiGraphGroupChat is faster because it makes no LLM calls at all", correct: false, explanation: "DiGraphGroupChat still uses an LLM call to choose between multiple valid successors when there are branching edges. The benefit is not speed — it is determinism and auditability." },
+    { text: "DiGraphGroupChat makes the conversation routing inspectable and auditable via explicit graph edges", correct: true, explanation: "Correct. With DiGraphGroupChat, every possible routing decision is encoded in the graph. You can read the graph in code and know exactly which agent sequences are possible. With 'auto', you can only know after the fact." },
+    { text: "DiGraphGroupChat supports more than 10 agents; GroupChat does not", correct: false, explanation: "GroupChat has no hard limit on the number of agents. The distinction between GroupChat and DiGraphGroupChat is about routing determinism, not agent count." },
+    { text: "DiGraphGroupChat removes the need for is_termination_msg", correct: false, explanation: "DiGraphGroupChat does not change how termination works. You still need is_termination_msg and max_round to control when the conversation ends." },
+  ]}
+/>
+
+---
+
+## Summary
+
+AG2's `DiGraphGroupChat` takes the AutoGen agent model and adds LangGraph's core discipline: explicit, inspectable routing. You define the conversation graph in code using NetworkX. The manager can only route between edges you drew, not invent new paths.
+
+`SwarmAgent` goes further, making agent-to-agent handoffs explicit function calls that appear in the conversation history — the most auditable routing model AutoGen/AG2 offers.
+
+The choice of routing model should match your production requirements: flexible for exploration, graph-based for auditability, swarm-based for explicit handoff tracing.
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "I can build a DiGraphGroupChat using NetworkX with loop and branch edges",
+    "I understand that DiGraphGroupChat constrains routing but may still use LLM calls for branching",
+    "I can configure a SwarmAgent with explicit handoff functions",
+    "I can choose between GroupChat, DiGraphGroupChat, and SwarmAgent for a given use case",
+  ]}
+  next="/modules/module-19-autogen-ag2/lesson-05"
+/>

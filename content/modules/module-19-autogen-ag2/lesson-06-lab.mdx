@@ -1,0 +1,489 @@
+---
+title: "Lab: Iterative Code Review System with Nested Chats"
+module: "module-19-autogen-ag2"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab: Iterative Code Review System with Nested Chats
+
+In Lessons 2 and 3 you learned how to build GroupChats and wire nested chats onto them. In this lab you build a realistic quality-control pipeline that uses nested chats — not GroupChat — as its primary coordination mechanism.
+
+The system has four agents. A **Developer** writes code in response to a specification. After every Developer message, a **Reviewer** fires in a nested chat to check code quality. If the Reviewer approves, a **Security Auditor** fires in a second nested chat to check for vulnerabilities. The **Orchestrator** manages the outer loop and applies the `APPROVED:` termination condition.
+
+This architecture models a real engineering team where every piece of code goes through code review and security review before it is accepted.
+
+<LabBrief title="Iterative Code Review with Nested Chats" time="2–3 hours">
+Build a four-agent AutoGen system using nested chats to implement an automated code review and security audit pipeline. The system must be fully automated, log its full trace to JSON, and meet all hard constraints listed below.
+</LabBrief>
+
+---
+
+## Run this lab
+
+**Option A — VS Code / local terminal** (instructions below)
+
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
+
+<ColabButton notebook="module-19-lab" />
+
+---
+
+## Setup
+
+```bash
+pip install pyautogen
+export OPENAI_API_KEY="sk-..."
+# Or Anthropic:
+# export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+---
+
+## File structure
+
+You will create four files:
+
+```
+code_review_system/
+├── prompts.py         ← system messages for all agents
+├── agents.py          ← agent definitions
+├── nested_chats.py    ← nested chat registration
+├── runner.py          ← initiate_chat, trace logging
+└── README.md          ← token cost analysis (required)
+```
+
+Keep agent definitions separate from system messages. This makes it easy to tune prompts without touching agent wiring.
+
+---
+
+## Hard constraints
+
+Before you start, read these — they are graded:
+
+- Must use nested chats (not GroupChat) for the review pipeline
+- Termination condition: `"APPROVED: "` followed by the agent name (e.g., `"APPROVED: Developer"`)
+- `human_input_mode="NEVER"` for all agents — fully automated
+- `max_consecutive_auto_reply=6` for the Orchestrator
+- Chat history must be saved to `review_trace.json` after each run
+- No hardcoded API keys — read from environment variables only
+
+---
+
+## Step 1: Write your system messages (`prompts.py`)
+
+System messages are the most important part of this system. Spend time on them before writing any agent code.
+
+```python
+# prompts.py
+
+DEVELOPER_PROMPT = """
+You are a senior software developer. When given a specification, write clean,
+working Python code that fulfils it.
+
+Rules:
+- Write complete, runnable code (no placeholders or pseudocode)
+- Include docstrings for every function
+- Handle the most obvious edge cases
+- When you have revised based on feedback and believe the code is ready,
+  end your message with exactly: APPROVED: Developer
+
+Do not say APPROVED: Developer until you have addressed all Reviewer and
+Security Auditor feedback.
+"""
+
+REVIEWER_PROMPT = """
+You are a code quality reviewer. Read the Python code provided to you carefully.
+
+Evaluate:
+1. Is the code readable and well-structured?
+2. Are there clear variable and function names?
+3. Is error handling present where needed?
+4. Are edge cases handled?
+
+If the code meets your standards, respond with ONLY: "Code quality: APPROVED"
+If not, list your specific objections as a numbered list. Be concise.
+Do not suggest security fixes — that is the Security Auditor's job.
+"""
+
+SECURITY_PROMPT = """
+You are a security auditor. You will only be shown code that has already passed
+code quality review. Check it for security issues.
+
+Look for:
+1. Injection vulnerabilities (SQL injection, command injection)
+2. Hardcoded credentials or secrets
+3. Insecure use of eval() or exec()
+4. Missing input validation on user-supplied data
+5. Insecure file operations
+
+If no security issues are found, respond with ONLY: "Security: APPROVED"
+If issues are found, list them as a numbered list. Be specific.
+"""
+
+ORCHESTRATOR_PROMPT = """
+You are an orchestrator. Your job is to pass the specification to the Developer
+and manage the review pipeline. You do not write code or provide feedback yourself.
+"""
+```
+
+---
+
+## Step 2: Define your agents (`agents.py`)
+
+```python
+# agents.py
+import os
+from autogen import AssistantAgent, UserProxyAgent
+from prompts import DEVELOPER_PROMPT, REVIEWER_PROMPT, SECURITY_PROMPT, ORCHESTRATOR_PROMPT
+
+llm_config = {
+    "config_list": [
+        {
+            "model": "gpt-4o-mini",
+            "api_key": os.environ["OPENAI_API_KEY"],
+        }
+    ],
+    "temperature": 0,
+}
+
+# TODO: Define the Developer AssistantAgent
+# - name: "Developer"
+# - system_message: DEVELOPER_PROMPT
+# - llm_config: llm_config
+developer = None  # replace with your implementation
+
+# TODO: Define the Reviewer AssistantAgent
+# - name: "Reviewer"
+# - system_message: REVIEWER_PROMPT
+# - llm_config: llm_config
+reviewer = None  # replace with your implementation
+
+# TODO: Define the SecurityAuditor AssistantAgent
+# - name: "SecurityAuditor"
+# - system_message: SECURITY_PROMPT
+# - llm_config: llm_config
+security_auditor = None  # replace with your implementation
+
+# TODO: Define the Orchestrator UserProxyAgent
+# Requirements:
+# - name: "Orchestrator"
+# - human_input_mode: "NEVER"
+# - max_consecutive_auto_reply: 6
+# - is_termination_msg: lambda that returns True when "APPROVED: Developer" is in content
+# - code_execution_config: False
+orchestrator = None  # replace with your implementation
+```
+
+<details>
+<summary>Solution: agents.py</summary>
+
+```python
+# agents.py
+import os
+from autogen import AssistantAgent, UserProxyAgent
+from prompts import DEVELOPER_PROMPT, REVIEWER_PROMPT, SECURITY_PROMPT, ORCHESTRATOR_PROMPT
+
+llm_config = {
+    "config_list": [
+        {
+            "model": "gpt-4o-mini",
+            "api_key": os.environ["OPENAI_API_KEY"],
+        }
+    ],
+    "temperature": 0,
+}
+
+developer = AssistantAgent(
+    name="Developer",
+    system_message=DEVELOPER_PROMPT,
+    llm_config=llm_config,
+)
+
+reviewer = AssistantAgent(
+    name="Reviewer",
+    system_message=REVIEWER_PROMPT,
+    llm_config=llm_config,
+)
+
+security_auditor = AssistantAgent(
+    name="SecurityAuditor",
+    system_message=SECURITY_PROMPT,
+    llm_config=llm_config,
+)
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=6,
+    is_termination_msg=lambda msg: "APPROVED: Developer" in msg.get("content", ""),
+    code_execution_config=False,
+)
+```
+
+</details>
+
+---
+
+## Step 3: Register nested chats (`nested_chats.py`)
+
+This is the heart of the lab. Two nested chats fire in sequence every time the Developer speaks:
+1. Reviewer fires first
+2. If Reviewer approves, SecurityAuditor fires
+
+```python
+# nested_chats.py
+from agents import orchestrator, developer, reviewer, security_auditor
+
+
+def build_review_message(recipient, messages, sender, config):
+    """
+    Build the first message for the Reviewer nested chat.
+    Extract the latest Developer message and ask for a code review.
+    """
+    # TODO: Get the last message content from the messages list
+    # and return a review prompt string
+    pass
+
+
+def build_security_message(recipient, messages, sender, config):
+    """
+    Build the first message for the SecurityAuditor nested chat.
+    The Reviewer has approved, so pass the code for security review.
+    """
+    # TODO: Get the last message content from the messages list
+    # and return a security audit prompt string
+    pass
+
+
+def should_run_security_audit(messages) -> bool:
+    """
+    Return True only if the Reviewer's response contains 'Code quality: APPROVED'.
+    This prevents the security audit from running on rejected code.
+    """
+    # TODO: Check the last message in messages for the approval string
+    pass
+
+
+def register_pipeline(orchestrator, developer, reviewer, security_auditor):
+    """Register the two-stage nested chat pipeline on the Orchestrator."""
+    # TODO: Call orchestrator.register_nested_chats with a chat_queue containing
+    # two entries: one for the reviewer, one for the security_auditor.
+    # The security_auditor entry should only fire if should_run_security_audit returns True.
+    # Use summary_method="last_msg" for both.
+    # trigger=developer for both (they fire when the Developer speaks)
+    pass
+```
+
+<details>
+<summary>Solution: nested_chats.py</summary>
+
+```python
+# nested_chats.py
+from agents import orchestrator, developer, reviewer, security_auditor
+
+
+def build_review_message(recipient, messages, sender, config):
+    last_code = messages[-1]["content"]
+    return (
+        f"Please review this Python code for quality, readability, and edge case handling:\n\n"
+        f"{last_code}"
+    )
+
+
+def build_security_message(recipient, messages, sender, config):
+    # Walk back to find the Developer's last message (code)
+    for msg in reversed(messages):
+        if msg.get("name") == "Developer":
+            return (
+                f"This code has passed quality review. Please audit it for security vulnerabilities:\n\n"
+                f"{msg['content']}"
+            )
+    return f"Please audit this code for security vulnerabilities:\n\n{messages[-1]['content']}"
+
+
+def should_run_security_audit(messages) -> bool:
+    if not messages:
+        return False
+    last = messages[-1].get("content", "")
+    return "Code quality: APPROVED" in last
+
+
+def register_pipeline(orchestrator, developer, reviewer, security_auditor):
+    orchestrator.register_nested_chats(
+        chat_queue=[
+            {
+                "recipient": reviewer,
+                "message": build_review_message,
+                "max_turns": 1,
+                "summary_method": "last_msg",
+            },
+            {
+                "recipient": security_auditor,
+                "message": build_security_message,
+                "max_turns": 1,
+                "summary_method": "last_msg",
+                "condition": should_run_security_audit,  # only runs if reviewer approved
+            },
+        ],
+        trigger=developer,
+    )
+```
+
+</details>
+
+---
+
+## Step 4: Wire the runner (`runner.py`)
+
+```python
+# runner.py
+import json
+import datetime
+from agents import orchestrator, developer, reviewer, security_auditor
+from nested_chats import register_pipeline
+
+SPECIFICATION = """
+Write a Python function called `safe_divide(a, b)` that:
+1. Takes two numbers as input
+2. Returns the result of a / b
+3. Raises a ValueError with a helpful message if b is zero
+4. Includes a docstring
+5. Has a simple __main__ block that demonstrates three cases:
+   - Normal division
+   - Division that produces a float
+   - Division by zero (caught and printed)
+"""
+
+
+def save_trace(orchestrator, manager):
+    """Save the full chat history to a timestamped JSON file."""
+    # TODO: Get messages from orchestrator.chat_messages[manager]
+    # and save them to review_trace.json
+    pass
+
+
+def main():
+    # TODO:
+    # 1. Call register_pipeline to wire the nested chats
+    # 2. Initiate the chat between orchestrator and developer with SPECIFICATION
+    # 3. Save the trace to review_trace.json
+    # 4. Print the final approved message (or a failure notice)
+    pass
+
+
+if __name__ == "__main__":
+    main()
+```
+
+<details>
+<summary>Solution: runner.py</summary>
+
+```python
+# runner.py
+import json
+import datetime
+from agents import orchestrator, developer, reviewer, security_auditor
+from nested_chats import register_pipeline
+
+SPECIFICATION = """
+Write a Python function called `safe_divide(a, b)` that:
+1. Takes two numbers as input
+2. Returns the result of a / b
+3. Raises a ValueError with a helpful message if b is zero
+4. Includes a docstring
+5. Has a simple __main__ block that demonstrates three cases:
+   - Normal division
+   - Division that produces a float
+   - Division by zero (caught and printed)
+"""
+
+
+def save_trace(orchestrator, recipient):
+    messages = orchestrator.chat_messages.get(recipient, [])
+    path = "review_trace.json"
+    with open(path, "w") as f:
+        json.dump(messages, f, indent=2)
+    print(f"Trace saved to {path} ({len(messages)} messages)")
+
+
+def main():
+    register_pipeline(orchestrator, developer, reviewer, security_auditor)
+
+    try:
+        orchestrator.initiate_chat(
+            developer,
+            message=f"Implement the following specification:\n\n{SPECIFICATION}",
+        )
+    except Exception as e:
+        print(f"Chat failed: {type(e).__name__}: {e}")
+    finally:
+        save_trace(orchestrator, developer)
+
+    # Find the approved message
+    messages = orchestrator.chat_messages.get(developer, [])
+    approved = next(
+        (m["content"] for m in reversed(messages) if "APPROVED: Developer" in m.get("content", "")),
+        None,
+    )
+    if approved:
+        print("\n=== APPROVED CODE ===")
+        print(approved)
+    else:
+        print("\nNo approved message found — check review_trace.json for the full history.")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+</details>
+
+---
+
+## Step 5: Extension challenges
+
+Once your base system is working, try these:
+
+**Extension A — Add a third review stage.** Add a **DocumentationAgent** that fires after the Security Auditor approves and checks that the docstrings are complete and accurate. The full pipeline becomes: Reviewer → SecurityAuditor → DocumentationAgent.
+
+**Extension B — Use round_robin for the outer loop.** Swap the outer `initiate_chat` conversation between Orchestrator and Developer to a GroupChat with `round_robin` selection. Measure whether this changes the total number of LLM calls.
+
+**Extension C — Cost instrumentation.** After each run, parse `review_trace.json` and count:
+- Total messages in the outer conversation
+- Total nested chat messages (you will need to log them separately)
+- Estimated token count based on message length
+
+Print a cost summary at the end of the run.
+
+---
+
+## README requirement
+
+Your submission must include a `README.md` with one paragraph answering this question:
+
+> What is the token cost model for this system, and how would you reduce it by 50%?
+
+Your answer should reference:
+- How many LLM calls occur per Developer revision cycle (outer + nested)
+- Where token accumulation is most severe
+- One specific change to the code that would cut cost by roughly half
+
+---
+
+## Submission checklist
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "prompts.py contains system messages for all four agents",
+    "agents.py defines Developer, Reviewer, SecurityAuditor, and Orchestrator with correct configuration",
+    "nested_chats.py registers two-stage nested chat pipeline triggered by Developer",
+    "runner.py initiates the chat and saves review_trace.json",
+    "Termination condition is 'APPROVED: Developer' in is_termination_msg",
+    "human_input_mode='NEVER' and max_consecutive_auto_reply=6 on Orchestrator",
+    "No hardcoded API keys anywhere in the codebase",
+    "README.md answers the token cost question with specifics",
+  ]}
+  next="/modules/module-19-autogen-ag2"
+/>

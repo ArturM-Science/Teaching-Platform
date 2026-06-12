@@ -1,0 +1,687 @@
+---
+title: "Lab: Multi-Agent Research System with ADK + Vertex AI"
+module: "module-17-google-adk"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab: Multi-Agent Research System with ADK + Vertex AI
+
+This lab puts everything from the module together. You will build a three-tier research system, verify it locally, and optionally deploy it to Vertex AI.
+
+<LabBrief title="Multi-Agent Research System with ADK + Vertex AI" time="2–3 hours">
+#### Objective
+Build a production-ready three-tier research system using ADK 2.0:
+- **Root orchestrator** (`LlmAgent`) decomposes the research question and delegates
+- **Research pipeline** (`SequentialAgent`): planner → parallel searchers (`ParallelAgent` with 2 branches) → synthesiser
+- **Critic** (`LlmAgent`) reviews the synthesis and writes its verdict to session state
+- `DatabaseSessionService` with SQLite for persistent state across restarts
+- Local verification with `adk dev`, then optional deploy to Vertex AI
+
+#### Setup
+```bash
+pip install google-adk google-cloud-aiplatform[adk]
+export GOOGLE_API_KEY="your-google-ai-studio-key"
+# For Vertex AI deployment (optional):
+# gcloud auth application-default login
+# export GOOGLE_CLOUD_PROJECT="your-project-id"
+```
+
+#### Deliverables
+- `agent.py` — all agent definitions (orchestrator, pipeline, critic)
+- `tools.py` — research tools (web search stub, summariser, fact-checker)
+- `session.py` — session service setup with `DatabaseSessionService`
+- `runner.py` — async runner loop with event printing
+- `adk_config.yaml` — Vertex AI deployment config
+- `README.md` — diagram of agent tree + one paragraph on A2A
+
+#### Hard constraints
+- Must use `SequentialAgent` for the inner pipeline (not `LlmAgent` for that part)
+- Must use `ParallelAgent` for the two search branches
+- Must use `DatabaseSessionService(db_url="sqlite:///./sessions.db")`
+- All tools must return structured dicts (not plain strings)
+- Critic must write its verdict: `tool_context.state["critic_verdict"] = verdict`
+</LabBrief>
+
+## Run this lab
+
+**Option A — VS Code / local terminal** (starter code below)
+
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
+
+<ColabButton notebook="module-17-lab" />
+
+---
+
+## Agent tree overview
+
+Before writing code, map the system you are building:
+
+```
+root_orchestrator (LlmAgent)
+│  Receives the user's research question
+│  Delegates to research_pipeline, then to critic
+│
+├── research_pipeline (SequentialAgent)
+│   │  Runs three stages in order
+│   │
+│   ├── planner (LlmAgent)
+│   │     Breaks question into sub-questions
+│   │     Writes: session.state["research_plan"]
+│   │
+│   ├── parallel_searchers (ParallelAgent)
+│   │   ├── web_searcher (LlmAgent)
+│   │   │     Searches the web for first sub-question
+│   │   │     Writes: session.state["web_results"]
+│   │   └── academic_searcher (LlmAgent)
+│   │         Searches academic sources for second sub-question
+│   │         Writes: session.state["academic_results"]
+│   │
+│   └── synthesiser (LlmAgent)
+│         Combines web and academic results into a draft
+│         Writes: session.state["synthesis_draft"]
+│
+└── critic (LlmAgent)
+      Reviews the synthesis for gaps and accuracy
+      Writes: session.state["critic_verdict"]
+```
+
+## Starter code
+
+### tools.py
+
+```python
+# tools.py — research tools for the ADK lab
+# TODO: implement the stub functions to return real data (or keep stubs for now)
+
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+
+
+@tool
+def plan_research(question: str, tool_context: ToolContext) -> dict:
+    """Break a research question into two focused sub-questions.
+
+    Args:
+        question: The main research question to decompose.
+        tool_context: Injected by ADK.
+
+    Returns:
+        A dict with 'sub_questions' (list of 2 strings) and 'original_question'.
+    """
+    # TODO: Replace stub with a real decomposition strategy
+    # Hint: the LLM calling this tool will phrase a good question —
+    # for a real system you might call another LLM here or use a template
+    sub_questions = [
+        f"What are the most recent developments in: {question}",
+        f"What are the key academic findings and controversies about: {question}",
+    ]
+    tool_context.state["research_plan"] = sub_questions
+    tool_context.state["original_question"] = question
+    return {"sub_questions": sub_questions, "original_question": question}
+
+
+@tool
+def search_web(tool_context: ToolContext) -> dict:
+    """Search the web for the first sub-question in the research plan.
+
+    Args:
+        tool_context: Injected by ADK.
+
+    Returns:
+        A dict with 'results' (list of strings) and 'sub_question'.
+    """
+    plan = tool_context.state.get("research_plan", [])
+    if not plan:
+        return {"error": "No research plan in session state. Run planner first."}
+
+    sub_question = plan[0]
+
+    # TODO: Replace stub with a real web search API call
+    # Options: SerpAPI, Google Custom Search, Tavily, etc.
+    results = [
+        f"[Web stub 1] Finding about: {sub_question}",
+        f"[Web stub 2] Another finding about: {sub_question}",
+        f"[Web stub 3] Third finding about: {sub_question}",
+    ]
+
+    tool_context.state["web_results"] = results
+    tool_context.state["web_sub_question"] = sub_question
+    return {"results": results, "sub_question": sub_question}
+
+
+@tool
+def search_academic(tool_context: ToolContext) -> dict:
+    """Search academic databases for the second sub-question in the research plan.
+
+    Args:
+        tool_context: Injected by ADK.
+
+    Returns:
+        A dict with 'results' (list of strings) and 'sub_question'.
+    """
+    plan = tool_context.state.get("research_plan", [])
+    if len(plan) < 2:
+        return {"error": "Research plan has fewer than 2 sub-questions."}
+
+    sub_question = plan[1]
+
+    # TODO: Replace stub with a real academic search API call
+    # Options: Semantic Scholar API, PubMed, arXiv, Crossref
+    results = [
+        f"[Academic stub 1] Paper finding: {sub_question}",
+        f"[Academic stub 2] Study result: {sub_question}",
+    ]
+
+    tool_context.state["academic_results"] = results
+    tool_context.state["academic_sub_question"] = sub_question
+    return {"results": results, "sub_question": sub_question}
+
+
+@tool
+def synthesise_results(tool_context: ToolContext) -> dict:
+    """Combine web and academic results into a synthesis draft.
+
+    Args:
+        tool_context: Injected by ADK.
+
+    Returns:
+        A dict with 'draft' (string) and 'source_count' (int).
+    """
+    question = tool_context.state.get("original_question", "Unknown question")
+    web_results = tool_context.state.get("web_results", [])
+    academic_results = tool_context.state.get("academic_results", [])
+
+    if not web_results and not academic_results:
+        return {"error": "No research results found. Run searchers first."}
+
+    # TODO: In a real system, you might call an LLM here to write a proper synthesis
+    # For now, concatenate the results into a structured draft
+    draft_parts = [f"# Research Synthesis: {question}\n"]
+
+    if web_results:
+        draft_parts.append("## Web Sources\n")
+        for result in web_results:
+            draft_parts.append(f"- {result}")
+
+    if academic_results:
+        draft_parts.append("\n## Academic Sources\n")
+        for result in academic_results:
+            draft_parts.append(f"- {result}")
+
+    draft = "\n".join(draft_parts)
+    total_sources = len(web_results) + len(academic_results)
+
+    tool_context.state["synthesis_draft"] = draft
+    return {"draft": draft, "source_count": total_sources}
+
+
+@tool
+def critique_synthesis(tool_context: ToolContext) -> dict:
+    """Review the synthesis draft and produce a verdict.
+
+    Args:
+        tool_context: Injected by ADK.
+
+    Returns:
+        A dict with 'verdict' ('approved' or 'needs_revision'), 'issues' list,
+        and 'recommendations' list.
+    """
+    draft = tool_context.state.get("synthesis_draft")
+    web_results = tool_context.state.get("web_results", [])
+    academic_results = tool_context.state.get("academic_results", [])
+
+    if not draft:
+        verdict = {
+            "verdict": "needs_revision",
+            "issues": ["No synthesis draft found in session state"],
+            "recommendations": ["Run the synthesiser before the critic"],
+        }
+        tool_context.state["critic_verdict"] = verdict
+        return verdict
+
+    issues = []
+    recommendations = []
+
+    # TODO: Replace with real quality checks
+    # Real implementation might: check source diversity, look for unsupported claims,
+    # verify that both sub-questions were addressed, check for logical gaps
+
+    if len(web_results) < 2:
+        issues.append("Insufficient web sources — fewer than 2 results")
+        recommendations.append("Broaden the web search query")
+
+    if not academic_results:
+        issues.append("No academic sources found")
+        recommendations.append("Search academic databases with a more specific query")
+
+    if len(draft) < 200:
+        issues.append("Synthesis is too brief — may be missing key information")
+        recommendations.append("Expand synthesis with more detail from available sources")
+
+    if issues:
+        verdict = "needs_revision"
+    else:
+        verdict = "approved"
+
+    result = {
+        "verdict": verdict,
+        "issues": issues,
+        "recommendations": recommendations,
+        "source_count": len(web_results) + len(academic_results),
+    }
+
+    # CONSTRAINT: Critic must write verdict to session state
+    tool_context.state["critic_verdict"] = result
+    return result
+```
+
+<details>
+<summary>Stuck on tools.py? Reveal hints</summary>
+
+- Every tool that reads session state should handle the case where the key is missing — return an `{"error": "..."}` dict rather than raising an exception
+- `tool_context.state` is a plain Python dict — use `.get(key, default)` for safe reads
+- The critic is the only tool that must write `critic_verdict` to state — this is the constraint. Make sure your implementation includes: `tool_context.state["critic_verdict"] = result`
+- For a more realistic version, replace the stubs in `search_web` with a call to Tavily or SerpAPI: they both have simple Python clients and free tiers
+
+</details>
+
+### agent.py
+
+```python
+# agent.py — all agent definitions for the research system
+
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+from tools import (
+    plan_research,
+    search_web,
+    search_academic,
+    synthesise_results,
+    critique_synthesis,
+)
+
+# ─────────────────────────────────────────────
+# Stage 1: Planner
+# ─────────────────────────────────────────────
+planner = LlmAgent(
+    name="planner",
+    model="gemini-2.0-flash",
+    tools=[plan_research],
+    instruction=(
+        "You are a research planner. Given a research question, use plan_research "
+        "to break it into two focused sub-questions. The first sub-question should "
+        "target recent developments; the second should target academic findings. "
+        "Call plan_research once and report what was planned."
+    ),
+)
+
+# ─────────────────────────────────────────────
+# Stage 2a: Web searcher (runs in parallel)
+# ─────────────────────────────────────────────
+web_searcher = LlmAgent(
+    name="web_searcher",
+    model="gemini-2.0-flash",
+    tools=[search_web],
+    instruction=(
+        "You are a web search specialist. Call search_web to retrieve web results "
+        "for the first sub-question in the research plan. Report the results found."
+    ),
+)
+
+# ─────────────────────────────────────────────
+# Stage 2b: Academic searcher (runs in parallel)
+# ─────────────────────────────────────────────
+academic_searcher = LlmAgent(
+    name="academic_searcher",
+    model="gemini-2.0-flash",
+    tools=[search_academic],
+    instruction=(
+        "You are an academic search specialist. Call search_academic to retrieve "
+        "academic results for the second sub-question in the research plan. "
+        "Report the papers or studies found."
+    ),
+)
+
+# ─────────────────────────────────────────────
+# Stage 2: Parallel search (fan-out)
+# ─────────────────────────────────────────────
+# TODO: Create a ParallelAgent named "parallel_searchers"
+# containing web_searcher and academic_searcher
+parallel_searchers = None  # Replace with ParallelAgent(...)
+
+# ─────────────────────────────────────────────
+# Stage 3: Synthesiser
+# ─────────────────────────────────────────────
+synthesiser = LlmAgent(
+    name="synthesiser",
+    model="gemini-2.0-flash",
+    tools=[synthesise_results],
+    instruction=(
+        "You are a research synthesiser. Call synthesise_results to combine "
+        "all web and academic results from session state into a structured draft. "
+        "Report how many sources were included."
+    ),
+)
+
+# ─────────────────────────────────────────────
+# Research pipeline: planner → [web || academic] → synthesiser
+# ─────────────────────────────────────────────
+# TODO: Create a SequentialAgent named "research_pipeline"
+# containing planner, parallel_searchers, and synthesiser
+research_pipeline = None  # Replace with SequentialAgent(...)
+
+# ─────────────────────────────────────────────
+# Critic: reviews the synthesis
+# ─────────────────────────────────────────────
+critic = LlmAgent(
+    name="critic",
+    model="gemini-2.0-flash",
+    tools=[critique_synthesis],
+    instruction=(
+        "You are a research critic. Call critique_synthesis to review the synthesis "
+        "draft from session state. Report the verdict, any issues found, and "
+        "your recommendations. Be constructive and specific."
+    ),
+)
+
+# ─────────────────────────────────────────────
+# Root orchestrator: delegates to pipeline then critic
+# ─────────────────────────────────────────────
+# TODO: Create the root LlmAgent named "root_orchestrator"
+# It should have research_pipeline and critic as sub_agents
+# Write a clear instruction that tells it to:
+# 1. Delegate to research_pipeline with the user's question
+# 2. Then delegate to critic to review the result
+# 3. Return a final answer that includes the synthesis and the critic's verdict
+root_orchestrator = None  # Replace with LlmAgent(...)
+```
+
+<details>
+<summary>Stuck on agent.py? Reveal the completed agent definitions</summary>
+
+```python
+# Completed parallel_searchers
+parallel_searchers = ParallelAgent(
+    name="parallel_searchers",
+    sub_agents=[web_searcher, academic_searcher],
+)
+
+# Completed research_pipeline
+research_pipeline = SequentialAgent(
+    name="research_pipeline",
+    sub_agents=[planner, parallel_searchers, synthesiser],
+)
+
+# Completed root_orchestrator
+root_orchestrator = LlmAgent(
+    name="root_orchestrator",
+    model="gemini-2.0-flash",
+    sub_agents=[research_pipeline, critic],
+    instruction=(
+        "You are a research orchestrator. Given a research question:\n"
+        "1. Delegate to research_pipeline to plan, search, and synthesise findings\n"
+        "2. Delegate to critic to review the synthesis\n"
+        "3. Read critic_verdict from the results\n"
+        "4. Return a final response that includes:\n"
+        "   - A summary of the synthesis draft\n"
+        "   - The critic's verdict (approved or needs_revision)\n"
+        "   - Any issues or recommendations from the critic\n"
+        "Be concise and structured in your final response."
+    ),
+)
+```
+
+</details>
+
+### session.py
+
+```python
+# session.py — session service setup with DatabaseSessionService
+
+import asyncio
+from google.adk.sessions import DatabaseSessionService
+
+# CONSTRAINT: Must use DatabaseSessionService, not InMemorySessionService
+session_service = DatabaseSessionService(db_url="sqlite:///./sessions.db")
+
+
+async def get_or_create_session(user_id: str, app_name: str = "research_app"):
+    """Get an existing session for this user or create a new one.
+    
+    Uses a stable session ID so sessions persist across restarts.
+    """
+    import hashlib
+    session_id = hashlib.sha256(f"{app_name}:{user_id}".encode()).hexdigest()[:32]
+
+    # Try to retrieve existing session
+    session = await session_service.get_session(
+        app_name=app_name,
+        user_id=user_id,
+        session_id=session_id,
+    )
+
+    if session is None:
+        session = await session_service.create_session(
+            app_name=app_name,
+            user_id=user_id,
+            session_id=session_id,
+        )
+        print(f"Created new session: {session.id}")
+    else:
+        print(f"Resumed existing session: {session.id}")
+
+    return session
+```
+
+### runner.py
+
+```python
+# runner.py — async runner loop
+
+import asyncio
+from google.adk.runners import Runner
+from google.genai.types import Content, Part
+from agent import root_orchestrator
+from session import session_service, get_or_create_session
+
+
+async def run_research(question: str, user_id: str = "demo_user"):
+    """Run the research pipeline for a given question."""
+    session = await get_or_create_session(user_id=user_id)
+
+    runner = Runner(
+        agent=root_orchestrator,
+        app_name="research_app",
+        session_service=session_service,
+    )
+
+    message = Content(parts=[Part(text=question)])
+
+    print(f"\nResearching: {question}")
+    print("─" * 60)
+
+    async for event in runner.run_async(
+        user_id=user_id,
+        session_id=session.id,
+        new_message=message,
+    ):
+        # Print intermediate events for visibility
+        if hasattr(event, "author") and event.author:
+            event_type = type(event).__name__
+            print(f"  [{event.author}] {event_type}")
+
+        if event.is_final_response():
+            text = ""
+            if event.content and event.content.parts:
+                text = event.content.parts[0].text
+            print(f"\nFinal Answer:\n{text}")
+
+            # Print the critic's verdict from session state
+            final_session = await session_service.get_session(
+                app_name="research_app",
+                user_id=user_id,
+                session_id=session.id,
+            )
+            if final_session:
+                verdict = final_session.state.get("critic_verdict")
+                if verdict:
+                    print(f"\nCritic verdict: {verdict.get('verdict', 'unknown')}")
+                    if verdict.get("issues"):
+                        print(f"Issues: {verdict['issues']}")
+
+
+if __name__ == "__main__":
+    question = "What is the current state of research into large language model reasoning?"
+    asyncio.run(run_research(question))
+```
+
+<details>
+<summary>Stuck on the runner? Common issues and fixes</summary>
+
+**Issue: `root_orchestrator is None`**
+You have not replaced the `None` placeholder in `agent.py`. Complete the `parallel_searchers`, `research_pipeline`, and `root_orchestrator` definitions before running the runner.
+
+**Issue: `ModuleNotFoundError: No module named 'google.adk'`**
+Run `pip install google-adk` and make sure you are in the correct virtual environment.
+
+**Issue: `GOOGLE_API_KEY` not found**
+Set the environment variable: `export GOOGLE_API_KEY="your-key"`. Get a free key at [aistudio.google.com](https://aistudio.google.com).
+
+**Issue: Session state not persisting between runs**
+Make sure you are using `DatabaseSessionService` (not `InMemorySessionService`) AND that you are using a stable session ID (the hash-based approach in `session.py`). If the session ID changes each run, it creates a new session.
+
+</details>
+
+### adk_config.yaml
+
+```yaml
+# adk_config.yaml — Vertex AI deployment configuration
+
+# The Python module containing your root agent
+# This file (agent.py) must define a variable called root_agent
+# or contain the agent accessible at module level
+agent_module: agent
+
+# Dependencies to install in the deployment container
+requirements: requirements.txt
+
+# Environment variables injected at runtime
+# Do NOT put API keys here — use Secret Manager instead
+env_vars:
+  APP_ENV: production
+  LOG_LEVEL: INFO
+```
+
+Create a matching `requirements.txt`:
+
+```
+google-adk>=2.0.0
+google-cloud-aiplatform[adk]>=1.60.0
+```
+
+## Testing your system
+
+Run the following checks in order before deploying:
+
+```bash
+# 1. Install dependencies
+pip install google-adk
+
+# 2. Set API key
+export GOOGLE_API_KEY="your-key"
+
+# 3. Start the dev UI — verify in the browser
+adk dev
+
+# 4. Run the runner directly
+python runner.py
+
+# 5. Verify SQLite persistence — restart the process and run again
+# The session should resume with the same ID
+python runner.py
+
+# 6. (Optional) Deploy to Vertex AI
+adk deploy --project=YOUR_PROJECT --region=us-central1
+```
+
+## Verification checklist
+
+Before submitting, verify each constraint:
+
+```bash
+# Check 1: SequentialAgent is used for the pipeline
+grep -n "SequentialAgent" agent.py
+# Should show: research_pipeline = SequentialAgent(...)
+
+# Check 2: ParallelAgent is used for search branches
+grep -n "ParallelAgent" agent.py
+# Should show: parallel_searchers = ParallelAgent(...)
+
+# Check 3: DatabaseSessionService is used
+grep -n "DatabaseSessionService" session.py
+# Should show: session_service = DatabaseSessionService(...)
+
+# Check 4: critic_verdict is written to state
+grep -n "critic_verdict" tools.py
+# Should show: tool_context.state["critic_verdict"] = ...
+
+# Check 5: All tools return dicts
+# Check manually — look for any tool returning a plain string instead of a dict
+```
+
+## README.md requirements
+
+Your `README.md` should include:
+
+1. An ASCII or Markdown diagram of the agent tree (like the one at the top of this lab)
+2. A one-paragraph answer to this question:
+
+> **When would you connect a LangGraph agent to this ADK system using the A2A protocol?**
+> 
+> Think about: what would need to be true about the LangGraph agent for A2A to be worth the overhead? What kinds of tasks is LangGraph better at than ADK's built-in `SequentialAgent`?
+
+A strong answer will mention specific scenarios — for example, if the research pipeline needed to support complex conditional loops (retry on low-quality results, branch on topic category) that are awkward to express in `SequentialAgent`.
+
+## Extension challenges
+
+Once the base system works, try these:
+
+**Extension 1 — Real search API**
+Replace the stubs in `tools.py` with real web search. The [Tavily API](https://tavily.com) has a Python client and a free tier:
+
+```python
+from tavily import TavilyClient
+client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+results = client.search(query=sub_question, max_results=5)
+```
+
+**Extension 2 — Critic-driven retry**
+Read the critic's verdict in the orchestrator and, if it is `needs_revision`, call `research_pipeline` again with a refined question. This requires switching the orchestrator to an `LlmAgent` with explicit retry logic in its instruction.
+
+**Extension 3 — A2A cross-framework call**
+If you have a LangGraph agent from the LangGraph module running locally, register it as an `AgentTool` in your orchestrator:
+
+```python
+from google.adk.tools.agent_tool import AgentTool
+
+langgraph_tool = AgentTool(
+    url="http://localhost:8001/agent",
+    description="A LangGraph agent specialised in document summarisation.",
+)
+```
+
+Then update the orchestrator's instruction to call it for long-form source documents.
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I have agent.py with all three agent types (LlmAgent, SequentialAgent, ParallelAgent)",
+    "I have tools.py with all five tools returning structured dicts",
+    "I have session.py using DatabaseSessionService with SQLite",
+    "I have runner.py that prints the critic verdict from session state",
+    "I have adk_config.yaml configured for Vertex AI deployment",
+    "I have README.md with an agent tree diagram and the A2A reflection paragraph",
+    "The system runs end-to-end with python runner.py",
+  ]}
+  next="/modules/module-17-google-adk"
+/>

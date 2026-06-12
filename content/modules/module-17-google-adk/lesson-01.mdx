@@ -1,0 +1,261 @@
+---
+title: "ADK Mental Model: Hierarchical Trees and the A2A Protocol"
+module: "module-17-google-adk"
+lesson: 1
+slug: "lesson-01"
+---
+
+# ADK Mental Model: Hierarchical Trees and the A2A Protocol
+
+Google's Agent Development Kit (ADK 2.0) is built around one central idea: agents form a tree, and the root delegates to branches. Once you see this structure, everything else — tools, orchestration, deployment — falls into place.
+
+<LearningObjectives items={[
+  "Describe ADK's hierarchical tree model and why it differs from flat agent lists",
+  "Distinguish between LlmAgent, SequentialAgent, and ParallelAgent",
+  "Explain what the A2A protocol enables that regular Python function calls cannot",
+  "Compare ADK with LangGraph and CrewAI at the design philosophy level",
+  "Read basic ADK imports and know where each class comes from",
+]} />
+
+## Why a tree?
+
+Most agent frameworks give you a flat list of agents and let them talk to each other. ADK takes a different approach: every system has exactly one **root agent**, and that agent can delegate work to **sub-agents**. Sub-agents can have their own sub-agents. The result is a tree.
+
+This is not arbitrary. Enterprise systems are already hierarchical — a manager delegates to a team lead who delegates to individual contributors. ADK encodes this reality directly into the framework. When something goes wrong, you follow the branch. When you want to add capability, you attach a new sub-agent. The structure is auditable in a way that a flat peer-to-peer mesh is not.
+
+```
+root_orchestrator
+├── planner_agent
+├── research_pipeline (SequentialAgent)
+│   ├── topic_extractor
+│   ├── parallel_searchers (ParallelAgent)
+│   │   ├── web_searcher
+│   │   └── academic_searcher
+│   └── synthesiser
+└── critic_agent
+```
+
+The root agent decides what to delegate and to whom. Sub-agents do not know about their siblings — they only know about their own tools and sub-agents. This isolation is a feature: it limits blast radius when an agent misbehaves.
+
+## The three agent types
+
+ADK 2.0 ships with three fundamental agent classes. Every ADK system is built by composing these three.
+
+### LlmAgent
+
+An agent backed by a language model. It reasons, calls tools, and decides what to do next. You give it a model, a set of tools, and an instruction — it handles everything else.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools import tool
+
+@tool
+def search_web(query: str) -> dict:
+    """Search the web for a given query and return results."""
+    # Real implementation would call a search API
+    return {"results": [f"Result for: {query}"]}
+
+researcher = LlmAgent(
+    name="researcher",
+    model="gemini-2.0-flash",
+    tools=[search_web],
+    instruction="You are a research assistant. Search for information and summarise your findings clearly.",
+)
+```
+
+`LlmAgent` is the workhorse of ADK. Any time you need reasoning, judgment, or flexible tool selection, you reach for `LlmAgent`.
+
+### SequentialAgent
+
+A deterministic pipeline that runs its sub-agents **in order**, one after the other. No LLM decides the order — it is fixed at construction time. Each sub-agent writes its output to session state; the next reads from it.
+
+```python
+from google.adk.agents import SequentialAgent
+
+pipeline = SequentialAgent(
+    name="research_pipeline",
+    sub_agents=[planner, researcher, synthesiser],
+)
+```
+
+`SequentialAgent` is appropriate when the flow is always the same: step 1, then step 2, then step 3. It adds zero LLM calls for routing — it simply moves to the next agent when the current one finishes.
+
+### ParallelAgent
+
+Runs its sub-agents **concurrently** and waits for all of them to finish before returning. Useful when you need results from multiple independent sources and do not want to run them sequentially.
+
+```python
+from google.adk.agents import ParallelAgent
+
+fan_out = ParallelAgent(
+    name="parallel_searchers",
+    sub_agents=[web_searcher, academic_searcher, news_searcher],
+)
+```
+
+Each sub-agent in a `ParallelAgent` gets its own execution context but shares the same session state. After all branches finish, the next agent in the pipeline can read all their results.
+
+<Callout type="insight">
+The three agent types compose naturally. A `SequentialAgent` can contain a `ParallelAgent` as one of its steps. A `ParallelAgent` can contain `LlmAgent` branches. A `LlmAgent` can have a `SequentialAgent` as a sub-agent tool. This composability is what makes ADK expressive without being complex.
+</Callout>
+
+<Quiz
+  question="Which ADK agent type runs its sub-agents concurrently?"
+  options={[
+    { text: "SequentialAgent", correct: false, explanation: "SequentialAgent runs sub-agents one after another in a fixed order — it is deterministic but not concurrent." },
+    { text: "ParallelAgent", correct: true, explanation: "ParallelAgent runs all its sub-agents at the same time and waits for all of them to finish before continuing." },
+    { text: "LlmAgent", correct: false, explanation: "LlmAgent is backed by a language model and can call tools or sub-agents, but it does not run them concurrently by default." },
+  ]}
+/>
+
+## Tools in ADK
+
+Tools are Python functions decorated with `@tool`. The decorator reads the function's docstring for the description and its type hints for the parameter schema. ADK passes this schema to the LLM so it knows how to call the tool correctly.
+
+```python
+from google.adk.tools import tool
+
+@tool
+def summarise_text(text: str, max_words: int = 100) -> dict:
+    """Summarise the given text to at most max_words words.
+    
+    Args:
+        text: The input text to summarise.
+        max_words: Maximum number of words in the summary.
+    
+    Returns:
+        A dict with keys 'summary' and 'word_count'.
+    """
+    words = text.split()[:max_words]
+    summary = " ".join(words)
+    return {"summary": summary, "word_count": len(words)}
+```
+
+The docstring is not just documentation — it is the description the LLM reads when deciding whether to call this tool. Write docstrings as if you are explaining the tool to the model, not to a human developer.
+
+<Callout type="warning">
+ADK 2.0 tools must return dicts, not raw strings. The framework passes tool results back into the LLM context as structured data. Returning a plain string will work in simple cases but can cause subtle parsing issues when the LLM expects JSON. Always return `{"result": value}` at minimum.
+</Callout>
+
+## The A2A Protocol: the killer feature
+
+The Agent-to-Agent (A2A) protocol is ADK's most distinctive capability. Every ADK agent that is deployed exposes an HTTP endpoint. Other agents — even agents built in completely different frameworks — can call that endpoint as if it were a tool.
+
+This means:
+
+- An ADK orchestrator can call a LangGraph pipeline as a sub-agent
+- A CrewAI crew can call an ADK specialist as an external tool
+- An ADK system can call another team's ADK system without sharing code
+
+The protocol is standardised at the HTTP level, not the Python level. The calling agent sends a message; the receiving agent processes it and returns a response. The underlying framework is opaque.
+
+```python
+from google.adk.tools.agent_tool import AgentTool
+
+# Register a remote LangGraph agent as a tool in your ADK orchestrator
+langgraph_research_tool = AgentTool(
+    url="http://langgraph-service:8000/agent",
+    description="A LangGraph-based deep research agent. Call with a research question.",
+)
+
+orchestrator = LlmAgent(
+    name="orchestrator",
+    model="gemini-2.0-flash",
+    tools=[langgraph_research_tool],
+    instruction="Decompose the user's question and delegate research to the appropriate specialist.",
+)
+```
+
+The `LlmAgent` orchestrator does not know or care that `langgraph_research_tool` is backed by LangGraph. To the LLM, it is just another tool with a description and a schema.
+
+<Callout type="insight">
+The A2A protocol means your ADK agent can call a LangGraph pipeline as a peer — the frameworks are interoperable at the network level, not just the Python level. Two teams using different frameworks can still compose their agents into a single system without forcing either team to change their framework.
+</Callout>
+
+<Quiz
+  question="What does the A2A protocol enable that a regular Python function call does not?"
+  options={[
+    { text: "Faster execution through async calls", correct: false, explanation: "A2A is about cross-framework interoperability, not execution speed. Regular async Python calls can be faster than HTTP round-trips." },
+    { text: "Cross-framework agent invocation over HTTP, without shared code", correct: true, explanation: "A2A exposes each agent as an HTTP endpoint using a standardised protocol. Any agent in any framework can call any other agent without sharing a Python codebase or agreeing on a common framework." },
+    { text: "Automatic retry logic on failure", correct: false, explanation: "A2A does not add retry logic. You would need to implement that in the calling agent or use an infrastructure layer like a service mesh." },
+  ]}
+/>
+
+## ADK vs LangGraph vs CrewAI
+
+Knowing where ADK fits helps you choose the right tool for the right job.
+
+| Dimension | ADK | LangGraph | CrewAI |
+|---|---|---|---|
+| Mental model | Hierarchical delegation tree | Explicit state graph with nodes and edges | Role-based crew with tasks |
+| Control flow | Framework manages delegation | You define every edge | Framework routes tasks to roles |
+| Optimised for | Enterprise delegation, auditability | Fine-grained control, complex branching | Rapid prototyping |
+| Deployment story | `adk deploy` to Vertex AI (one command) | Manual — you containerise and deploy | Manual or CrewAI cloud |
+| Cross-framework | A2A protocol (network level) | LangGraph can call external tools | Tool wrappers only |
+| State management | Session service (pluggable) | LangGraph state graph | Agent memory + task context |
+
+**Choose ADK when:**
+- You need one-command deployment to a managed cloud platform
+- Your system is naturally hierarchical (clear delegation chains)
+- You need cross-framework interoperability without framework lock-in
+- Observability and auditability are first-class concerns
+
+**Choose LangGraph when:**
+- You need precise control over every decision point in the flow
+- Your workflow has complex branching, cycles, or conditional loops
+- You want to implement custom retry logic or human-in-the-loop at specific nodes
+
+**Choose CrewAI when:**
+- You want to prototype quickly with role-based agents
+- The role metaphor maps cleanly to your problem domain
+- Production deployment complexity is not yet a concern
+
+<Callout type="note">
+ADK is not a replacement for LangGraph or CrewAI — it is designed to call them. A mature multi-team system might have an ADK orchestrator at the root calling a LangGraph pipeline for complex document processing and a CrewAI crew for content generation. The A2A protocol makes this composition possible.
+</Callout>
+
+## Basic imports
+
+Every ADK project uses the same core imports. Memorise this pattern:
+
+```python
+# Core agent classes
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+
+# Tool decorator
+from google.adk.tools import tool
+
+# Session management
+from google.adk.sessions import InMemorySessionService, DatabaseSessionService
+
+# Runner (coordinates execution)
+from google.adk.runners import Runner
+
+# Message types (from the underlying Gemini SDK)
+from google.genai.types import Content, Part
+
+# For cross-framework calls
+from google.adk.tools.agent_tool import AgentTool
+```
+
+ADK sits on top of the `google-genai` SDK, which handles the actual Gemini API calls. You interact with ADK's abstractions; ADK handles the Gemini API underneath.
+
+```bash
+# Install ADK
+pip install google-adk
+
+# Optional: for Vertex AI deployment
+pip install google-cloud-aiplatform[adk]
+```
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I can describe the hierarchical tree model and why it aids auditability",
+    "I know the difference between LlmAgent, SequentialAgent, and ParallelAgent",
+    "I understand what the A2A protocol enables at the network level",
+    "I can explain when to choose ADK over LangGraph or CrewAI",
+    "I recognise the core ADK import structure",
+  ]}
+  next="/modules/module-17-google-adk/lesson-02"
+/>

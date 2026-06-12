@@ -1,0 +1,359 @@
+---
+title: "Your First ADK Agent: Tools, Sessions, and the Runner"
+module: "module-17-google-adk"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Your First ADK Agent: Tools, Sessions, and the Runner
+
+Building your first ADK agent takes about 50 lines of Python. This lesson walks through every line — what it does, why it is there, and what happens at runtime.
+
+<LearningObjectives items={[
+  "Define a tool using the @tool decorator and understand how docstrings become descriptions",
+  "Construct an LlmAgent with a model, tools, and instruction",
+  "Set up an InMemorySessionService and create a session",
+  "Use Runner and run_async to execute an agent turn",
+  "Interpret events from the async event stream",
+  "Start the local development UI with adk dev",
+]} />
+
+## Step 1: Define your tools
+
+Tools are the actions your agent can take. In ADK, a tool is a Python function decorated with `@tool`. The decorator does three things:
+
+1. Reads the **docstring** and uses it as the tool description (what the LLM sees)
+2. Reads the **type hints** and generates a JSON schema for the parameters
+3. Registers the function so ADK can call it when the LLM requests it
+
+```python
+from google.adk.tools import tool
+
+@tool
+def get_weather(city: str) -> dict:
+    """Get the current weather for a given city.
+    
+    Args:
+        city: The name of the city to get weather for.
+    
+    Returns:
+        A dict with 'temperature_c', 'condition', and 'humidity_percent'.
+    """
+    # In a real implementation, you would call a weather API here
+    weather_data = {
+        "London": {"temperature_c": 12, "condition": "Cloudy", "humidity_percent": 78},
+        "Tokyo": {"temperature_c": 22, "condition": "Sunny", "humidity_percent": 55},
+        "New York": {"temperature_c": 18, "condition": "Partly cloudy", "humidity_percent": 65},
+    }
+    return weather_data.get(city, {"temperature_c": 20, "condition": "Unknown", "humidity_percent": 60})
+
+
+@tool
+def convert_temperature(celsius: float, target_unit: str) -> dict:
+    """Convert a temperature from Celsius to another unit.
+    
+    Args:
+        celsius: The temperature in Celsius.
+        target_unit: Either 'fahrenheit' or 'kelvin'.
+    
+    Returns:
+        A dict with 'value' and 'unit'.
+    """
+    if target_unit.lower() == "fahrenheit":
+        converted = (celsius * 9 / 5) + 32
+        return {"value": round(converted, 1), "unit": "fahrenheit"}
+    elif target_unit.lower() == "kelvin":
+        converted = celsius + 273.15
+        return {"value": round(converted, 2), "unit": "kelvin"}
+    else:
+        return {"error": f"Unknown unit: {target_unit}"}
+```
+
+<Callout type="insight">
+The docstring is not just documentation — it is the description the LLM reads when deciding whether to call this tool. The Args section tells the LLM what each parameter means. Write docstrings as if you are explaining the tool to a model that has never seen your code.
+</Callout>
+
+<Quiz
+  question="Where does ADK get the tool description that it shows to the LLM?"
+  options={[
+    { text: "From a separate metadata dict you pass to the @tool decorator", correct: false, explanation: "The @tool decorator in ADK 2.0 does not require a separate metadata dict. It reads the description from the function's docstring automatically." },
+    { text: "From the function's docstring", correct: true, explanation: "The @tool decorator reads the function's docstring and uses it as the tool description. The Args section of the docstring becomes per-parameter descriptions." },
+    { text: "From the function name, converted from snake_case to a sentence", correct: false, explanation: "The function name is used as the tool name (e.g., get_weather), but the description comes from the docstring. Without a docstring, the LLM gets minimal guidance on when to call the tool." },
+  ]}
+/>
+
+## Step 2: Define your agent
+
+With tools in hand, create an `LlmAgent`. The three required fields are `name`, `model`, and `instruction`. Tools are optional but almost always present.
+
+```python
+from google.adk.agents import LlmAgent
+
+weather_agent = LlmAgent(
+    name="weather_assistant",
+    model="gemini-2.0-flash",
+    tools=[get_weather, convert_temperature],
+    instruction="""You are a helpful weather assistant.
+    
+When a user asks about the weather, use the get_weather tool to retrieve current conditions.
+If the user asks for the temperature in Fahrenheit or Kelvin, use convert_temperature to convert it.
+Always respond in a friendly, conversational tone and include the relevant weather details.
+""",
+)
+```
+
+A few notes on these fields:
+
+- **`name`**: Identifies this agent in logs and traces. Use a descriptive, lowercase, underscore-separated name.
+- **`model`**: The Gemini model to use. `gemini-2.0-flash` is the fastest and cheapest capable model. Use `gemini-2.0-pro` when you need higher reasoning quality.
+- **`instruction`**: The system prompt. This shapes how the agent behaves, what it prioritises, and what persona it adopts. It does not change between turns.
+- **`tools`**: List of `@tool`-decorated functions this agent can call.
+
+## Step 3: Set up a session service
+
+ADK requires a session service to manage conversation state. In development, use `InMemorySessionService` — it is fast, requires no setup, and disappears when the process ends.
+
+```python
+import asyncio
+from google.adk.sessions import InMemorySessionService
+
+session_service = InMemorySessionService()
+
+# Create a session for a specific user
+session = asyncio.run(
+    session_service.create_session(
+        app_name="weather_app",
+        user_id="user_123",
+    )
+)
+
+print(f"Session ID: {session.id}")
+```
+
+The session holds the conversation history and any state that tools write. You can have multiple sessions for the same user (e.g., separate chat threads), and multiple users in the same session service.
+
+<Callout type="warning">
+`InMemorySessionService` is for development only. Everything it stores disappears when your Python process exits. For production, use `DatabaseSessionService` (covered in Lesson 3). The agent code does not change when you switch — only the session service constructor changes.
+</Callout>
+
+## Step 4: Create a Runner and send a message
+
+The `Runner` ties together the agent, the app name, and the session service. It is the entry point for every agent turn.
+
+```python
+from google.adk.runners import Runner
+from google.genai.types import Content, Part
+
+runner = Runner(
+    agent=weather_agent,
+    app_name="weather_app",
+    session_service=session_service,
+)
+```
+
+To send a message, call `runner.run_async()`. This is an async generator — it yields events as the agent works.
+
+```python
+async def run_turn(user_message: str, session_id: str) -> str:
+    """Run one turn of the agent and return the final response text."""
+    message = Content(parts=[Part(text=user_message)])
+    
+    final_response = ""
+    
+    async for event in runner.run_async(
+        user_id="user_123",
+        session_id=session_id,
+        new_message=message,
+    ):
+        if event.is_final_response():
+            if event.content and event.content.parts:
+                final_response = event.content.parts[0].text
+    
+    return final_response
+```
+
+## Step 5: Handle events
+
+`runner.run_async()` yields a stream of events. Each event represents something that happened during the agent's reasoning — a tool call, a tool response, a model response, or the final answer.
+
+The event types you will use most often:
+
+| Check | What it means |
+|---|---|
+| `event.is_final_response()` | The agent has finished — this is the response to show the user |
+| `event.is_tool_call()` | The LLM decided to call a tool |
+| `event.is_tool_response()` | A tool finished and returned its result |
+| `event.author` | Who produced this event (`"model"`, `"tool"`, or the agent name) |
+
+For most applications, you only need `is_final_response()`. For debugging or building a UI that shows intermediate steps, you can inspect every event.
+
+```python
+async def run_with_trace(user_message: str, session_id: str):
+    """Run one turn and print all events for debugging."""
+    message = Content(parts=[Part(text=user_message)])
+    
+    async for event in runner.run_async(
+        user_id="user_123",
+        session_id=session_id,
+        new_message=message,
+    ):
+        print(f"[{event.author}] {type(event).__name__}")
+        
+        if event.is_final_response():
+            text = event.content.parts[0].text if event.content and event.content.parts else ""
+            print(f"\nFinal response: {text}")
+```
+
+<Quiz
+  question="What does event.is_final_response() tell you in the event stream?"
+  options={[
+    { text: "That the agent encountered an error and is stopping", correct: false, explanation: "Errors surface as exceptions, not as final response events. is_final_response() indicates successful completion of the agent turn." },
+    { text: "That the agent has finished reasoning and this event contains the answer to show the user", correct: true, explanation: "is_final_response() marks the last event in a turn — the one that contains the agent's answer to the user's message. All preceding events are intermediate steps." },
+    { text: "That this is the last tool call the agent will make", correct: false, explanation: "Tool call events are separate from the final response. The final response event contains the agent's text response after all tool calls have completed." },
+  ]}
+/>
+
+## Complete working example
+
+Here is a complete, runnable script that brings all the pieces together:
+
+```python
+import asyncio
+from google.adk.agents import LlmAgent
+from google.adk.tools import tool
+from google.adk.sessions import InMemorySessionService
+from google.adk.runners import Runner
+from google.genai.types import Content, Part
+
+
+@tool
+def get_weather(city: str) -> dict:
+    """Get the current weather for a given city.
+    
+    Args:
+        city: The name of the city.
+    
+    Returns:
+        A dict with temperature_c, condition, and humidity_percent.
+    """
+    weather_data = {
+        "London": {"temperature_c": 12, "condition": "Cloudy", "humidity_percent": 78},
+        "Tokyo": {"temperature_c": 22, "condition": "Sunny", "humidity_percent": 55},
+        "New York": {"temperature_c": 18, "condition": "Partly cloudy", "humidity_percent": 65},
+    }
+    return weather_data.get(city, {"temperature_c": 20, "condition": "Unknown", "humidity_percent": 60})
+
+
+@tool
+def convert_temperature(celsius: float, target_unit: str) -> dict:
+    """Convert a temperature from Celsius to Fahrenheit or Kelvin.
+    
+    Args:
+        celsius: The temperature in Celsius.
+        target_unit: Either 'fahrenheit' or 'kelvin'.
+    
+    Returns:
+        A dict with value and unit.
+    """
+    if target_unit.lower() == "fahrenheit":
+        return {"value": round((celsius * 9 / 5) + 32, 1), "unit": "fahrenheit"}
+    elif target_unit.lower() == "kelvin":
+        return {"value": round(celsius + 273.15, 2), "unit": "kelvin"}
+    return {"error": f"Unknown unit: {target_unit}"}
+
+
+weather_agent = LlmAgent(
+    name="weather_assistant",
+    model="gemini-2.0-flash",
+    tools=[get_weather, convert_temperature],
+    instruction=(
+        "You are a helpful weather assistant. Use get_weather to check conditions "
+        "and convert_temperature when the user asks for Fahrenheit or Kelvin. "
+        "Respond conversationally with all relevant details."
+    ),
+)
+
+
+async def main():
+    session_service = InMemorySessionService()
+    session = await session_service.create_session(
+        app_name="weather_app",
+        user_id="demo_user",
+    )
+
+    runner = Runner(
+        agent=weather_agent,
+        app_name="weather_app",
+        session_service=session_service,
+    )
+
+    questions = [
+        "What's the weather like in Tokyo?",
+        "What's that in Fahrenheit?",
+        "How about London?",
+    ]
+
+    for question in questions:
+        print(f"\nUser: {question}")
+        message = Content(parts=[Part(text=question)])
+
+        async for event in runner.run_async(
+            user_id="demo_user",
+            session_id=session.id,
+            new_message=message,
+        ):
+            if event.is_final_response():
+                text = event.content.parts[0].text if event.content and event.content.parts else ""
+                print(f"Agent: {text}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<Callout type="warning">
+ADK 2.0 is async throughout. `runner.run_async()` returns an async generator — you must `async for` over it inside an `async def` function. If you are in a synchronous context (e.g., a script), wrap everything in `asyncio.run(main())`. Do not try to call `next()` on the generator or iterate it synchronously — you will get a runtime error.
+</Callout>
+
+## Local development UI
+
+ADK ships with a local development server that provides a chat interface and a trace viewer. Start it with:
+
+```bash
+# Point it at the Python module containing your agent
+adk dev --agent_module weather_agent_module
+
+# Or if your agent is in agent.py:
+adk dev
+```
+
+This opens a browser at `localhost:8000` with:
+
+- **Chat tab**: Send messages and see responses, as if you were the user
+- **Traces tab**: Every tool call, model call, and event, in order, with timing
+- **State tab**: The current session state dict, updated after each tool call
+
+The traces tab is invaluable for debugging. If your agent is calling the wrong tool, skipping a tool, or getting stuck, the trace shows exactly why.
+
+```bash
+# Install ADK first
+pip install google-adk
+
+# Set your API key (Google AI Studio key)
+export GOOGLE_API_KEY="your-key-here"
+
+# Start the dev server
+adk dev
+```
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I can write a @tool-decorated function with a proper docstring and type hints",
+    "I can construct an LlmAgent with name, model, tools, and instruction",
+    "I understand the role of InMemorySessionService and its limitations",
+    "I can write an async runner loop that extracts the final response",
+    "I know how to start the local dev UI with adk dev",
+  ]}
+  next="/modules/module-17-google-adk/lesson-03"
+/>

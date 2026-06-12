@@ -1,0 +1,338 @@
+---
+title: "Tools and Context: Built-in Tools, Custom Tools, Task Dependencies"
+module: "module-20-crewai"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Tools and Context: Built-in Tools, Custom Tools, Task Dependencies
+
+Agents without tools are limited to what they already know. Real pipelines need agents that can search the web, read files, run code, or query databases. In this lesson you'll wire built-in tools into agents, write your own custom tools, and learn how to chain task outputs through complex dependency graphs.
+
+<LearningObjectives items={[
+  "Import and configure built-in crewai_tools for web search, file I/O, and code execution",
+  "Write a custom tool using the @tool decorator",
+  "Return error strings from tools so agents can recover gracefully",
+  "Build multi-task context chains with multiple dependencies",
+  "Understand the limits of context= and when to reach for Flows instead",
+]} />
+
+## Built-in tools
+
+Install `crewai-tools` if you haven't already:
+
+```bash
+pip install crewai crewai-tools langchain-anthropic
+```
+
+The `crewai_tools` package provides ready-to-use tools you can attach to any agent:
+
+```python
+from crewai_tools import (
+    SerperDevTool,
+    FileReadTool,
+    FileWriterTool,
+    DirectoryReadTool,
+    CodeInterpreterTool,
+    WebsiteSearchTool,
+)
+```
+
+### SerperDevTool — web search
+
+```python
+import os
+from crewai_tools import SerperDevTool
+
+# Requires SERPER_API_KEY environment variable
+search = SerperDevTool()
+
+researcher = Agent(
+    role="Senior Researcher",
+    goal="Find current, accurate information from the web",
+    backstory="You are an expert at formulating precise search queries and evaluating source quality.",
+    llm=llm,
+    tools=[search],
+    verbose=True,
+)
+```
+
+Get a free key at [serper.dev](https://serper.dev) — the free tier provides 2 500 queries/month, which is plenty for development.
+
+```bash
+export SERPER_API_KEY="your-serper-key"
+```
+
+### FileReadTool and FileWriterTool — file I/O
+
+```python
+from crewai_tools import FileReadTool, FileWriterTool
+
+reader = FileReadTool()    # lets agent read any file by path
+writer = FileWriterTool()  # lets agent write content to a file
+
+archivist = Agent(
+    role="Data Archivist",
+    goal="Read source files and produce structured summaries",
+    backstory="You process raw data files and extract structured information.",
+    llm=llm,
+    tools=[reader, writer],
+)
+```
+
+The agent calls these tools by providing a file path. `FileReadTool` returns the file contents as a string; `FileWriterTool` accepts a path and content to write.
+
+### CodeInterpreterTool — execute Python
+
+```python
+from crewai_tools import CodeInterpreterTool
+
+executor = CodeInterpreterTool()
+
+data_analyst = Agent(
+    role="Data Analyst",
+    goal="Compute statistics and verify numerical claims with code",
+    backstory="You write and run Python to verify numbers before including them in reports.",
+    llm=llm,
+    tools=[executor],
+)
+```
+
+`CodeInterpreterTool` runs code in a sandboxed environment and returns stdout. Use it when your agent needs to compute, verify, or transform data rather than just reason about it.
+
+### WebsiteSearchTool — RAG over a website
+
+```python
+from crewai_tools import WebsiteSearchTool
+
+# Crawls and embeds the site, then answers queries via RAG
+docs_search = WebsiteSearchTool(website="https://docs.crewai.com")
+
+agent = Agent(
+    role="Documentation Specialist",
+    goal="Answer questions using only the official documentation",
+    backstory="You only cite from official docs and never speculate beyond them.",
+    llm=llm,
+    tools=[docs_search],
+)
+```
+
+<Callout type="warning">
+`SerperDevTool` requires `SERPER_API_KEY` to be set as an environment variable. Without it, the tool raises a `ValueError` at runtime — not at import time. The agent will start, begin its task, call the tool, and only then fail. Test your environment variables before wiring tools into production agents.
+</Callout>
+
+## Custom tools with the @tool decorator
+
+When no built-in tool fits, write your own. The `@tool` decorator turns any function into a CrewAI tool:
+
+```python
+from crewai.tools import tool
+
+@tool("Calculator")
+def calculate(expression: str) -> str:
+    """Evaluate a mathematical expression safely."""
+    try:
+        # Restrict builtins to prevent code injection
+        result = eval(expression, {"__builtins__": {}}, {})
+        return str(result)
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+The string passed to `@tool(...)` is the tool's name — what the agent sees in its toolbox. The docstring is the tool's description — what the agent uses to decide when to call it. Both matter: a clear, specific docstring reduces incorrect tool calls.
+
+### A more realistic custom tool: database query
+
+```python
+import sqlite3
+from crewai.tools import tool
+
+@tool("Database Query")
+def query_database(sql: str) -> str:
+    """Execute a read-only SQL query against the analytics database.
+    
+    Use this to look up sales figures, user counts, or event data.
+    Only SELECT statements are permitted. Returns results as a CSV string.
+    """
+    try:
+        conn = sqlite3.connect("analytics.db")
+        cursor = conn.cursor()
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        headers = [desc[0] for desc in cursor.description]
+        conn.close()
+        lines = [",".join(headers)] + [",".join(str(v) for v in row) for row in rows]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+Attach it to an agent like any built-in tool:
+
+```python
+analyst = Agent(
+    role="Data Analyst",
+    goal="Answer business questions using real data from the database",
+    backstory="You write precise SQL queries and interpret results accurately.",
+    llm=llm,
+    tools=[query_database, calculate],
+)
+```
+
+### Tool error handling: return error strings
+
+When a tool fails, return a descriptive error string — do not raise an exception:
+
+```python
+@tool("Fetch API Data")
+def fetch_api(endpoint: str) -> str:
+    """Fetch JSON data from the internal API."""
+    import requests
+    try:
+        response = requests.get(f"https://api.internal/{endpoint}", timeout=5)
+        response.raise_for_status()
+        return response.text
+    except requests.Timeout:
+        return "Error: Request timed out after 5 seconds. Try a more specific endpoint."
+    except requests.HTTPError as e:
+        return f"Error: HTTP {e.response.status_code} — {e.response.reason}"
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+When the agent receives an error string, it retries with adjusted inputs. If you raise an exception instead, the agent's task fails entirely. Returning an error string gives the agent a chance to recover within its `max_iter` budget.
+
+<Callout type="insight">
+The agent reads your error string and uses it to adjust its next attempt. "Error: endpoint not found" will cause a different retry than "Error: rate limit exceeded". Write error strings that tell the agent what went wrong and implicitly suggest what to try instead. "Error: endpoint /stats/2019 not found — try /stats/2024 for recent data" is a much more useful signal than "Error: 404".
+</Callout>
+
+## Task context chains
+
+You saw basic context in Lesson 1. Here's the full picture for multi-dependency chains:
+
+```python
+research_task = Task(
+    description="Research {topic} and list 5 key developments.",
+    expected_output="A numbered list of 5 developments with data points.",
+    agent=researcher,
+)
+
+analysis_task = Task(
+    description="Critically analyse the research findings.",
+    expected_output="A risk assessment with 3 severity-rated risks.",
+    agent=analyst,
+    context=[research_task],        # sees research output
+)
+
+fact_check_task = Task(
+    description="Verify the top claim from the analysis with a web search.",
+    expected_output="A confirmation or correction of the claim with source.",
+    agent=fact_checker,
+    context=[analysis_task],        # sees analysis output only
+)
+
+report_task = Task(
+    description="Write a final report on {topic}.",
+    expected_output="A 4-section report: Summary, Findings, Risks, Next Steps.",
+    agent=writer,
+    context=[research_task, analysis_task, fact_check_task],  # sees all three
+)
+```
+
+When `report_task` runs, its prompt includes the outputs of all three prior tasks. The writer has the full picture without you writing any glue code.
+
+### What the agent actually receives
+
+The agent's prompt for `report_task` looks roughly like this:
+
+```
+You are a Technical Report Writer.
+Your goal is: Produce clear, structured reports...
+Your backstory: ...
+
+Task: Write a final report on large language model efficiency.
+Expected Output: A 4-section report: Summary, Findings, Risks, Next Steps.
+
+Context from prior tasks:
+
+[Research Task Output]
+1. Mixture-of-experts architectures...
+...
+
+[Analysis Task Output]
+Risk 1 (High): Inference cost...
+...
+
+[Fact Check Task Output]
+Confirmed: The claim that...
+...
+```
+
+The agent doesn't know which task produced which context — it's all injected as a single block. Keep this in mind when designing your `expected_output` strings: each task's output should be self-contained enough to be useful out of context.
+
+## Context is always included — there is no conditional
+
+`context=[]` is unconditional. Whatever tasks you list, their outputs are always injected. There is no built-in way to say "include task_a's output only if it contains the word 'APPROVED'".
+
+For conditional context logic, you need Flows (covered in Lesson 5). Flows let you branch between crews based on output content, making the inclusion of certain outputs into subsequent tasks a routing decision rather than a static declaration.
+
+If you need a quick workaround in sequential mode: have an agent produce a structured marker in its output ("STATUS: APPROVED" or "STATUS: REJECTED") and have the next agent's `description` say "If the status is APPROVED, proceed with writing. If REJECTED, return a one-line explanation of why." This is fragile — use Flows for production conditional logic.
+
+## Using output_file with FileReadTool
+
+You can persist a task's output to a file and have a later agent read it:
+
+```python
+analysis_task = Task(
+    description="Analyse the research and produce a risk report.",
+    expected_output="A structured risk report in markdown.",
+    agent=analyst,
+    context=[research_task],
+    output_file="analysis.md",      # saved automatically after task completes
+)
+
+# A later agent uses FileReadTool to read the saved analysis
+verification_task = Task(
+    description=(
+        "Read the analysis from 'analysis.md' and verify the top 3 claims "
+        "against external sources."
+    ),
+    expected_output="A verification report confirming or correcting each claim.",
+    agent=fact_checker_with_file_tool,
+    # No context= needed — agent reads the file directly via FileReadTool
+)
+```
+
+This approach is useful when the context chain would make the prompt too long, or when you want the file as a persistent artefact independent of the crew run.
+
+<Quiz
+  question="What string should a custom tool return to signal failure to the agent?"
+  options={[
+    { text: "A descriptive error string like `\"Error: endpoint not found — try /stats/2024\"`", correct: true, explanation: "Correct. Returning an error string lets the agent read the failure reason and adjust its next attempt within the max_iter budget. The agent treats the string as feedback and retries with different inputs." },
+    { text: "None — the tool should raise an exception so CrewAI can catch and handle it", correct: false, explanation: "Raising an exception from a tool causes the agent's task to fail entirely. Returning an error string gives the agent the chance to recover. Always return strings from tools — never raise." },
+    { text: "An empty string — the agent detects empty responses and retries automatically", correct: false, explanation: "An empty string does not signal failure to the agent — it looks like a successful but empty result. The agent may accept it and move on, or produce a confused response. Always return a descriptive error string." },
+    { text: "The string 'TOOL_ERROR' — CrewAI's built-in error handler intercepts this sentinel value", correct: false, explanation: "There is no 'TOOL_ERROR' sentinel value in CrewAI. Return a plain descriptive error string that explains what went wrong and, ideally, what the agent should try instead." },
+  ]}
+/>
+
+<Quiz
+  question="If report_task has context=[research_task, analysis_task], what does the report agent receive in its prompt?"
+  options={[
+    { text: "The completed outputs of both research_task and analysis_task, injected into the report agent's prompt as context", correct: true, explanation: "Correct. CrewAI collects the output strings from all listed context tasks and includes them in the dependent task's prompt. The report agent can read and build on both prior outputs." },
+    { text: "Only the output of the most recently completed task — the last one in the context list", correct: false, explanation: "All listed context tasks' outputs are included, not just the last one. The order in the list affects the order they appear in the prompt, but all of them are included." },
+    { text: "A reference to both tasks that the agent can optionally call to retrieve their outputs", correct: false, explanation: "context= passes completed outputs, not callable references. The tasks have already run — their outputs are injected as static text into the prompt. The agent cannot re-run them." },
+    { text: "The combined token count of both outputs so the agent can decide how much to summarise", correct: false, explanation: "CrewAI passes the actual text content of each task's output, not metadata about it. The agent reads the full outputs, not summaries or token counts." },
+  ]}
+/>
+
+<Checkpoint
+  moduleSlug="module-20-crewai"
+  items={[
+    "I can import and configure SerperDevTool, FileReadTool, FileWriterTool, and CodeInterpreterTool",
+    "I can write a custom tool with @tool and a clear docstring",
+    "I know to return error strings (not raise exceptions) from tools so agents can recover",
+    "I can build multi-task context chains with multiple dependencies",
+    "I understand that context= is unconditional and when to use Flows for conditional logic",
+  ]}
+  next="/modules/module-20-crewai/lesson-04"
+/>

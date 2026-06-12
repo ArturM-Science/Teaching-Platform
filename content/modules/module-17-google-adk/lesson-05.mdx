@@ -1,0 +1,343 @@
+---
+title: "Production: Vertex AI Deployment, Observability, and Cost"
+module: "module-17-google-adk"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Vertex AI Deployment, Observability, and Cost
+
+Building an agent locally is the easy part. Getting it to production — reliably, cheaply, and with enough visibility to debug failures — is where most projects stumble. ADK's production story is one of its strongest differentiators: a single command deploys to a fully managed, auto-scaling platform.
+
+<LearningObjectives items={[
+  "Use adk dev to run the local development server with UI and trace viewer",
+  "Write an adk_config.yaml for Vertex AI deployment",
+  "Deploy an ADK agent with adk deploy and understand what it provisions",
+  "Read Cloud Trace spans for a deployed agent",
+  "Calculate the per-run cost of a multi-agent pipeline",
+  "Use LiteLLM to run non-Gemini models inside ADK",
+  "Run adk eval to verify agent behaviour before deployment",
+]} />
+
+## Local development with adk dev
+
+`adk dev` starts a local web server that provides a complete development environment for your agent. It is the fastest way to iterate before you have any cloud infrastructure.
+
+```bash
+# From the directory containing your agent module (agent.py or similar)
+adk dev
+
+# The server starts at http://localhost:8000
+# Three tabs are available:
+# - Chat: send messages and see agent responses
+# - Traces: view the full event stream for each turn
+# - State: inspect the current session state dict
+```
+
+The traces tab shows every LLM call, every tool invocation, every tool response, and the final answer — all in order with timing. If your agent is making unexpected tool calls or the LLM is reasoning incorrectly, the traces tab shows you exactly what happened and why.
+
+```bash
+# If you have multiple agent files, specify the module
+adk dev --agent_module my_agent_module
+
+# Use a specific port
+adk dev --port 9000
+
+# Set your API key before starting
+export GOOGLE_API_KEY="your-google-ai-studio-key"
+adk dev
+```
+
+<Callout type="tip">
+Run `adk dev` before every significant code change. The chat UI lets you manually test edge cases in seconds. The trace viewer shows you the exact sequence of tool calls — which is the most reliable way to verify your agent is doing what you intended, not just that the output looks right.
+</Callout>
+
+## Deploying to Vertex AI Agent Engine
+
+Vertex AI Agent Engine is Google Cloud's managed execution environment for ADK agents. It handles:
+
+- Container building and pushing to Artifact Registry
+- Serverless execution (scales to zero when not in use)
+- Autoscaling under load
+- Session state persistence
+- Cloud Trace integration
+
+You configure the deployment in `adk_config.yaml`:
+
+```yaml
+# adk_config.yaml — place this in your project root
+
+# The Python module that contains your root agent
+# If your agent is in agent.py and the variable is named root_agent,
+# this should be 'agent'
+agent_module: agent
+
+# Your requirements file
+requirements: requirements.txt
+
+# Optional: environment variables to inject at runtime
+env_vars:
+  APP_ENV: production
+  LOG_LEVEL: INFO
+```
+
+Then deploy with one command:
+
+```bash
+# Authenticate first (one-time setup)
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+
+# Deploy
+adk deploy \
+  --project=your-gcp-project \
+  --region=us-central1
+
+# The command outputs an endpoint URL when complete
+# Something like: https://us-central1-aiplatform.googleapis.com/v1/projects/.../agents/...
+```
+
+<Callout type="note">
+`adk deploy` requires billing to be enabled on your Google Cloud project and the Vertex AI API to be enabled. Run `gcloud services enable aiplatform.googleapis.com` if you get a "service not enabled" error. The first deployment of a new agent may take 3–5 minutes to build the container.
+</Callout>
+
+## What adk deploy provisions
+
+Understanding what happens under the hood helps you debug deployment issues and estimate costs.
+
+```
+adk deploy
+    │
+    ├── 1. Reads adk_config.yaml
+    ├── 2. Packages your Python code + requirements.txt
+    ├── 3. Builds a Docker container (managed by Google — no Dockerfile needed)
+    ├── 4. Pushes container to Artifact Registry in your project
+    ├── 5. Creates a Vertex AI Agent resource
+    ├── 6. Configures autoscaling (0 to N instances)
+    └── 7. Returns an HTTPS endpoint
+
+Result:
+    - Your agent is available at the returned endpoint
+    - Scales to zero when not in use (no cost when idle)
+    - Scales up automatically under load
+    - Session state backed by Vertex AI managed storage
+    - All traces sent to Cloud Trace automatically
+```
+
+<Quiz
+  question="What does adk deploy handle that you would otherwise need to configure manually?"
+  options={[
+    { text: "Writing the agent code and defining tools", correct: false, explanation: "adk deploy does not write code. It packages and deploys the code you have already written. You are responsible for the agent code and tool definitions." },
+    { text: "Container building, autoscaling, HTTPS endpoint, and Cloud Trace integration", correct: true, explanation: "adk deploy provisions all of this automatically. Without it, you would need a Dockerfile, a container registry, a Kubernetes deployment or Cloud Run service, load balancer configuration, and manual Cloud Trace instrumentation." },
+    { text: "Setting up a Postgres database for session state", correct: false, explanation: "adk deploy uses Vertex AI managed session storage, not a Postgres database you provision. DatabaseSessionService with a Postgres URL is for self-managed deployments outside Vertex AI." },
+  ]}
+/>
+
+## Observability: Cloud Trace
+
+When deployed to Vertex AI, every agent turn is automatically traced. You can view traces in the Google Cloud Console under Cloud Trace.
+
+Each trace shows a hierarchy of spans:
+
+```
+agent_turn (root span)
+├── llm_call: planner                    # 450ms
+│   └── model: gemini-2.0-flash
+├── tool_call: extract_topics            # 12ms
+├── agent_call: parallel_search          # 890ms
+│   ├── agent_call: web_searcher         # 890ms (concurrent)
+│   │   ├── llm_call: web_searcher       # 380ms
+│   │   └── tool_call: search_web        # 510ms (API call)
+│   └── agent_call: academic_searcher    # 710ms (concurrent)
+│       ├── llm_call: academic_searcher  # 290ms
+│       └── tool_call: search_academic   # 420ms (API call)
+├── llm_call: synthesiser                # 620ms
+└── tool_call: synthesise_findings       # 8ms
+```
+
+The trace shows you where time is spent, which tools are slow, and whether parallelism is actually saving time. In this example, `web_searcher` and `academic_searcher` ran concurrently (both shown under `parallel_search`, both taking ~900ms total instead of 1600ms sequential).
+
+Locally, traces are written to `~/.adk/traces/` as JSON files. You can read them directly or open them in the `adk dev` traces tab.
+
+## Cost model
+
+ADK's cost is almost entirely Gemini API calls. Every LLM call costs money; tool calls do not. Understanding your cost model before production is essential.
+
+### Gemini pricing (approximate, verify at cloud.google.com/vertex-ai/pricing)
+
+| Model | Input (per 1M tokens) | Output (per 1M tokens) |
+|---|---|---|
+| Gemini 2.0 Flash | ~$0.10 | ~$0.40 |
+| Gemini 2.0 Pro | ~$1.25 | ~$5.00 |
+
+### Counting LLM calls in a pipeline
+
+```
+SequentialAgent([planner, parallel_search, synthesiser])
+    where parallel_search = ParallelAgent([web_searcher, academic_searcher])
+
+LLM calls per pipeline run:
+  - planner:           1 call (gemini-2.0-flash)
+  - web_searcher:      1 call (gemini-2.0-flash)
+  - academic_searcher: 1 call (gemini-2.0-flash)
+  - synthesiser:       1 call (gemini-2.0-flash)
+
+Total: 4 LLM calls per pipeline run
+
+If each call uses ~500 input tokens and ~200 output tokens:
+  - 4 × 500 = 2,000 input tokens → $0.0002
+  - 4 × 200 = 800 output tokens  → $0.00032
+  - Total per run: ~$0.00052 (~0.05 cents)
+```
+
+### LlmAgent orchestrator adds extra calls
+
+```
+LlmAgent(orchestrator, sub_agents=[web_searcher, critic])
+
+LLM calls per pipeline run:
+  - orchestrator: 1+ calls (decides what to call next, may call repeatedly)
+  - web_searcher: 1 call per invocation
+  - critic:       1 call per invocation
+  - orchestrator: 1 more call (after reviewing critic output, decides next step)
+
+For a 2-round research loop: ~6–8 LLM calls vs 4 for the sequential version
+```
+
+<Quiz
+  question="Why does an LlmAgent orchestrator cost more per pipeline run than a SequentialAgent with the same sub-agents?"
+  options={[
+    { text: "LlmAgent uses more expensive models by default", correct: false, explanation: "You choose the model for each agent. The difference in cost comes from the number of LLM calls, not the default model choice." },
+    { text: "An LlmAgent orchestrator makes additional LLM calls for each routing decision — deciding which sub-agent to call and when", correct: true, explanation: "The orchestrator LLM is called once to decide what to do, then again after each sub-agent returns, then again to decide next steps. These routing decisions are LLM calls. A SequentialAgent makes no routing LLM calls — the order is in the code." },
+    { text: "SequentialAgent caches LLM responses between calls", correct: false, explanation: "ADK does not cache LLM responses by default. The cost difference is purely from the number of LLM calls made, not caching." },
+  ]}
+/>
+
+## Using non-Gemini models with LiteLLM
+
+ADK uses Gemini by default, but you can use any model that LiteLLM supports — Claude, GPT-4, Mistral, local models via Ollama — by wrapping it with `LiteLlm`.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.models.lite_llm import LiteLlm
+
+# Use Claude for the synthesiser (useful if you want Claude's writing quality)
+claude_synthesiser = LlmAgent(
+    name="synthesiser",
+    model=LiteLlm(model="anthropic/claude-haiku-4-5-20251001"),
+    tools=[synthesise_findings],
+    instruction="Synthesise the research findings into a polished report.",
+)
+
+# Use GPT-4 for the critic
+gpt_critic = LlmAgent(
+    name="critic",
+    model=LiteLlm(model="openai/gpt-4o"),
+    tools=[critique_research],
+    instruction="Review the research and identify factual gaps or unsupported claims.",
+)
+
+# Mix models in the same pipeline
+pipeline = SequentialAgent(
+    name="mixed_model_pipeline",
+    sub_agents=[
+        gemini_planner,      # LlmAgent(model="gemini-2.0-flash")
+        claude_synthesiser,  # LlmAgent(model=LiteLlm("anthropic/claude-haiku-4-5-20251001"))
+        gpt_critic,          # LlmAgent(model=LiteLlm("openai/gpt-4o"))
+    ],
+)
+```
+
+You need to set the appropriate environment variables for each provider:
+
+```bash
+# For Claude (Anthropic)
+export ANTHROPIC_API_KEY="your-anthropic-key"
+
+# For GPT-4 (OpenAI)
+export OPENAI_API_KEY="your-openai-key"
+
+# For Google (still needed for other Gemini agents)
+export GOOGLE_API_KEY="your-google-key"
+```
+
+<Callout type="tip">
+LiteLLM support in ADK lets you choose the best model for each role in your pipeline. A Gemini Flash agent for fast routing decisions, Claude for high-quality synthesis, GPT-4 for rigorous fact-checking. You are not locked into one provider just because you are using ADK.
+</Callout>
+
+## Evaluation with adk eval
+
+Before deploying, verify your agent against test cases with `adk eval`. This runs your agent against predefined inputs and checks both the final answer and the tool call trajectory.
+
+Create a test file:
+
+```json
+// eval_cases.json
+[
+  {
+    "query": "What is the capital of France?",
+    "expected_tool_calls": [],
+    "expected_final_response_contains": "Paris"
+  },
+  {
+    "query": "Search for recent AI research papers",
+    "expected_tool_calls": ["search_academic"],
+    "expected_final_response_contains": "research"
+  },
+  {
+    "query": "What is the weather in Tokyo and convert it to Fahrenheit?",
+    "expected_tool_calls": ["get_weather", "convert_temperature"],
+    "expected_final_response_contains": "Fahrenheit"
+  }
+]
+```
+
+Run the evaluation:
+
+```bash
+adk eval \
+  --agent_module agent \
+  --eval_file eval_cases.json \
+  --output_file eval_results.json
+
+# Output:
+# Running 3 test cases...
+# Test 1: PASS (0 tool calls, contains 'Paris') ✓
+# Test 2: PASS (called search_academic, contains 'research') ✓
+# Test 3: FAIL (called get_weather but skipped convert_temperature)
+# 
+# 2/3 passed. See eval_results.json for details.
+```
+
+<Callout type="tip">
+Use `adk eval` before every production deploy. It checks both the final answer quality and the tool call trajectory — not just whether the output looks right. An agent that produces the correct answer by hallucinating (without calling any tools) will fail trajectory checks, which is the right behaviour to catch.
+</Callout>
+
+## Production checklist
+
+Before you run `adk deploy`:
+
+```
+□ adk dev smoke test — manually tested at least 5 representative queries
+□ adk eval passes — automated test cases include happy path and edge cases
+□ Session service switched to DatabaseSessionService (not InMemorySessionService)
+□ API keys stored in Secret Manager (not hardcoded in adk_config.yaml)
+□ requirements.txt is pinned (google-adk==X.Y.Z, not google-adk>=X)
+□ adk_config.yaml reviewed — agent_module points to the correct module
+□ Cloud Trace API enabled in your GCP project
+□ Cost estimate done — number of LLM calls per run × expected daily runs × model pricing
+```
+
+<Checkpoint
+  moduleSlug="module-17-google-adk"
+  items={[
+    "I can start the local dev server with adk dev and use the chat and traces tabs",
+    "I can write an adk_config.yaml for a Vertex AI deployment",
+    "I understand what adk deploy provisions automatically",
+    "I can read a Cloud Trace span hierarchy for a multi-agent pipeline",
+    "I can calculate the per-run LLM cost of a SequentialAgent pipeline",
+    "I can configure a non-Gemini model using LiteLlm",
+    "I can write eval test cases and run adk eval before deployment",
+  ]}
+  next="/modules/module-17-google-adk/lesson-06-lab"
+/>

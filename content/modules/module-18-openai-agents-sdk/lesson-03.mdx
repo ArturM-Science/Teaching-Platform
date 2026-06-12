@@ -1,0 +1,278 @@
+---
+title: "Handoffs: Triage Patterns and Agent-to-Agent Delegation"
+module: "module-18-openai-agents-sdk"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Handoffs: Triage Patterns and Agent-to-Agent Delegation
+
+Handoffs turn a collection of single-purpose agents into a coordinated system. The pattern is simple: one lightweight agent reads the request and routes it; specialist agents handle everything from that point. This lesson shows you how to build that pattern, how handoffs appear in the trace, and where the pattern breaks down.
+
+<LearningObjectives items={[
+  "Build a triage agent that routes to two or more specialists using handoffs",
+  "Customise a handoff's tool name and description with handoff() arguments",
+  "Trace what happens in the OpenAI dashboard when a handoff fires",
+  "Chain handoffs across multiple levels of specialisation",
+  "Identify the failure mode of circular handoffs and how to prevent it",
+]} />
+
+## The triage pattern
+
+The triage pattern has two layers: a front-end agent that reads user intent and routes it, and specialist agents that own their domain entirely.
+
+```python
+from agents import Agent, Runner, handoff
+
+# Specialists — deep domain knowledge, no routing logic
+billing_agent = Agent(
+    name="Billing",
+    instructions=(
+        "You handle billing, payments, invoices, and refunds. "
+        "Be precise about charges and always confirm before processing refunds."
+    ),
+)
+
+tech_agent = Agent(
+    name="Tech Support",
+    instructions=(
+        "You handle technical issues: bugs, errors, configuration, and troubleshooting. "
+        "Ask for error messages and system info before diagnosing."
+    ),
+)
+
+# Triage — routing logic only, no domain knowledge
+triage_agent = Agent(
+    name="Triage",
+    instructions=(
+        "Determine whether the user has a billing question or a technical issue. "
+        "For billing questions (payments, invoices, charges, refunds), transfer to Billing. "
+        "For technical issues (errors, bugs, not working, configuration), transfer to Tech Support. "
+        "Do not answer domain questions yourself — always transfer."
+    ),
+    handoffs=[handoff(billing_agent), handoff(tech_agent)],
+)
+
+# Always call the triage agent — it routes internally
+result = Runner.run_sync(triage_agent, "I was charged twice for my subscription last month.")
+print(result.final_output)  # Billing agent's response
+```
+
+The triage agent's instructions say only two things: how to classify, and never answer yourself. All domain knowledge lives in the specialists. This makes each agent independently testable and easy to update.
+
+<Callout type="tip">
+Keep triage agent instructions tight — just routing logic, no domain knowledge. If you start adding domain knowledge to the triage agent, you are building a generalist agent with routing bolted on, which is harder to test and maintain. The specialists should know their domain; the triage agent should know only who to ask.
+</Callout>
+
+## How handoffs appear in the model
+
+When you add `handoff(billing_agent)` to `handoffs=[]`, the SDK registers a tool called `transfer_to_billing` (derived from the agent name). The triage agent sees this tool in its tool list and calls it when it decides to route.
+
+In the trace on the OpenAI dashboard, you see:
+- Triage agent turn: tool call → `transfer_to_billing`
+- Billing agent turn: receives full conversation history, continues from there
+
+The second agent does not receive a "handoff notification" — it just sees the conversation history up to that point, plus its own system prompt. It has no way of knowing it was handed off to rather than started fresh.
+
+## Customising handoff appearance
+
+By default the tool name is `transfer_to_{agent_name_lowercase}`. You can override it:
+
+```python
+from agents import Agent, handoff
+
+billing_agent = Agent(name="Billing", instructions="Handle billing questions.")
+
+triage_agent = Agent(
+    name="Triage",
+    instructions="Route billing questions to billing support.",
+    handoffs=[
+        handoff(
+            billing_agent,
+            tool_name_override="route_to_billing_department",
+            tool_description_override=(
+                "Transfer to the billing department for questions about charges, "
+                "invoices, payment methods, and refunds."
+            ),
+        )
+    ],
+)
+```
+
+Use `tool_description_override` when the agent name alone is not enough for the model to decide correctly. A more precise description improves routing accuracy, especially when you have several specialists with overlapping names.
+
+<Quiz
+  question="In the triage pattern, does the triage agent see the specialist's response before returning to the user?"
+  options={[
+    { text: "No. The triage agent's job ends when it triggers the handoff. The specialist responds directly to the user.", correct: true, explanation: "This is the key difference from tool calls. The triage agent calls transfer_to_billing and stops. The Runner switches to the billing agent, which owns the rest of the conversation." },
+    { text: "Yes. The specialist's response is returned to the triage agent, which reviews it before sending it to the user.", correct: false, explanation: "That describes CrewAI's hierarchical process, not the OpenAI Agents SDK. In this SDK, handoffs are one-way — the triage agent stops when it triggers the handoff." },
+    { text: "It depends on whether the handoff was configured with return_results=True.", correct: false, explanation: "There is no return_results parameter. Handoffs are always one-way in this SDK." },
+  ]}
+/>
+
+## Full customer support example
+
+Here is a complete triage system with tools on the specialist agents:
+
+```python
+from agents import Agent, Runner, function_tool, handoff
+import asyncio
+
+# --- Billing tools ---
+
+@function_tool
+def lookup_invoice(invoice_id: str) -> str:
+    """Look up an invoice by ID and return its details."""
+    # Mock data — replace with real DB call
+    mock_invoices = {
+        "INV-001": {"amount": 99.00, "date": "2026-05-01", "status": "paid"},
+        "INV-002": {"amount": 99.00, "date": "2026-06-01", "status": "duplicate"},
+    }
+    if invoice_id in mock_invoices:
+        inv = mock_invoices[invoice_id]
+        return f"Invoice {invoice_id}: ${inv['amount']:.2f} on {inv['date']}, status: {inv['status']}"
+    return f"Invoice {invoice_id} not found."
+
+@function_tool
+def process_refund(invoice_id: str, reason: str) -> str:
+    """Process a refund for a given invoice ID."""
+    return f"Refund initiated for invoice {invoice_id}. Reason: {reason}. ETA: 3-5 business days."
+
+# --- Tech support tools ---
+
+@function_tool
+def run_diagnostic(component: str) -> str:
+    """Run a diagnostic check on a system component."""
+    components = {
+        "api": "API: all endpoints responding, latency 42ms",
+        "database": "Database: connected, 0 slow queries",
+        "auth": "Auth: service degraded — elevated error rate on token refresh",
+    }
+    return components.get(component.lower(), f"Unknown component: {component}")
+
+@function_tool
+def check_status(service: str) -> str:
+    """Check the operational status of a service."""
+    return f"Status page for {service}: all systems operational as of 14:32 UTC."
+
+# --- Agents ---
+
+billing_agent = Agent(
+    name="Billing",
+    instructions=(
+        "You handle billing, invoices, and refunds. "
+        "Always look up the invoice before discussing charges. "
+        "Get confirmation before processing any refund."
+    ),
+    tools=[lookup_invoice, process_refund],
+)
+
+tech_agent = Agent(
+    name="TechSupport",
+    instructions=(
+        "You handle technical issues. "
+        "Run diagnostics before guessing. "
+        "Check service status if the user reports an outage."
+    ),
+    tools=[run_diagnostic, check_status],
+)
+
+triage_agent = Agent(
+    name="Triage",
+    instructions=(
+        "You are the first point of contact for customer support. "
+        "For billing or payment questions: transfer to Billing. "
+        "For technical issues, errors, or outages: transfer to Tech Support. "
+        "Do not answer domain questions yourself."
+    ),
+    handoffs=[handoff(billing_agent), handoff(tech_agent)],
+)
+
+async def main():
+    questions = [
+        "I was charged twice for my subscription.",
+        "The API keeps returning 401 errors after I rotated my key.",
+    ]
+    for question in questions:
+        print(f"\nUser: {question}")
+        result = await Runner.run(triage_agent, question)
+        print(f"Agent: {result.final_output}")
+
+asyncio.run(main())
+```
+
+## Multi-level handoffs
+
+Specialists can themselves have handoffs to further specialists. A tech support agent might hand off to a security specialist for certain escalations:
+
+```python
+security_agent = Agent(
+    name="Security",
+    instructions="Handle account security issues: compromised accounts, suspicious activity, 2FA problems.",
+)
+
+tech_agent = Agent(
+    name="TechSupport",
+    instructions=(
+        "Handle technical issues. "
+        "For anything involving account compromise or suspicious login activity, "
+        "transfer to the Security specialist."
+    ),
+    tools=[run_diagnostic, check_status],
+    handoffs=[handoff(security_agent)],
+)
+```
+
+The Runner follows the chain automatically. A triage handoff to tech support, followed by a tech support handoff to security, is handled in a single `Runner.run()` call. The final output is the security agent's response.
+
+<Quiz
+  question="When should you use tool_description_override in a handoff?"
+  options={[
+    { text: "Always — the default description is never sufficient.", correct: false, explanation: "The default description (derived from the agent name) is often sufficient for clearly named agents. Override it when the name alone is ambiguous." },
+    { text: "When multiple specialists have overlapping names or responsibilities, to help the routing agent choose correctly.", correct: true, explanation: "A more precise description improves routing accuracy. If you have TechSupportLevel1 and TechSupportLevel2, a clear description of each helps the triage model choose the right one." },
+    { text: "Only when the agent name contains spaces or special characters.", correct: false, explanation: "Agent names are normalised for tool names automatically. Override the description for semantic clarity, not naming constraints." },
+  ]}
+/>
+
+## The circular handoff failure mode
+
+<FailureMuseum
+  title="The infinite handoff loop"
+  description="Two agents were configured to hand off to each other. Agent A was supposed to handle general questions but route complex ones to Agent B. Agent B was supposed to handle complex questions but route out-of-scope ones back to Agent A. With vague instructions, Agent A would hand off to Agent B, which would hand off back to Agent A, looping until the Runner hit its max_turns limit — costing tokens for every loop."
+  lesson="Never give two agents a handoff path back to each other without a clear stopping condition. The solution: Agent B should either handle the question or return a final 'I cannot help with this' response — never hand back to Agent A. If you need escalation, hand off upward only, never in a cycle."
+/>
+
+Rules to prevent circular handoffs:
+
+1. Handoffs should only go in one direction in your routing graph (leaf agents have no handoffs)
+2. Specialist agents should always be able to produce a final answer, even if it is "I cannot help with this"
+3. Set `RunConfig(max_turns=10)` as a safety net for unexpected loops
+
+## When to use handoffs vs. tools: decision guide
+
+Use a **handoff** when:
+- The specialist needs to conduct a multi-turn sub-conversation
+- The specialist has its own set of tools the original agent does not need
+- You want clear separation of responsibilities and independent testability
+- The original agent should have no visibility into what the specialist does
+
+Use a **tool** when:
+- You need data or a side effect and then want to continue reasoning
+- The operation is stateless and returns a value
+- The original agent needs the result to formulate its response
+
+<Callout type="insight">
+The triage pattern is the highest-value use case for handoffs. A single-agent system with many tools is hard to maintain and prompt — the model must balance all tool knowledge at once. Triage + specialists lets each agent have a focused system prompt and a small, coherent tool set. Each agent is independently testable with simple unit tests.
+</Callout>
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I built a triage agent with handoffs to two specialist agents",
+    "I understand that the triage agent stops when it triggers a handoff",
+    "I know how to override the handoff tool name and description",
+    "I can chain handoffs across multiple levels",
+    "I know how to prevent circular handoff loops",
+  ]}
+  next="/modules/module-18-openai-agents-sdk/lesson-04"
+/>

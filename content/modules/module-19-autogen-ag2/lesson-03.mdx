@@ -1,0 +1,294 @@
+---
+title: "Nested Chats and Tool Use Inside Agents"
+module: "module-19-autogen-ag2"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Nested Chats and Tool Use Inside Agents
+
+GroupChat handles multi-agent dialogue well when all agents are equally involved throughout the conversation. But some tasks have a different shape: a main conversation proceeds normally, and at specific moments a sub-task fires — a quality check, a specialised lookup, a validation step — before the main conversation continues.
+
+AutoGen's answer is **nested chats**: a sub-conversation that fires automatically when a specific agent speaks, completes privately, and injects its result back into the outer conversation as if the triggering agent had produced it.
+
+Combined with **tool use** — giving agents the ability to call Python functions — this makes AutoGen capable of realistic, multi-step workflows.
+
+<LearningObjectives items={[
+  "Register Python functions as tools on an AssistantAgent",
+  "Configure a nested chat that fires when a specific agent speaks",
+  "Control how nested chat results are summarised and returned to the outer conversation",
+  "Know when nested chats are the right structure versus GroupChat",
+  "Understand the hidden cost and observability challenge of nested chats",
+]} />
+
+---
+
+## Tool use in AssistantAgent
+
+Tools are Python functions. You define the function, then register it on a caller agent (which generates the function call) and an executor agent (which runs it).
+
+### Defining a tool function
+
+```python
+def search_web(query: str) -> str:
+    """Search the web for information about the given query."""
+    # In production, call a real search API here.
+    # For this example, we return a simulated result.
+    return f"[Simulated results for '{query}']: LLMs reduce manual test case writing by ~40% according to a 2024 IEEE study."
+```
+
+The docstring matters — AutoGen uses it as the tool description when constructing the LLM call.
+
+### Registering with register_function
+
+```python
+from autogen import AssistantAgent, UserProxyAgent
+from autogen import register_function
+import os
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+researcher = AssistantAgent(
+    name="Researcher",
+    system_message=(
+        "You are a research specialist. Use the search_web tool to find information. "
+        "Always cite the source from your search results. "
+        "When done, say 'FINAL_ANSWER: ' followed by your summary."
+    ),
+    llm_config=llm_config,
+)
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=8,
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+
+register_function(
+    search_web,
+    caller=researcher,      # this agent generates the tool call
+    executor=orchestrator,  # this agent executes it and returns the result
+    name="search_web",
+    description="Search the web for information about a topic.",
+)
+```
+
+When the Researcher decides to call `search_web`, it produces a structured tool call message. The Orchestrator sees this, runs the Python function, and returns the result. The Researcher then uses the result to continue its response.
+
+<Callout type="tip">
+The caller and executor separation is intentional. The LLM agent (caller) decides when to call a tool and with what arguments. The proxy agent (executor) actually runs the code. This separation means you can inspect and log every tool call before it executes, or add a human approval step for sensitive tools.
+</Callout>
+
+---
+
+## Nested chats
+
+A nested chat fires a private sub-conversation when a specified agent sends a message. The sub-conversation runs to completion, and its result is returned to the outer conversation as the triggering agent's reply.
+
+### The structure
+
+```python
+orchestrator.register_nested_chats(
+    chat_queue=[
+        {
+            "recipient": review_agent,
+            "message": create_review_message,  # a function that builds the sub-chat's first message
+            "max_turns": 3,
+            "summary_method": "last_msg",
+        }
+    ],
+    trigger=drafter_agent,  # fires when drafter_agent sends a message
+)
+```
+
+The `message` value in the chat queue entry is a callable with this signature:
+
+```python
+def create_review_message(recipient, messages, sender, config):
+    # messages is the outer conversation history so far
+    last_message = messages[-1]["content"]
+    return f"Please review this draft for quality and accuracy:\n\n{last_message}"
+```
+
+### A complete nested chat example
+
+Imagine an outer conversation between an Orchestrator and a Drafter. Every time the Drafter produces a draft, a private review sub-conversation fires with a separate Review agent:
+
+```python
+from autogen import AssistantAgent, UserProxyAgent
+import os
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+drafter = AssistantAgent(
+    name="Drafter",
+    system_message=(
+        "You are a technical writer. Write a clear, concise explanation of the "
+        "concept given to you. After each draft, wait for feedback. "
+        "When the review is passed, output 'APPROVED: Drafter' to end the conversation."
+    ),
+    llm_config=llm_config,
+)
+
+reviewer = AssistantAgent(
+    name="Reviewer",
+    system_message=(
+        "You are a technical reviewer. Read the draft carefully. "
+        "If it is clear, accurate, and complete, respond with 'APPROVED'. "
+        "If not, list your specific objections concisely so the drafter can revise."
+    ),
+    llm_config=llm_config,
+)
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=10,
+    is_termination_msg=lambda msg: "APPROVED:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+
+# Build the nested chat message from the outer conversation
+def create_review_prompt(recipient, messages, sender, config):
+    last_draft = messages[-1]["content"]
+    return f"Review this technical explanation for accuracy and clarity:\n\n{last_draft}"
+
+# Register: fires a private review sub-chat every time the Drafter speaks
+orchestrator.register_nested_chats(
+    chat_queue=[
+        {
+            "recipient": reviewer,
+            "message": create_review_prompt,
+            "max_turns": 2,           # sub-chat runs at most 2 turns
+            "summary_method": "last_msg",  # return the last review message to outer chat
+        }
+    ],
+    trigger=drafter,  # fires when drafter sends a message
+)
+
+orchestrator.initiate_chat(
+    drafter,
+    message="Explain what a context window is in large language models, for a non-technical audience.",
+)
+```
+
+When the Drafter sends its first draft, the nested chat fires. The Orchestrator opens a private conversation with the Reviewer (max 2 turns), gets the review result, and injects it back into the outer conversation as if the Drafter had received feedback. The Drafter can then revise and produce a second draft, which triggers the nested chat again.
+
+---
+
+## The summary_method options
+
+How the nested chat result is returned to the outer conversation is controlled by `summary_method`:
+
+**`"last_msg"`** — returns the final message from the nested chat as-is. Use this when the last message is the complete, useful result (e.g., a review verdict or a tool output).
+
+**`"reflection_with_llm"`** — uses an additional LLM call to summarise the nested conversation into a single message. Use this when the nested conversation is multi-turn and you want a distilled, readable summary rather than a raw final message.
+
+```python
+{
+    "recipient": reviewer,
+    "message": create_review_prompt,
+    "max_turns": 4,
+    "summary_method": "reflection_with_llm",  # LLM distills the 4-turn sub-chat into one message
+}
+```
+
+<Callout type="warning">
+Nested chats are powerful but hidden. The turns and cost they add do not appear in the outer chat's turn count. If your outer chat runs 8 rounds and each round triggers a 3-turn nested chat, the actual number of LLM calls is closer to 8 × 3 = 24 nested calls plus 8 outer responses. Log and monitor nested chats separately in production. When `summary_method="reflection_with_llm"`, add one more LLM call per nested chat instance.
+</Callout>
+
+---
+
+## When to use nested chats vs GroupChat
+
+| Situation | Right choice |
+|---|---|
+| All agents collaborate throughout the whole conversation | GroupChat |
+| A quality-control step fires after every draft | Nested chat |
+| A specialised sub-task (translation, validation, lookup) fires at a specific moment | Nested chat |
+| Agents need to see each other's prior messages to do their job | GroupChat |
+| The sub-task is self-contained and only its result matters to the outer conversation | Nested chat |
+
+Nested chats compose well. You can have multiple chat queues on the same Orchestrator — one fires on the Drafter, another fires on a different agent — building a pipeline of review and validation steps that are invisible in the outer conversation's turn count.
+
+---
+
+## Chaining multiple nested chats
+
+You can register multiple nested chats to fire in sequence from one trigger. The `chat_queue` is a list:
+
+```python
+orchestrator.register_nested_chats(
+    chat_queue=[
+        {
+            "recipient": grammar_checker,
+            "message": lambda recipient, messages, sender, config: (
+                f"Check grammar and spelling:\n\n{messages[-1]['content']}"
+            ),
+            "max_turns": 1,
+            "summary_method": "last_msg",
+        },
+        {
+            "recipient": fact_checker,
+            "message": lambda recipient, messages, sender, config: (
+                f"Verify all factual claims:\n\n{messages[-1]['content']}"
+            ),
+            "max_turns": 2,
+            "summary_method": "last_msg",
+        },
+    ],
+    trigger=drafter,
+)
+```
+
+When the Drafter speaks, the grammar checker fires first. Its result is passed to the fact checker. The final result of the chain is returned to the outer conversation. This creates a multi-stage quality pipeline from a single line of configuration.
+
+---
+
+<Quiz
+  question="When does a nested chat fire?"
+  options={[
+    { text: "After every message from any agent in the outer GroupChat", correct: false, explanation: "Nested chats fire only when the specific agent set as 'trigger' sends a message. Other agents' messages do not trigger the nested chat." },
+    { text: "When the agent specified in the 'trigger' parameter sends a message in the outer conversation", correct: true, explanation: "Correct. The trigger parameter is an agent reference. Each time that agent produces a message in the outer conversation, the nested chat fires." },
+    { text: "Only once, at the start of the conversation, before any other messages", correct: false, explanation: "Nested chats fire every time the trigger agent speaks, not just once. If the trigger agent speaks 4 times, the nested chat fires 4 times." },
+    { text: "When the UserProxyAgent calls register_nested_chats", correct: false, explanation: "register_nested_chats is called during setup to configure the trigger. The nested chat fires later, at runtime, whenever the trigger agent speaks." },
+  ]}
+/>
+
+<Quiz
+  question="What does summary_method='reflection_with_llm' do?"
+  options={[
+    { text: "It returns the last message from the nested chat without modification", correct: false, explanation: "That is what 'last_msg' does. 'reflection_with_llm' is different — it adds an extra LLM step." },
+    { text: "It uses an additional LLM call to summarise the nested conversation into a single distilled message", correct: true, explanation: "Correct. 'reflection_with_llm' sends the full nested chat history to the LLM and asks it to produce a concise summary. This adds one LLM call per nested chat but gives the outer conversation a cleaner, more readable result." },
+    { text: "It reflects the nested chat result back to the trigger agent for approval before injecting it", correct: false, explanation: "There is no approval step in 'reflection_with_llm'. It simply summarises and injects. For approval steps, you would need to design that logic yourself." },
+    { text: "It stores the nested chat history in a database for later retrieval", correct: false, explanation: "AutoGen has no built-in database integration. 'reflection_with_llm' is purely about how the result is summarised before being returned to the outer conversation." },
+  ]}
+/>
+
+---
+
+## Summary
+
+Tool use gives individual agents access to Python functions — giving them the ability to search, calculate, or validate without breaking the conversation flow. Nested chats let you fire complete private sub-conversations at specific moments — for quality control, specialised sub-tasks, or multi-stage review pipelines.
+
+Both features extend AutoGen's reach from simple group discussions to complex, structured workflows. The key to using them well is monitoring: nested chats add hidden cost and turns that are easy to miss if you only watch the outer conversation.
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "I can define a Python tool function and register it on an AssistantAgent",
+    "I can write a nested chat that fires when a specific agent speaks",
+    "I know the difference between summary_method='last_msg' and 'reflection_with_llm'",
+    "I can chain multiple nested chats in a single chat_queue",
+    "I understand that nested chats add hidden cost not visible in the outer turn count",
+  ]}
+  next="/modules/module-19-autogen-ag2/lesson-04"
+/>

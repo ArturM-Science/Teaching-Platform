@@ -1,0 +1,194 @@
+---
+title: "Mental Model: Conversation Threads vs Graph Edges"
+module: "module-19-autogen-ag2"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Mental Model: Conversation Threads vs Graph Edges
+
+Imagine a team of specialists in a group chat. When someone posts a message, anyone on the team can read it and reply. No one has to look up a routing table or follow a flowchart — they just respond to what they see. That is AutoGen's core idea.
+
+AutoGen agents communicate by taking turns in a shared conversation thread. There are no explicit edges between agents, no typed state object, and no node graph to define. Agents simply read the conversation so far and add their next message. A special coordinator — the `GroupChatManager` — reads the conversation and decides who should speak next.
+
+<LearningObjectives items={[
+  "Explain how AutoGen models multi-agent coordination as a conversation thread",
+  "Distinguish AssistantAgent from UserProxyAgent and know when to use each",
+  "Describe how GroupChatManager routes messages between agents",
+  "Compare AutoGen's conversational model with LangGraph's graph model and CrewAI's role model",
+  "Identify when conversational coordination beats graph-based coordination, and vice versa",
+]} />
+
+---
+
+## The two core agent types
+
+AutoGen has two fundamental agent archetypes. Everything else in the framework builds on these two.
+
+### AssistantAgent
+
+`AssistantAgent` is LLM-powered. Give it a name, a system message defining its role, and an `llm_config` pointing to a model. When it is its turn to speak, it calls the LLM with the full conversation history and returns the response as its message.
+
+```python
+from autogen import AssistantAgent
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": "sk-..."}],
+    "temperature": 0,
+}
+
+researcher = AssistantAgent(
+    name="Researcher",
+    system_message=(
+        "You are a research specialist. When given a topic, find relevant facts "
+        "and summarise them clearly. When you have enough, say FINAL_ANSWER: "
+        "followed by your summary."
+    ),
+    llm_config=llm_config,
+)
+```
+
+The `AssistantAgent` can also call tools (Python functions) if you register them — covered in Lesson 3.
+
+### UserProxyAgent
+
+`UserProxyAgent` represents the human user or an automated orchestrator. It does three things:
+
+1. **Initiates conversations** — calls `initiate_chat()` to start the agent loop
+2. **Executes code** — if an agent produces a code block, the proxy can run it in a subprocess
+3. **Controls the loop** — checks for termination conditions and enforces `max_consecutive_auto_reply`
+
+```python
+from autogen import UserProxyAgent
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",          # fully automated, no human prompts
+    max_consecutive_auto_reply=10,     # safety: stop after 10 auto-replies
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),
+    code_execution_config=False,       # disable code execution for this agent
+)
+```
+
+`human_input_mode` controls when the proxy pauses and asks a real human for input:
+- `"ALWAYS"` — asks after every message (interactive mode)
+- `"NEVER"` — never asks, runs fully automated
+- `"TERMINATE"` — asks only when the termination condition is met
+
+For automated pipelines, always use `"NEVER"`.
+
+---
+
+## The GroupChat model
+
+Two agents talking back and forth is useful, but most real tasks need more than two specialists. AutoGen's `GroupChat` puts multiple agents into one shared thread.
+
+```python
+from autogen import GroupChat, GroupChatManager
+
+groupchat = GroupChat(
+    agents=[orchestrator, researcher, critic, synthesiser],
+    max_round=12,
+    speaker_selection_method="auto",
+)
+
+manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+orchestrator.initiate_chat(manager, message="Research the impact of LLMs on software testing.")
+```
+
+When `initiate_chat` is called, the manager reads the conversation history after each message and picks the next speaker. With `speaker_selection_method="auto"`, it asks the LLM: "Given this conversation, who should speak next?" That decision is itself an LLM call — a routing call added on top of every agent response.
+
+<Callout type="insight">
+The GroupChatManager uses an LLM call to decide the next speaker every single round. With 4 agents and 12 rounds, that is 12 extra routing calls on top of the agent responses. In a 12-round conversation with 4 agents, you pay for roughly 24 LLM calls minimum — 12 agent responses (one per round) plus 12 routing calls. Budget for this. Lesson 5 covers how to measure and reduce this cost.
+</Callout>
+
+---
+
+## How AutoGen differs from LangGraph and CrewAI
+
+All three frameworks coordinate multiple LLM agents, but they model the problem differently. Understanding these differences tells you which tool to reach for.
+
+### LangGraph: explicit graph, typed state
+
+In LangGraph, you define a directed graph of nodes (Python functions) and edges (routing logic). A typed state object flows through the graph. Every routing decision is code you wrote — deterministic and auditable by inspection.
+
+LangGraph is the right choice when you need checkpointing, strict typed state, human-in-the-loop at specific graph nodes, or replay of a failed run.
+
+### CrewAI: roles and tasks
+
+CrewAI abstracts away the conversation entirely. You define agents by role and assign them tasks. CrewAI handles who does what and in what order. The framework encourages thinking in workflows: "who does step 1, who does step 2."
+
+CrewAI is the right choice when your problem maps cleanly to a sequence of distinct tasks with clear ownership.
+
+### AutoGen: conversation thread
+
+AutoGen lets agents see the full conversation and respond naturally, like colleagues in a chat room. There is no typed state — the conversation history is the state. There is no routing graph — the GroupChatManager reads context and decides.
+
+AutoGen shines when you want agents to debate, critique, and revise naturally without prescribing the exact flow. A researcher might challenge a critic's objection; the critic might back down; the synthesiser might step in. This kind of emergent coordination is easy to express in AutoGen and awkward to wire in LangGraph.
+
+<Callout type="note">
+Neither model is universally better. Use AutoGen when the task benefits from flexible, context-driven agent dialogue. Use LangGraph when you need deterministic routing, typed state, and checkpointing. Many production systems use both: LangGraph as the outer orchestrator with AutoGen GroupChats as sub-tasks within individual nodes.
+</Callout>
+
+---
+
+## AG2: when you want both
+
+AG2 is a community fork of AutoGen (version 0.4+) that adds explicit graph support. Its `DiGraphGroupChat` lets you define the conversation graph using NetworkX — making every routing decision inspectable and auditable — while keeping the conversational agent model you get with AutoGen.
+
+Think of AG2 as AutoGen with LangGraph's routing discipline grafted on. You still write agents the same way, but instead of letting the manager LLM decide who speaks next, you draw the edges yourself.
+
+AG2 is covered in depth in Lesson 4. For now, the key point is that the AutoGen/AG2 ecosystem covers a spectrum from fully flexible (GroupChat, `"auto"` selection) to fully deterministic (DiGraphGroupChat with explicit edges).
+
+---
+
+## Choosing a coordination model
+
+| Situation | Recommended approach |
+|---|---|
+| Agents should debate and revise each other's work | AutoGen GroupChat, `"auto"` selection |
+| You need a fixed sequence of agent turns | AutoGen GroupChat, `"round_robin"` selection |
+| You need auditable, deterministic routing | AG2 DiGraphGroupChat |
+| You need typed state and checkpointing | LangGraph |
+| You need cloud-native deployment and handoffs | ADK or OpenAI Agents SDK |
+
+---
+
+<Quiz
+  question="In AutoGen's GroupChat, who decides which agent speaks next?"
+  options={[
+    { text: "The agent that was last addressed by name in the conversation", correct: false, explanation: "AutoGen does not parse names from message text to route. The GroupChatManager makes the routing decision, not the content of the message." },
+    { text: "The GroupChatManager, which makes an LLM call after each message", correct: true, explanation: "Correct. With speaker_selection_method='auto', the GroupChatManager sends the conversation history to the LLM and asks which agent should speak next. This is an extra LLM call per round." },
+    { text: "The UserProxyAgent, which has a hardcoded routing table", correct: false, explanation: "UserProxyAgent controls the loop and termination, but it does not decide which agent speaks next in a GroupChat. That is the GroupChatManager's job." },
+    { text: "The agents take turns in the order they were added to the GroupChat list", correct: false, explanation: "That would be round_robin selection. The default 'auto' mode uses an LLM to pick the next speaker based on the conversation context." },
+  ]}
+/>
+
+<Quiz
+  question="What is the key functional difference between AssistantAgent and UserProxyAgent?"
+  options={[
+    { text: "AssistantAgent can call tools; UserProxyAgent cannot", correct: false, explanation: "Both agent types can be configured with tools. The distinction is about their primary role, not tool capability." },
+    { text: "AssistantAgent generates LLM responses; UserProxyAgent controls the loop, executes code, and checks termination", correct: true, explanation: "Correct. AssistantAgent is the LLM-powered responder. UserProxyAgent acts as the orchestrator: it initiates chats, runs code blocks, and enforces termination conditions." },
+    { text: "AssistantAgent is for Python code; UserProxyAgent is for natural language", correct: false, explanation: "Both agent types handle natural language. UserProxyAgent can execute code, but that is one of several roles it plays, not its defining distinction." },
+    { text: "They are interchangeable — the names are just conventions", correct: false, explanation: "They have distinct roles. UserProxyAgent has special capabilities: initiate_chat, code execution, and termination checking. AssistantAgent is purely LLM-driven." },
+  ]}
+/>
+
+---
+
+## Summary
+
+AutoGen models multi-agent coordination as a shared conversation thread where agents take turns speaking. `AssistantAgent` generates LLM responses; `UserProxyAgent` controls the loop. `GroupChat` puts multiple agents in one thread; `GroupChatManager` decides who speaks next using an LLM call.
+
+This model is flexible and natural for tasks that benefit from open-ended agent dialogue. It differs from LangGraph (explicit graph, typed state) and CrewAI (role/task abstraction). AG2 bridges the gap by adding explicit graph support to the AutoGen agent model.
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "I can explain how AutoGen models coordination as a conversation thread",
+    "I know the difference between AssistantAgent and UserProxyAgent",
+    "I understand that GroupChatManager makes an LLM call to pick the next speaker",
+    "I can match a task to the right framework: AutoGen, LangGraph, or CrewAI",
+  ]}
+  next="/modules/module-19-autogen-ag2/lesson-02"
+/>

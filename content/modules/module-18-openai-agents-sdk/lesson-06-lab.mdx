@@ -1,0 +1,534 @@
+---
+title: "Lab: Customer Support System — Triage, Specialists, and Guardrails"
+module: "module-18-openai-agents-sdk"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab: Customer Support System — Triage, Specialists, and Guardrails
+
+You have learned the four primitives. Now you will build a production-shaped system that uses all of them together: a triage agent, two specialist agents with real tools, a regex PII guardrail, and an LLM-as-judge output guardrail.
+
+<LabBrief title="Customer Support System: Triage, Specialists, and Guardrails" time="2–3 hours">
+#### Objective
+Build a three-agent customer support pipeline:
+
+- **Triage agent** — reads user intent, routes to Billing or Tech Support using handoffs
+- **Billing agent** — handles payment questions with invoice lookup and refund tools
+- **Tech Support agent** — handles technical issues with diagnostic and status tools
+- **Input guardrail** — reject messages containing PII (SSN, credit card, and one more pattern)
+- **Output guardrail (LLM-as-judge)** — flag responses that make promises the company cannot keep
+
+The system must handle tripwire exceptions gracefully and never expose internal error details to the user.
+
+#### Setup
+```bash
+pip install openai-agents pydantic
+export OPENAI_API_KEY="sk-..."
+# Or for Anthropic models:
+# pip install litellm
+# export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+#### Deliverables
+- `tools.py` — billing tools (`lookup_invoice`, `process_refund`) and tech tools (`run_diagnostic`, `check_status`)
+- `guardrails.py` — PII input guardrail (3+ patterns) and LLM output guardrail
+- `agents.py` — all three agents with tools and handoffs wired together
+- `runner.py` — conversation loop that catches both tripwire exceptions and returns user-friendly messages
+- `README.md` — one paragraph: when would you add a fourth agent instead of adding more tools to an existing agent?
+
+#### Hard constraints
+- Must use **handoffs** (not tools) for triage-to-specialist routing
+- PII guardrail must check for at least 3 distinct patterns (SSN format, credit card format, and one more)
+- Output guardrail must use a separate LLM agent — not regex
+- `Runner.run()` must catch `InputGuardrailTripwireTriggered` and return a user-friendly message
+- `RunConfig(max_turns=8)` must be set on every `Runner.run()` call
+</LabBrief>
+
+## Run this lab
+
+**Option A — VS Code / local terminal** (instructions below)
+
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
+
+<ColabButton notebook="module-18-lab" />
+
+---
+
+## Starter code
+
+Work through the files in order. Each `TODO` is a concrete task. Solution blocks are available at the bottom of each section — try the task before opening them.
+
+### `tools.py`
+
+```python
+# tools.py
+from agents import function_tool, RunContextWrapper
+from dataclasses import dataclass
+
+# --- Context ---
+
+@dataclass
+class SupportContext:
+    user_id: str
+    session_id: str
+
+# --- Billing tools ---
+
+# Mock database — replace with real DB calls in production
+INVOICES = {
+    "INV-001": {"amount": 99.00, "date": "2026-05-01", "status": "paid"},
+    "INV-002": {"amount": 99.00, "date": "2026-06-01", "status": "duplicate"},
+    "INV-003": {"amount": 299.00, "date": "2026-06-10", "status": "pending"},
+}
+
+@function_tool
+def lookup_invoice(ctx: RunContextWrapper[SupportContext], invoice_id: str) -> str:
+    """Look up an invoice by ID and return its details including amount, date, and status."""
+    # TODO: Look up invoice_id in INVOICES dict.
+    # If found, return a formatted string with amount, date, and status.
+    # If not found, return a not-found message.
+    raise NotImplementedError
+
+@function_tool
+def process_refund(ctx: RunContextWrapper[SupportContext], invoice_id: str, reason: str) -> str:
+    """Process a refund for a given invoice. Returns confirmation with estimated timeline."""
+    # TODO: Check if invoice_id exists in INVOICES.
+    # If it does, return a confirmation message with the refund amount and 3-5 business day ETA.
+    # If not, return an error message.
+    # Note: log ctx.context.user_id and invoice_id for audit purposes (print is fine).
+    raise NotImplementedError
+
+# --- Tech support tools ---
+
+DIAGNOSTICS = {
+    "api": "API endpoints: all responding, avg latency 38ms",
+    "database": "Database: connected, replication lag 0ms",
+    "auth": "Auth service: degraded — elevated token refresh error rate (12%)",
+    "storage": "Storage: all buckets accessible, no quota issues",
+}
+
+@function_tool
+def run_diagnostic(ctx: RunContextWrapper[SupportContext], component: str) -> str:
+    """Run a diagnostic check on a system component (api, database, auth, storage)."""
+    # TODO: Look up component (lowercase) in DIAGNOSTICS.
+    # Return the diagnostic string if found, or a message listing valid components if not.
+    raise NotImplementedError
+
+@function_tool
+def check_status(ctx: RunContextWrapper[SupportContext], service: str) -> str:
+    """Check the operational status of a named service."""
+    # TODO: Return a mock status string that includes the service name and a timestamp.
+    # Format: "Status for {service}: all systems operational as of {current UTC time}"
+    raise NotImplementedError
+```
+
+<details>
+<summary>Solution: tools.py</summary>
+
+```python
+# tools.py
+from agents import function_tool, RunContextWrapper
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+@dataclass
+class SupportContext:
+    user_id: str
+    session_id: str
+
+INVOICES = {
+    "INV-001": {"amount": 99.00, "date": "2026-05-01", "status": "paid"},
+    "INV-002": {"amount": 99.00, "date": "2026-06-01", "status": "duplicate"},
+    "INV-003": {"amount": 299.00, "date": "2026-06-10", "status": "pending"},
+}
+
+DIAGNOSTICS = {
+    "api": "API endpoints: all responding, avg latency 38ms",
+    "database": "Database: connected, replication lag 0ms",
+    "auth": "Auth service: degraded — elevated token refresh error rate (12%)",
+    "storage": "Storage: all buckets accessible, no quota issues",
+}
+
+@function_tool
+def lookup_invoice(ctx: RunContextWrapper[SupportContext], invoice_id: str) -> str:
+    """Look up an invoice by ID and return its details including amount, date, and status."""
+    inv = INVOICES.get(invoice_id.upper())
+    if not inv:
+        return f"Invoice {invoice_id} not found. Please check the invoice ID and try again."
+    return (
+        f"Invoice {invoice_id}: ${inv['amount']:.2f} charged on {inv['date']}, "
+        f"status: {inv['status']}"
+    )
+
+@function_tool
+def process_refund(ctx: RunContextWrapper[SupportContext], invoice_id: str, reason: str) -> str:
+    """Process a refund for a given invoice. Returns confirmation with estimated timeline."""
+    inv = INVOICES.get(invoice_id.upper())
+    if not inv:
+        return f"Cannot process refund: invoice {invoice_id} not found."
+    print(f"AUDIT: refund initiated user={ctx.context.user_id} invoice={invoice_id}")
+    return (
+        f"Refund of ${inv['amount']:.2f} initiated for invoice {invoice_id}. "
+        f"Reason: {reason}. Funds will appear in 3–5 business days."
+    )
+
+@function_tool
+def run_diagnostic(ctx: RunContextWrapper[SupportContext], component: str) -> str:
+    """Run a diagnostic check on a system component (api, database, auth, storage)."""
+    result = DIAGNOSTICS.get(component.lower())
+    if not result:
+        valid = ", ".join(DIAGNOSTICS.keys())
+        return f"Unknown component '{component}'. Valid options: {valid}"
+    return result
+
+@function_tool
+def check_status(ctx: RunContextWrapper[SupportContext], service: str) -> str:
+    """Check the operational status of a named service."""
+    now = datetime.now(timezone.utc).strftime("%H:%M UTC")
+    return f"Status for {service}: all systems operational as of {now}"
+```
+</details>
+
+---
+
+### `guardrails.py`
+
+```python
+# guardrails.py
+import re
+from agents import (
+    Agent, Runner, InputGuardrail, OutputGuardrail,
+    GuardrailFunctionOutput, RunContextWrapper
+)
+from pydantic import BaseModel
+
+# --- PII patterns ---
+
+# TODO: Define at least 3 regex patterns to detect PII.
+# Required: SSN format (###-##-####), credit card (16 digits, spaces/dashes optional),
+# and at least one more (phone number, email, passport, etc.).
+PII_PATTERNS: list[str] = [
+    # TODO: add patterns here
+]
+
+async def pii_input_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    input: str,
+) -> GuardrailFunctionOutput:
+    """Reject messages that appear to contain PII."""
+    # TODO: Check input against each pattern in PII_PATTERNS.
+    # Return GuardrailFunctionOutput with tripwire_triggered=True if any match.
+    # Include the list of matched patterns in output_info for audit logging.
+    raise NotImplementedError
+
+# --- LLM output guardrail ---
+
+class PromiseCheck(BaseModel):
+    contains_promise: bool
+    flagged_phrases: list[str]
+    severity: str  # "none" | "low" | "high"
+
+# TODO: Create a fast LLM agent (gpt-4o-mini or claude-haiku) that checks whether
+# a response makes promises the company cannot keep.
+# It should return a PromiseCheck via output_type.
+promise_checker_agent: Agent  # replace with your Agent(...)
+
+async def promise_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    output: str,
+) -> GuardrailFunctionOutput:
+    """Use an LLM to flag responses that make unkeepable promises."""
+    # TODO: Run promise_checker_agent against the output string.
+    # Trigger the tripwire if contains_promise is True and severity is "high".
+    raise NotImplementedError
+
+# Export guardrail objects for use in agents.py
+pii_guardrail = InputGuardrail(guardrail_function=pii_input_guardrail)
+output_promise_guardrail = OutputGuardrail(guardrail_function=promise_output_guardrail)
+```
+
+<details>
+<summary>Solution: guardrails.py</summary>
+
+```python
+# guardrails.py
+import re
+from agents import (
+    Agent, Runner, InputGuardrail, OutputGuardrail,
+    GuardrailFunctionOutput, RunContextWrapper
+)
+from pydantic import BaseModel
+
+PII_PATTERNS = [
+    r"\b\d{3}-\d{2}-\d{4}\b",                           # SSN: 123-45-6789
+    r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",         # Credit card: 16 digits
+    r"\b(\+1\s?)?\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}\b",  # US phone number
+]
+
+async def pii_input_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    input: str,
+) -> GuardrailFunctionOutput:
+    matched = [p for p in PII_PATTERNS if re.search(p, input)]
+    return GuardrailFunctionOutput(
+        output_info={"matched_patterns": matched, "input_length": len(input)},
+        tripwire_triggered=bool(matched),
+    )
+
+class PromiseCheck(BaseModel):
+    contains_promise: bool
+    flagged_phrases: list[str]
+    severity: str  # "none" | "low" | "high"
+
+promise_checker_agent = Agent(
+    name="PromiseChecker",
+    model="gpt-4o-mini",
+    instructions=(
+        "You review customer support responses for promises the company cannot keep. "
+        "Flag responses that contain: service guarantees ('we guarantee', '100% uptime'), "
+        "data promises ('your data will never be lost'), unconditional refund promises "
+        "('full refund no questions asked'), or SLA commitments with specific numbers. "
+        "Mark severity as 'high' if the promise is specific and legally binding, "
+        "'low' if it is vague, 'none' if there is no problematic promise."
+    ),
+    output_type=PromiseCheck,
+)
+
+async def promise_output_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    output: str,
+) -> GuardrailFunctionOutput:
+    result = await Runner.run(promise_checker_agent, output, context=ctx.context)
+    check = result.final_output
+    return GuardrailFunctionOutput(
+        output_info={
+            "contains_promise": check.contains_promise,
+            "flagged_phrases": check.flagged_phrases,
+            "severity": check.severity,
+        },
+        tripwire_triggered=check.contains_promise and check.severity == "high",
+    )
+
+pii_guardrail = InputGuardrail(guardrail_function=pii_input_guardrail)
+output_promise_guardrail = OutputGuardrail(guardrail_function=promise_output_guardrail)
+```
+</details>
+
+---
+
+### `agents.py`
+
+```python
+# agents.py
+from agents import Agent, handoff
+from tools import (
+    SupportContext,
+    lookup_invoice, process_refund,
+    run_diagnostic, check_status,
+)
+from guardrails import pii_guardrail, output_promise_guardrail
+
+# TODO: Create billing_agent with:
+#   - name="Billing"
+#   - instructions: handles payments, invoices, refunds; always looks up invoice before discussing charges
+#   - tools: lookup_invoice, process_refund
+#   - output_guardrails: [output_promise_guardrail]
+billing_agent: Agent  # replace with your Agent(...)
+
+# TODO: Create tech_agent with:
+#   - name="TechSupport"
+#   - instructions: handles technical issues; runs diagnostics before guessing; checks status for outages
+#   - tools: run_diagnostic, check_status
+#   - output_guardrails: [output_promise_guardrail]
+tech_agent: Agent  # replace with your Agent(...)
+
+# TODO: Create triage_agent with:
+#   - name="Triage"
+#   - instructions: routing logic only — no domain knowledge; route billing questions to Billing,
+#     technical issues to TechSupport; never answer domain questions directly
+#   - handoffs: [handoff(billing_agent), handoff(tech_agent)]
+#   - input_guardrails: [pii_guardrail]
+#   (Note: PII guardrail on triage = checked once, before any specialist sees the input)
+triage_agent: Agent  # replace with your Agent(...)
+```
+
+<details>
+<summary>Solution: agents.py</summary>
+
+```python
+# agents.py
+from agents import Agent, handoff
+from tools import (
+    SupportContext,
+    lookup_invoice, process_refund,
+    run_diagnostic, check_status,
+)
+from guardrails import pii_guardrail, output_promise_guardrail
+
+billing_agent = Agent[SupportContext](
+    name="Billing",
+    instructions=(
+        "You handle billing, invoices, payments, and refunds. "
+        "Always look up the invoice before discussing specific charges. "
+        "Get explicit confirmation before processing any refund. "
+        "Do not make guarantees about refund timelines beyond 3–5 business days."
+    ),
+    tools=[lookup_invoice, process_refund],
+    output_guardrails=[output_promise_guardrail],
+)
+
+tech_agent = Agent[SupportContext](
+    name="TechSupport",
+    instructions=(
+        "You handle technical issues: errors, bugs, configuration problems, and outages. "
+        "Run diagnostics before suggesting fixes. "
+        "Check service status if the user reports widespread issues. "
+        "Be honest about degraded services — do not minimise known incidents."
+    ),
+    tools=[run_diagnostic, check_status],
+    output_guardrails=[output_promise_guardrail],
+)
+
+triage_agent = Agent[SupportContext](
+    name="Triage",
+    instructions=(
+        "You are the first point of contact for customer support. "
+        "Your only job is to route the conversation to the right specialist. "
+        "For billing or payment questions (invoices, charges, refunds): transfer to Billing. "
+        "For technical issues (errors, not working, configuration, outages): transfer to TechSupport. "
+        "Do not answer domain questions yourself. Always transfer."
+    ),
+    handoffs=[handoff(billing_agent), handoff(tech_agent)],
+    input_guardrails=[pii_guardrail],
+)
+```
+</details>
+
+---
+
+### `runner.py`
+
+```python
+# runner.py
+import asyncio
+from agents import Runner, RunConfig
+from agents.exceptions import InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered
+from agents_module import triage_agent  # rename if your file is agents.py
+from tools import SupportContext
+
+# TODO: Implement handle_message(user_id, session_id, message) -> str
+# It should:
+#   1. Create a SupportContext with user_id and session_id
+#   2. Call Runner.run(triage_agent, message, context=ctx, run_config=RunConfig(max_turns=8))
+#   3. Catch InputGuardrailTripwireTriggered → return a user-friendly PII message
+#   4. Catch OutputGuardrailTripwireTriggered → return a user-friendly escalation message
+#   5. Return result.final_output on success
+
+async def handle_message(user_id: str, session_id: str, message: str) -> str:
+    raise NotImplementedError
+
+async def main():
+    test_cases = [
+        ("How do I cancel my subscription?", "general"),
+        ("I was charged twice for INV-002 last month.", "billing"),
+        ("The API keeps returning 401 errors after I rotated my key.", "tech"),
+        ("My SSN is 123-45-6789, can you look up my account?", "pii — should be blocked"),
+    ]
+    for message, label in test_cases:
+        print(f"\n[{label}]")
+        print(f"User: {message}")
+        response = await handle_message("u_demo", "sess_001", message)
+        print(f"Agent: {response}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<details>
+<summary>Solution: runner.py</summary>
+
+```python
+# runner.py
+import asyncio
+from agents import Runner, RunConfig
+from agents.exceptions import InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered
+from agents import triage_agent  # assumes your file is agents.py; adjust import as needed
+from tools import SupportContext
+
+async def handle_message(user_id: str, session_id: str, message: str) -> str:
+    ctx = SupportContext(user_id=user_id, session_id=session_id)
+    try:
+        result = await Runner.run(
+            triage_agent,
+            message,
+            context=ctx,
+            run_config=RunConfig(max_turns=8),
+        )
+        return result.final_output
+    except InputGuardrailTripwireTriggered:
+        return (
+            "I'm not able to process messages that contain personal information "
+            "such as social security numbers, credit card numbers, or phone numbers. "
+            "Please remove any sensitive data and try again."
+        )
+    except OutputGuardrailTripwireTriggered:
+        return (
+            "I'm sorry, I was unable to provide a suitable response to your question. "
+            "Please contact our support team directly at support@example.com for assistance."
+        )
+
+async def main():
+    test_cases = [
+        ("How do I cancel my subscription?", "general"),
+        ("I was charged twice for INV-002 last month.", "billing"),
+        ("The API keeps returning 401 errors after I rotated my key.", "tech"),
+        ("My SSN is 123-45-6789, can you look up my account?", "pii — should be blocked"),
+    ]
+    for message, label in test_cases:
+        print(f"\n[{label}]")
+        print(f"User: {message}")
+        response = await handle_message("u_demo", "sess_001", message)
+        print(f"Agent: {response}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+</details>
+
+---
+
+## Extension tasks
+
+If you finish early, pick one:
+
+**Extension A — Multi-turn conversation**: Modify `runner.py` to support a back-and-forth conversation loop. Use `result.to_input_list()` to carry history forward across turns. Add a `/quit` command to exit.
+
+**Extension B — Streaming output**: Rewrite `handle_message` to use `Runner.run_streamed` and print tokens as they arrive. Handle the `InputGuardrailTripwireTriggered` exception (it is raised before streaming starts).
+
+**Extension C — Fourth agent**: Add an `AccountAgent` that handles account management questions (password resets, plan changes, account deletion). Update the triage agent to route to it. What did you have to change? How does this compare to adding more tools to the billing agent?
+
+**Extension D — Anthropic model**: Switch one or more agents to `LitellmModel(model="anthropic/claude-haiku-4-5-20251001")`. Verify that tools, handoffs, and guardrails all still work. What differences do you notice in response style?
+
+---
+
+<Callout type="insight">
+After completing this lab, you have built a production-shaped system: triage routing via handoffs, specialist agents with typed context, guardrails running in parallel with agent calls, graceful exception handling, and a configurable turn limit. The same pattern scales to 10 specialists — the triage agent's instructions grow, but the architecture does not change.
+</Callout>
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I built a triage agent that routes to two specialists using handoffs",
+    "I implemented a PII input guardrail that checks at least 3 patterns",
+    "I implemented an LLM output guardrail using a separate agent",
+    "My runner catches both tripwire exceptions and returns user-friendly messages",
+    "RunConfig(max_turns=8) is set on every Runner.run() call",
+    "I wrote the README paragraph on when to add a fourth agent vs. more tools",
+  ]}
+  next="/modules/module-18-openai-agents-sdk"
+/>

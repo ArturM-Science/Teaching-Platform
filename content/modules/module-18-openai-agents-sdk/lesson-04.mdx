@@ -1,0 +1,340 @@
+---
+title: "Guardrails: Input Validation, Output Filtering, Safety"
+module: "module-18-openai-agents-sdk"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Guardrails: Input Validation, Output Filtering, Safety
+
+Guardrails are the SDK's safety layer — functions that intercept inputs before they reach your agent and outputs before they reach your users. This lesson covers how input and output guardrails work, how to write them, and when to use an LLM as the guardrail function itself.
+
+<LearningObjectives items={[
+  "Write an input guardrail function and attach it to an agent",
+  "Catch InputGuardrailTripwireTriggered and return a user-friendly message",
+  "Write an output guardrail and explain when it adds latency",
+  "Use a fast LLM agent as a guardrail function",
+  "Choose between input guardrails, output guardrails, and Pydantic output_type for different validation needs",
+]} />
+
+## What guardrails do
+
+Guardrails are validation functions registered on an agent. They receive the same input (or output) the agent sees and return a `GuardrailFunctionOutput` that says whether to allow the run to continue.
+
+- **Input guardrails** run in parallel with the first LLM call. If one triggers, the LLM call is cancelled.
+- **Output guardrails** run after the agent produces a final response. If one triggers, the result is discarded.
+
+The key signature:
+
+```python
+from agents import GuardrailFunctionOutput, RunContextWrapper, Agent
+
+async def my_guardrail(
+    ctx: RunContextWrapper,   # typed context object
+    agent: Agent,             # the agent being guarded
+    input: str,               # the user's input (input guardrail) or agent output (output guardrail)
+) -> GuardrailFunctionOutput:
+    ...
+    return GuardrailFunctionOutput(
+        output_info={"key": "value"},  # any dict — appears in the trace
+        tripwire_triggered=False,      # True = cancel the run
+    )
+```
+
+## Writing an input guardrail
+
+Input guardrails are the most common use case: reject malformed, dangerous, or policy-violating inputs before any LLM cost is incurred.
+
+```python
+from agents import (
+    Agent, Runner, InputGuardrail, GuardrailFunctionOutput,
+    RunContextWrapper
+)
+import re
+import asyncio
+
+# Patterns to detect — add as many as your policy requires
+PII_PATTERNS = [
+    r"\b\d{3}-\d{2}-\d{4}\b",           # SSN format: 123-45-6789
+    r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",  # Credit card: 16 digits
+    r"\b\d{3}\s?\d{3}\s?\d{4}\b",        # Phone number
+]
+
+async def no_pii_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    input: str,
+) -> GuardrailFunctionOutput:
+    """Reject inputs that appear to contain personally identifiable information."""
+    detected = []
+    for pattern in PII_PATTERNS:
+        if re.search(pattern, input):
+            detected.append(pattern)
+
+    return GuardrailFunctionOutput(
+        output_info={"patterns_detected": detected},
+        tripwire_triggered=len(detected) > 0,
+    )
+
+support_agent = Agent(
+    name="Support",
+    instructions="Help customers with questions about our product.",
+    input_guardrails=[InputGuardrail(guardrail_function=no_pii_guardrail)],
+)
+```
+
+## Catching the tripwire exception
+
+When a tripwire triggers, the SDK raises `InputGuardrailTripwireTriggered`. Catch it in your Runner call and return a user-friendly message:
+
+```python
+from agents.exceptions import InputGuardrailTripwireTriggered
+
+async def handle_message(user_input: str) -> str:
+    try:
+        result = await Runner.run(support_agent, user_input)
+        return result.final_output
+    except InputGuardrailTripwireTriggered as e:
+        # Log the guardrail details for audit purposes
+        print(f"Guardrail triggered: {e.guardrail_result.output.output_info}")
+        return (
+            "I'm not able to process messages that contain personal information "
+            "such as social security numbers or credit card numbers. "
+            "Please remove any sensitive data and try again."
+        )
+
+async def main():
+    safe_input = "How do I cancel my subscription?"
+    pii_input = "My SSN is 123-45-6789, can you look up my account?"
+
+    print(await handle_message(safe_input))
+    print(await handle_message(pii_input))
+
+asyncio.run(main())
+```
+
+<Callout type="note">
+Input guardrails run **in parallel** with the first agent call — not before it. This is an important performance detail: if your guardrail completes before the agent does (which it usually does, since guardrails are lightweight), there is no added latency on the happy path. The agent call is only cancelled if the guardrail triggers.
+</Callout>
+
+<Quiz
+  question="Do input guardrails run before or in parallel with the agent's first LLM call?"
+  options={[
+    { text: "Before — the guardrail must pass before the agent is called.", correct: false, explanation: "Input guardrails run in parallel with the first LLM call, not sequentially before it. This means they add no latency on the happy path." },
+    { text: "In parallel — the guardrail and the first agent call start at the same time.", correct: true, explanation: "Correct. Both start simultaneously. If the guardrail triggers, the agent call is cancelled. If the guardrail passes and the agent finishes first, the guardrail result is still checked." },
+    { text: "After — guardrails are checked once the agent has its response.", correct: false, explanation: "That describes output guardrails, not input guardrails. Input guardrails are checked before the agent's response is used." },
+  ]}
+/>
+
+## Writing an output guardrail
+
+Output guardrails check the agent's final response before it reaches the user. Use them for safety-critical checks you cannot express as a Pydantic schema.
+
+```python
+from agents import OutputGuardrail, GuardrailFunctionOutput, RunContextWrapper
+
+# Phrases the company has decided agents must not commit to
+FORBIDDEN_COMMITMENTS = [
+    "we guarantee",
+    "100% uptime",
+    "your data will never",
+    "we will always",
+    "full refund within",
+]
+
+async def no_overcommitment_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    output: str,  # Note: output, not input
+) -> GuardrailFunctionOutput:
+    """Reject responses that make commitments the company cannot keep."""
+    output_lower = output.lower()
+    triggered_phrases = [p for p in FORBIDDEN_COMMITMENTS if p in output_lower]
+
+    return GuardrailFunctionOutput(
+        output_info={"triggered_phrases": triggered_phrases},
+        tripwire_triggered=len(triggered_phrases) > 0,
+    )
+
+agent = Agent(
+    name="Support",
+    instructions="Help customers. Be helpful but do not make specific service guarantees.",
+    output_guardrails=[OutputGuardrail(guardrail_function=no_overcommitment_guardrail)],
+)
+```
+
+<Callout type="warning">
+Output guardrails **do** add latency — they run after the agent completes, so they are purely sequential. Use them only for safety-critical checks. For format validation (ensuring the response has certain fields), prefer `output_type` with a Pydantic model — that validation happens during parsing and does not require a second sequential step.
+</Callout>
+
+## Using an LLM as a guardrail
+
+Regex and keyword matching miss nuance. For safety-critical guardrails, use a fast, cheap LLM as the validation function:
+
+```python
+from agents import Agent, Runner, InputGuardrail, GuardrailFunctionOutput, RunContextWrapper
+from pydantic import BaseModel
+
+# Output schema for the safety checker
+class SafetyCheck(BaseModel):
+    is_safe: bool
+    reason: str
+    category: str  # "safe", "pii", "harmful", "off_topic"
+
+# A cheap, fast model for safety checking
+safety_checker = Agent(
+    name="SafetyChecker",
+    model="gpt-4o-mini",  # Fast and cheap — important for a guardrail
+    instructions=(
+        "You are a safety classifier for a customer support system. "
+        "Classify the input as safe or unsafe. "
+        "Mark as unsafe if the input contains: PII (SSN, credit cards, passwords), "
+        "harmful requests, or content completely unrelated to software products. "
+        "Be permissive — only flag clear violations."
+    ),
+    output_type=SafetyCheck,
+)
+
+async def llm_safety_guardrail(
+    ctx: RunContextWrapper,
+    agent: Agent,
+    input: str,
+) -> GuardrailFunctionOutput:
+    # Run the safety checker against the user's input
+    result = await Runner.run(safety_checker, input, context=ctx.context)
+    check = result.final_output  # SafetyCheck instance
+
+    return GuardrailFunctionOutput(
+        output_info={
+            "is_safe": check.is_safe,
+            "reason": check.reason,
+            "category": check.category,
+        },
+        tripwire_triggered=not check.is_safe,
+    )
+
+main_agent = Agent(
+    name="Support",
+    instructions="Help customers with software product questions.",
+    input_guardrails=[InputGuardrail(guardrail_function=llm_safety_guardrail)],
+)
+```
+
+The safety checker runs in parallel with `main_agent`'s first call. If the checker flags the input, the main agent call is cancelled. Because the safety checker is a small model (`gpt-4o-mini`), it is typically much faster than the main agent — so the parallel execution often adds zero latency.
+
+<Quiz
+  question="What exception is raised when an input guardrail's tripwire_triggered is True?"
+  options={[
+    { text: "GuardrailViolationError", correct: false, explanation: "This exception does not exist in the SDK." },
+    { text: "InputGuardrailTripwireTriggered", correct: true, explanation: "Correct. Import it from agents.exceptions and catch it in your Runner.run() call to return a user-friendly response." },
+    { text: "AgentSafetyError", correct: false, explanation: "This exception does not exist in the SDK." },
+  ]}
+/>
+
+## Multiple guardrails
+
+You can attach multiple guardrails to a single agent. They run in parallel with each other (and with the first agent call):
+
+```python
+agent = Agent(
+    name="Support",
+    instructions="Help customers.",
+    input_guardrails=[
+        InputGuardrail(guardrail_function=no_pii_guardrail),
+        InputGuardrail(guardrail_function=llm_safety_guardrail),
+        InputGuardrail(guardrail_function=rate_limit_guardrail),
+    ],
+    output_guardrails=[
+        OutputGuardrail(guardrail_function=no_overcommitment_guardrail),
+    ],
+)
+```
+
+If any input guardrail triggers, the run is cancelled and `InputGuardrailTripwireTriggered` is raised. The `guardrail_result` attribute on the exception identifies which guardrail fired.
+
+## Choosing the right validation mechanism
+
+| Need | Best approach |
+|---|---|
+| Validate response structure (fields, types) | `output_type=MyPydanticModel` — fastest, no added latency |
+| Reject inputs matching known patterns (regex) | `InputGuardrail` with a regex function — fast, zero LLM cost |
+| Detect nuanced unsafe content in inputs | `InputGuardrail` with a fast LLM — semantic, runs in parallel |
+| Check agent response for policy violations | `OutputGuardrail` — use sparingly, adds latency |
+| Fact-check agent responses | `OutputGuardrail` with an LLM — expensive, only for critical cases |
+
+<Callout type="insight">
+The guardrail architecture reflects a key tradeoff: precision vs. latency. Regex guardrails are fast but miss nuance. LLM guardrails are more accurate but cost tokens. The SDK's parallel execution (input guardrails run alongside the first agent call) makes the cost of LLM guardrails lower than you might expect — as long as the guardrail model is faster than your main agent model, it adds zero latency on the happy path.
+</Callout>
+
+## Complete example: agent with both guardrail types
+
+```python
+from agents import (
+    Agent, Runner, InputGuardrail, OutputGuardrail,
+    GuardrailFunctionOutput, RunContextWrapper
+)
+from agents.exceptions import InputGuardrailTripwireTriggered, OutputGuardrailTripwireTriggered
+import re
+import asyncio
+
+PII_PATTERNS = [
+    r"\b\d{3}-\d{2}-\d{4}\b",
+    r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+]
+
+FORBIDDEN_COMMITMENTS = ["we guarantee", "100% uptime", "your data will never"]
+
+async def pii_guardrail(ctx: RunContextWrapper, agent: Agent, input: str) -> GuardrailFunctionOutput:
+    detected = [p for p in PII_PATTERNS if re.search(p, input)]
+    return GuardrailFunctionOutput(
+        output_info={"patterns": detected},
+        tripwire_triggered=bool(detected),
+    )
+
+async def commitment_guardrail(ctx: RunContextWrapper, agent: Agent, output: str) -> GuardrailFunctionOutput:
+    triggered = [p for p in FORBIDDEN_COMMITMENTS if p in output.lower()]
+    return GuardrailFunctionOutput(
+        output_info={"phrases": triggered},
+        tripwire_triggered=bool(triggered),
+    )
+
+agent = Agent(
+    name="Support",
+    instructions="Help customers. Do not make specific service guarantees.",
+    input_guardrails=[InputGuardrail(guardrail_function=pii_guardrail)],
+    output_guardrails=[OutputGuardrail(guardrail_function=commitment_guardrail)],
+)
+
+async def chat(user_input: str) -> str:
+    try:
+        result = await Runner.run(agent, user_input)
+        return result.final_output
+    except InputGuardrailTripwireTriggered:
+        return "Please remove personal information from your message and try again."
+    except OutputGuardrailTripwireTriggered:
+        return "I'm sorry, I cannot provide that response. Please contact our team directly."
+
+async def main():
+    tests = [
+        "How do I cancel my subscription?",
+        "My SSN is 123-45-6789 — look me up.",
+    ]
+    for t in tests:
+        print(f"Input: {t}")
+        print(f"Response: {await chat(t)}\n")
+
+asyncio.run(main())
+```
+
+<Checkpoint
+  moduleSlug="module-18-openai-agents-sdk"
+  items={[
+    "I wrote an input guardrail function that checks for PII patterns",
+    "I caught InputGuardrailTripwireTriggered and returned a user-friendly message",
+    "I understand that input guardrails run in parallel with the first agent call",
+    "I understand that output guardrails add latency and should be used sparingly",
+    "I know when to use output_type vs. guardrails for validation",
+  ]}
+  next="/modules/module-18-openai-agents-sdk/lesson-05"
+/>

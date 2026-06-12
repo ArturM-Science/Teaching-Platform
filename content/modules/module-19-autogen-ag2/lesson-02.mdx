@@ -1,0 +1,327 @@
+---
+title: "Your First GroupChat: Agents, Manager, and Termination"
+module: "module-19-autogen-ag2"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Your First GroupChat: Agents, Manager, and Termination
+
+Reading about GroupChat is useful. Building one and watching it run is what makes the model click. In this lesson you will write a complete, working three-agent GroupChat from scratch — about 70 lines — and understand every design decision along the way.
+
+The system has three agents: a **Researcher** that finds relevant information, a **Critic** that challenges weak claims, and a **Synthesiser** that produces the final answer. An **Orchestrator** (UserProxyAgent) initiates the conversation and watches for termination.
+
+<LearningObjectives items={[
+  "Write a complete GroupChat with three agents and a manager",
+  "Configure llm_config for both OpenAI and Anthropic models",
+  "Craft system messages that assign role, behaviour, and termination responsibility",
+  "Set up a reliable termination condition using is_termination_msg",
+  "Choose the right speaker_selection_method for your use case",
+  "Inspect chat history after a run",
+]} />
+
+---
+
+## Setup
+
+```bash
+pip install pyautogen
+```
+
+You need an API key for at least one LLM provider.
+
+```python
+import os
+from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
+
+# OpenAI
+llm_config = {
+    "config_list": [
+        {
+            "model": "gpt-4o-mini",
+            "api_key": os.environ["OPENAI_API_KEY"],
+        }
+    ],
+    "temperature": 0,
+}
+
+# --- OR: Anthropic ---
+# llm_config = {
+#     "config_list": [
+#         {
+#             "model": "claude-haiku-4-5-20251001",
+#             "api_key": os.environ["ANTHROPIC_API_KEY"],
+#             "api_type": "anthropic",
+#         }
+#     ],
+#     "temperature": 0,
+# }
+```
+
+Never hardcode API keys. Read them from environment variables.
+
+---
+
+## Crafting system messages
+
+A good system message has three parts in order:
+
+1. **Role** — who this agent is
+2. **Behaviour** — how it should respond
+3. **Termination signal** — when and how to signal that the task is done
+
+The termination signal is the most commonly skipped part, and it causes the most bugs. Every agent in your GroupChat must know the string that ends the conversation, and the Synthesiser — the one responsible for the final answer — must produce it.
+
+```python
+researcher = AssistantAgent(
+    name="Researcher",
+    system_message=(
+        "You are a research specialist. Your job is to find relevant facts and "
+        "data on the topic given to you. Be specific: cite specific numbers, "
+        "dates, or studies where possible. Do not speculate beyond what you know. "
+        "When the Critic and Synthesiser are satisfied, stop contributing."
+    ),
+    llm_config=llm_config,
+)
+
+critic = AssistantAgent(
+    name="Critic",
+    system_message=(
+        "You are a rigorous critic. After the Researcher speaks, identify any "
+        "unsupported claims, gaps in evidence, or logical weaknesses. Be concise: "
+        "one or two specific objections per message. If you have no objections "
+        "to raise, say 'No further objections.' and stop."
+    ),
+    llm_config=llm_config,
+)
+
+synthesiser = AssistantAgent(
+    name="Synthesiser",
+    system_message=(
+        "You are a synthesis specialist. When the Researcher has provided "
+        "sufficient evidence and the Critic has no further objections, write a "
+        "clear, well-structured final answer. Begin your final answer with exactly "
+        "'FINAL_ANSWER: ' followed by your response. Do not use this phrase until "
+        "you are ready to deliver the final answer."
+    ),
+    llm_config=llm_config,
+)
+```
+
+---
+
+## The Orchestrator (UserProxyAgent)
+
+The Orchestrator starts the conversation and watches for the termination string. It is not an LLM agent — it does not call a model. It is the loop controller.
+
+```python
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=15,
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+```
+
+<Callout type="warning">
+Design your termination string carefully. If `"FINAL_ANSWER:"` appears anywhere in a code snippet, a tool result, or a partial sentence, the chat ends immediately — even if the task is not done. Make your termination marker distinctive. `"FINAL_ANSWER: "` with a trailing space is slightly safer. Something like `"TASK_COMPLETE_v1: "` is safer still. The longer and more specific the marker, the less likely it is to appear accidentally.
+</Callout>
+
+---
+
+## Assembling the GroupChat
+
+```python
+groupchat = GroupChat(
+    agents=[orchestrator, researcher, critic, synthesiser],
+    max_round=12,
+    speaker_selection_method="auto",
+)
+
+manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+```
+
+`max_round` is an absolute ceiling. If termination has not fired by round 12, the chat stops anyway. Always set both `is_termination_msg` and `max_round`. One is your primary exit; the other is your emergency brake.
+
+---
+
+## Initiating the chat
+
+```python
+orchestrator.initiate_chat(
+    manager,
+    message="What are the three most significant ways large language models have changed software testing practices? Provide specific evidence.",
+)
+```
+
+Run this and watch the agents converse. The Researcher provides facts. The Critic challenges. The Synthesiser waits until the exchange settles, then writes `FINAL_ANSWER:` and the chat terminates.
+
+---
+
+## Speaker selection methods
+
+`GroupChat` supports three values for `speaker_selection_method`:
+
+**`"auto"`** (default) — after each message, the GroupChatManager sends the full conversation to the LLM and asks who should speak next. This produces the most natural, context-aware routing. It also adds one LLM call per round.
+
+```python
+groupchat = GroupChat(agents=[...], max_round=12, speaker_selection_method="auto")
+```
+
+**`"round_robin"`** — agents speak in the order they appear in the `agents` list, cycling repeatedly. Predictable, cheap (no routing call), but blind to context. Useful when the order is fixed by design.
+
+```python
+groupchat = GroupChat(agents=[...], max_round=12, speaker_selection_method="round_robin")
+```
+
+**`"random"`** — a random agent is picked each round. Rarely useful in production. Occasionally helpful for testing that agents are robust to unexpected turn order.
+
+```python
+groupchat = GroupChat(agents=[...], max_round=12, speaker_selection_method="random")
+```
+
+For the three-agent system above, `"auto"` is the right choice — the manager needs to understand that the Critic should speak after the Researcher and the Synthesiser should speak once the Critic is satisfied.
+
+---
+
+## Inspecting chat history
+
+After `initiate_chat` returns, the full conversation is available as a list of message dictionaries.
+
+```python
+messages = orchestrator.chat_messages[manager]
+
+for msg in messages:
+    print(f"[{msg['role'].upper()} — {msg.get('name', 'unknown')}]")
+    print(msg["content"])
+    print("---")
+```
+
+Each message dict has at minimum:
+- `"role"`: `"user"` or `"assistant"`
+- `"content"`: the message text
+- `"name"`: the agent's name (when available)
+
+To extract the final answer:
+
+```python
+final = next(
+    (msg["content"] for msg in reversed(messages) if "FINAL_ANSWER:" in msg.get("content", "")),
+    "No final answer found.",
+)
+print(final)
+```
+
+---
+
+## Complete example
+
+Putting it all together in one file:
+
+```python
+import os
+from autogen import AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager
+
+llm_config = {
+    "config_list": [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}],
+    "temperature": 0,
+}
+
+researcher = AssistantAgent(
+    name="Researcher",
+    system_message=(
+        "You are a research specialist. Find relevant facts on the topic. "
+        "Be specific. When the Critic and Synthesiser are satisfied, stop contributing."
+    ),
+    llm_config=llm_config,
+)
+
+critic = AssistantAgent(
+    name="Critic",
+    system_message=(
+        "You are a rigorous critic. Identify unsupported claims or gaps. "
+        "One or two specific objections per message. If satisfied, say 'No further objections.'"
+    ),
+    llm_config=llm_config,
+)
+
+synthesiser = AssistantAgent(
+    name="Synthesiser",
+    system_message=(
+        "You are a synthesis specialist. When evidence is sufficient and Critic has "
+        "no objections, write the final answer starting with exactly 'FINAL_ANSWER: '."
+    ),
+    llm_config=llm_config,
+)
+
+orchestrator = UserProxyAgent(
+    name="Orchestrator",
+    human_input_mode="NEVER",
+    max_consecutive_auto_reply=15,
+    is_termination_msg=lambda msg: "FINAL_ANSWER:" in msg.get("content", ""),
+    code_execution_config=False,
+)
+
+groupchat = GroupChat(
+    agents=[orchestrator, researcher, critic, synthesiser],
+    max_round=12,
+    speaker_selection_method="auto",
+)
+manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+
+orchestrator.initiate_chat(
+    manager,
+    message="What are the three most significant ways LLMs have changed software testing?",
+)
+
+messages = orchestrator.chat_messages[manager]
+final = next(
+    (m["content"] for m in reversed(messages) if "FINAL_ANSWER:" in m.get("content", "")),
+    "No final answer produced.",
+)
+print("\n=== RESULT ===")
+print(final)
+```
+
+---
+
+<Quiz
+  question="What happens if no agent ever outputs 'FINAL_ANSWER:' and max_round is reached?"
+  options={[
+    { text: "The chat raises an exception and the program crashes", correct: false, explanation: "AutoGen does not raise an exception when max_round is hit. It simply stops the chat loop and returns control to the caller." },
+    { text: "The chat stops after max_round rounds without error, and the caller gets the raw message history", correct: true, explanation: "Correct. max_round is a hard ceiling. When it is hit, initiate_chat returns normally. You get the full chat_messages history, but no FINAL_ANSWER will be present in it." },
+    { text: "The GroupChatManager keeps running until one of the agents says the termination string", correct: false, explanation: "No. max_round is an absolute limit. The chat will not run beyond max_round rounds regardless of whether the termination condition has fired." },
+    { text: "The UserProxyAgent automatically asks a human for input to break the deadlock", correct: false, explanation: "This only happens if human_input_mode='TERMINATE' or 'ALWAYS'. With human_input_mode='NEVER', the UserProxyAgent never asks for human input, and max_round ends the chat silently." },
+  ]}
+/>
+
+<Quiz
+  question="Which speaker_selection_method uses the fewest LLM calls per round?"
+  options={[
+    { text: "auto — because the LLM picks the best speaker efficiently", correct: false, explanation: "'auto' adds one LLM routing call per round. It is the most expensive selection method, not the cheapest." },
+    { text: "round_robin — because it uses a deterministic cycle with no routing call", correct: true, explanation: "Correct. round_robin cycles through agents in order without making any extra LLM call. Each round is purely an agent response, nothing more." },
+    { text: "random — because a random pick requires no computation", correct: false, explanation: "random does not make an LLM call, but neither does round_robin. Both avoid the routing call. round_robin is more useful in practice because it is predictable." },
+    { text: "All methods use the same number of LLM calls", correct: false, explanation: "'auto' uses one extra LLM call per round for routing. 'round_robin' and 'random' do not. The difference compounds significantly over many rounds." },
+  ]}
+/>
+
+---
+
+## Summary
+
+A working AutoGen GroupChat needs four things: agent definitions with clear system messages, an Orchestrator to control the loop, a GroupChat that sets `max_round` and `speaker_selection_method`, and a termination condition that all agents know about.
+
+The most common failure mode is a poorly designed termination condition — too generic (fires early), missing from a system message (fires never), or absent from `is_termination_msg` (GroupChatManager keeps routing past the answer).
+
+<Checkpoint
+  moduleSlug="module-19-autogen-ag2"
+  items={[
+    "I can write a complete three-agent GroupChat in one file",
+    "I can configure llm_config for OpenAI and Anthropic",
+    "My system messages include the termination signal in the relevant agent",
+    "I set both is_termination_msg and max_round as belt-and-braces termination",
+    "I can inspect chat_messages and extract the final answer",
+  ]}
+  next="/modules/module-19-autogen-ag2/lesson-03"
+/>
