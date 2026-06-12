@@ -16,20 +16,32 @@ interface Props {
   next?: string
 }
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
 export function ModuleQuiz({ moduleSlug, questions, passPercent = 80, next }: Props) {
+  const [shuffled] = useState(() =>
+    questions.map(q => ({ ...q, options: shuffle(q.options) }))
+  )
   const [answers, setAnswers] = useState<Record<number, number>>({})
   const [submitted, setSubmitted] = useState(false)
   const [saved, setSaved] = useState(false)
   const [pending, startTransition] = useTransition()
 
-  const allAnswered = questions.every((_, i) => answers[i] !== undefined)
-  const score = questions.filter((q, i) => q.options[answers[i]]?.correct).length
-  const scorePercent = Math.round((score / questions.length) * 100)
+  const allAnswered = shuffled.every((_, i) => answers[i] !== undefined)
+  const score = shuffled.filter((q, i) => q.options[answers[i]]?.correct).length
+  const scorePercent = Math.round((score / shuffled.length) * 100)
   const passed = submitted && scorePercent >= passPercent
 
   function handleSubmit() {
     setSubmitted(true)
-    if (Math.round((score / questions.length) * 100) >= passPercent && !saved) {
+    if (Math.round((score / shuffled.length) * 100) >= passPercent && !saved) {
       startTransition(async () => {
         await markModuleComplete(moduleSlug)
         setSaved(true)
@@ -47,12 +59,12 @@ export function ModuleQuiz({ moduleSlug, questions, passPercent = 80, next }: Pr
       <div className="border-b border-zinc-200 bg-zinc-50 px-6 py-4 rounded-t-xl">
         <p className="text-xs font-semibold uppercase tracking-widest text-amber-600">Module quiz</p>
         <p className="mt-1 text-sm text-zinc-600">
-          Answer all {questions.length} questions, then submit. Score {passPercent}% or higher to complete the module.
+          Answer all {shuffled.length} questions, then submit. Score {passPercent}% or higher to complete the module.
         </p>
       </div>
 
       <div className="divide-y divide-zinc-100">
-        {questions.map((q, qi) => {
+        {shuffled.map((q, qi) => {
           const selected = answers[qi]
           return (
             <div key={qi} className="px-6 py-5">
@@ -106,12 +118,12 @@ export function ModuleQuiz({ moduleSlug, questions, passPercent = 80, next }: Pr
             disabled={!allAnswered}
             className="rounded-lg bg-zinc-900 px-5 py-2.5 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:bg-zinc-300"
           >
-            {allAnswered ? 'Submit answers' : `Answer all questions (${Object.keys(answers).length}/${questions.length})`}
+            {allAnswered ? 'Submit answers' : `Answer all questions (${Object.keys(answers).length}/${shuffled.length})`}
           </button>
         ) : passed ? (
           <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
             <div className="flex items-center justify-between">
-              <span>You scored {score}/{questions.length} ({scorePercent}%) — module complete! 🎉</span>
+              <span>You scored {score}/{shuffled.length} ({scorePercent}%) — module complete! 🎉</span>
               {pending && <span className="text-xs font-normal text-green-500">Saving…</span>}
               {saved && !pending && <span className="text-xs font-normal text-green-500">Progress saved</span>}
             </div>
@@ -120,7 +132,7 @@ export function ModuleQuiz({ moduleSlug, questions, passPercent = 80, next }: Pr
         ) : (
           <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             <span className="font-medium">
-              You scored {score}/{questions.length} ({scorePercent}%) — you need {passPercent}% to pass. Review the explanations above and try again.
+              You scored {score}/{shuffled.length} ({scorePercent}%) — you need {passPercent}% to pass. Review the explanations above and try again.
             </span>
             <button
               onClick={handleRetry}
