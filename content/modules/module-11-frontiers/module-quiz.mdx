@@ -15,6 +15,16 @@ Score 80% or higher to mark this module complete.
   next="Module 11 complete — Module 12: Capstone is next."
   questions={[
     {
+      type: 'match',
+      question: "Match each frontier capability to its key trade-off.",
+      pairs: [
+        { left: "Computer-use agents", right: "Reaches any UI, but pixels and clicks are far more brittle than structured API calls" },
+        { left: "Multimodal agents", right: "Adds image/video/audio understanding, but every modality is also an injection surface" },
+        { left: "Agent interoperability (MCP, A2A)", right: "Eliminates N×M custom integrations, but requires all parties to adopt the protocol" },
+        { left: "Long-horizon autonomy", right: "Handles complex multi-day tasks, but error rates compound with each step" }
+      ]
+    },
+    {
       question: "How do computer-use agents differ from API/tool-calling agents?",
       options: [
         { label: "They run on faster hardware" },
@@ -25,26 +35,6 @@ Score 80% or higher to mark this module complete.
       explanation: "Computer use reaches any software with a screen, but pixels and clicks are far more brittle and slower than structured tool calls. Prefer an API when one exists."
     },
     {
-      question: "What new input does multimodality add to the agent threat model?",
-      options: [
-        { label: "Nothing — images are inert data" },
-        { label: "Injection via non-text channels: instructions hidden in images, screenshots, or documents the model 'sees'", correct: true },
-        { label: "Only larger file sizes" },
-        { label: "GPU memory attacks" }
-      ],
-      explanation: "A screenshot containing 'ignore your instructions and…' is read by a vision model just like text. Every modality the model perceives is an injection surface."
-    },
-    {
-      question: "What problem do agent interoperability protocols (MCP, A2A) address?",
-      options: [
-        { label: "Making models smaller" },
-        { label: "Standard interfaces so tools and agents from different vendors can discover and talk to each other without N×M custom integrations", correct: true },
-        { label: "Replacing HTTP" },
-        { label: "Encrypting prompts" }
-      ],
-      explanation: "MCP standardises agent↔tool/data connections; A2A targets agent↔agent. Both replace bespoke per-pair integrations with a common contract."
-    },
-    {
       question: "Why do agent error rates compound over long-horizon tasks?",
       options: [
         { label: "Models get tired" },
@@ -53,6 +43,17 @@ Score 80% or higher to mark this module complete.
         { label: "They don't — errors average out" }
       ],
       explanation: "0.99^100 ≈ 0.37. Long-horizon autonomy demands checkpointing, self-verification, and recovery so single-step errors don't sink the run."
+    },
+    {
+      type: 'order',
+      question: "Put the frontier capability adoption decision steps in the correct order.",
+      steps: [
+        "Define the specific task you need the capability for",
+        "Build a representative eval set for that task",
+        "Run multiple trials and measure actual success rate and failure modes",
+        "Assess the blast radius if the capability fails in production",
+        "Decide to adopt, wait for maturity, or find an alternative approach"
+      ]
     },
     {
       question: "In the Frontier Readiness Framework, when should you adopt a frontier capability into a product?",

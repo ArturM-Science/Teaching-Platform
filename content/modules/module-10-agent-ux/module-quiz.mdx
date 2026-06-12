@@ -25,14 +25,14 @@ Score 80% or higher to mark this module complete.
       explanation: "Classic UI: deterministic responses to clicks. Agent UI: variable-latency, fallible, autonomous behaviour. The design problem shifts to trust calibration, visibility, and recovery."
     },
     {
-      question: "What's the right level of transparency for most agent products?",
-      options: [
-        { label: "Raw chain-of-thought and full API payloads for everyone" },
-        { label: "Meaningful progress and key decisions surfaced ('searching X', 'found 3 sources'), with detail available on demand", correct: true },
-        { label: "Nothing — just the final answer" },
-        { label: "A spinner" }
-      ],
-      explanation: "Zero transparency destroys trust on the first error; raw traces overwhelm. Show intent and progress at human granularity, with drill-down for power users."
+      type: 'match',
+      question: "Match each transparency level to the right use case.",
+      pairs: [
+        { left: "No visibility — just a spinner", right: "Almost never appropriate — even brief waits need a status signal" },
+        { left: "Progress updates (searching X, found 3 sources)", right: "Default for most agent products — shows intent without overwhelming" },
+        { left: "Step-level reasoning on demand", right: "Power users or debugging — available via drill-down, not surfaced by default" },
+        { left: "Raw chain-of-thought and full API payloads", right: "Internal developer tooling only — too much noise for end users" }
+      ]
     },
     {
       question: "Which actions should require human approval in a human-in-the-loop design?",
@@ -45,14 +45,15 @@ Score 80% or higher to mark this module complete.
       explanation: "Gate by consequence, not by count. Approving everything trains users to click yes blindly; gating only irreversible actions keeps approvals meaningful."
     },
     {
-      question: "A user corrects the agent mid-task ('no, the OTHER London — Ontario'). A well-designed agent should:",
-      options: [
-        { label: "Restart the whole task from scratch" },
-        { label: "Incorporate the correction into its working context and adjust the remaining steps, confirming the change", correct: true },
-        { label: "Ignore input until the run finishes" },
-        { label: "Ask the user to file a ticket" }
-      ],
-      explanation: "Corrections are steering, not failures. The loop should accept feedback mid-run, update state, and visibly change course — that's what makes users feel in control."
+      type: 'order',
+      question: "Put the stages of a good agent failure experience in the right order.",
+      steps: [
+        "Detect the failure and stop the run",
+        "Preserve any partial work completed so far",
+        "Show the user what was attempted and what failed",
+        "Offer a specific recovery path or next step",
+        "Allow the user to retry with a corrected input or different approach"
+      ]
     },
     {
       question: "What does 'designing for failure' mean for agents?",

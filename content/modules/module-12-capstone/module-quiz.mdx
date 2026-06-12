@@ -15,6 +15,18 @@ The capstone is graded on your submission — this quiz checks the judgment behi
   next="Capstone module complete — congratulations!"
   questions={[
     {
+      type: 'order',
+      question: "Put the capstone phases in the correct order.",
+      steps: [
+        "Choose project scope and define success criteria up front",
+        "Architecture design review — simplest control flow that could work",
+        "Build the evaluation harness before the full implementation",
+        "Implement, then production-harden (errors, cost, security)",
+        "Deploy with observability — traces, metrics, cost tracking",
+        "Demo, compare results to original criteria, and retrospective"
+      ]
+    },
+    {
       question: "What makes a capstone project well-scoped?",
       options: [
         { label: "Maximum ambition — use every technique from the course" },
@@ -23,16 +35,6 @@ The capstone is graded on your submission — this quiz checks the judgment behi
         { label: "Replicating a paper" }
       ],
       explanation: "Shipped-and-measured beats ambitious-and-unfinished. The discipline is cutting scope until end-to-end quality is achievable, then defining what 'works' means before building."
-    },
-    {
-      question: "In an architecture design review, the first question to answer is:",
-      options: [
-        { label: "Which vector database to use" },
-        { label: "Does this problem need an agent at all — and if so, what's the simplest control flow that could work?", correct: true },
-        { label: "How many subagents to spawn" },
-        { label: "What the UI colour scheme is" }
-      ],
-      explanation: "The course's recurring lesson: prefer the simplest thing — a single call, then a workflow, then an agent, then multi-agent — and justify each escalation."
     },
     {
       question: "Why must the evaluation plan exist before you build, not after?",
@@ -45,6 +47,16 @@ The capstone is graded on your submission — this quiz checks the judgment behi
       explanation: "Defining metrics and a test set first forces clarity about the task and prevents moving the goalposts to match whatever the system happens to do."
     },
     {
+      type: 'match',
+      question: "Match each capstone phase to the course module it applies most directly.",
+      pairs: [
+        { left: "Architecture design review", right: "Module 05–06 — workflow patterns and multi-agent design" },
+        { left: "Evaluation harness", right: "Module 04 — eval datasets, metrics, and regression testing" },
+        { left: "Production hardening", right: "Module 07–08 — deployment, serving, security" },
+        { left: "Observability setup", right: "Module 09 — traces, cost audit, SLOs" }
+      ]
+    },
+    {
       question: "'Production hardening' in the capstone primarily means:",
       options: [
         { label: "Buying a bigger server" },
@@ -53,16 +65,6 @@ The capstone is graded on your submission — this quiz checks the judgment behi
         { label: "Adding more features" }
       ],
       explanation: "The happy path is the demo; the failure paths are the product. Hardening = applying Modules 07–09: errors handled, costs bounded, security boundaries enforced."
-    },
-    {
-      question: "What belongs in a useful retrospective?",
-      options: [
-        { label: "Only what went well" },
-        { label: "What worked, what failed, what you'd change — including measured results vs. the original success criteria", correct: true },
-        { label: "A list of frameworks you used" },
-        { label: "Plans for features you didn't build" }
-      ],
-      explanation: "The retrospective closes the loop: compare outcomes to the criteria you set in the eval plan, and be specific about failures — that's where the learning is."
     },
     {
       question: "Your capstone demo works 9 times out of 10. For launch readiness, the key question is:",

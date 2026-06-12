@@ -15,6 +15,17 @@ Score 80% or higher to mark this module complete.
   next="Module 05 complete — Module 06: Multi-Agent Systems is next."
   questions={[
     {
+      type: 'order',
+      question: "Put the workflow complexity levels in order from simplest to most complex.",
+      steps: [
+        "Single prompt — one call, one answer",
+        "Sequential chain — output of step N feeds step N+1",
+        "Branching workflow — classifier routes to specialised paths",
+        "Repair loop — retries with error feedback until convergence or MAX_ITERATIONS",
+        "Multi-agent system — multiple autonomous agents coordinating"
+      ]
+    },
+    {
       question: "When should you upgrade a single prompt into a multi-step workflow?",
       options: [
         { label: "Always — workflows are strictly better" },
@@ -25,24 +36,14 @@ Score 80% or higher to mark this module complete.
       explanation: "Workflows add latency, cost, and failure points. The trigger is a prompt overloaded with distinct responsibilities — split when separation buys reliability you can measure."
     },
     {
-      question: "In a sequential chain, what's the most common failure mode at step boundaries?",
-      options: [
-        { label: "Steps running in the wrong order" },
-        { label: "Context loss — a step doesn't pass forward information a later step needs", correct: true },
-        { label: "Steps sharing too much memory" },
-        { label: "The API rejecting chained calls" }
-      ],
-      explanation: "Each step sees only what you explicitly pass it. Summarising too aggressively between steps silently drops details that a later step needed."
-    },
-    {
-      question: "What's the role of a classifier in a routing workflow?",
-      options: [
-        { label: "It generates the final answer" },
-        { label: "It assigns the input to one of a fixed set of categories, which determines the branch that handles it", correct: true },
-        { label: "It compresses the context window" },
-        { label: "It validates output schemas" }
-      ],
-      explanation: "Classify first, then route to a branch specialised for that category. Constrain the classifier to a closed label set and handle the 'none of the above' case explicitly."
+      type: 'match',
+      question: "Match each workflow pattern to its defining characteristic.",
+      pairs: [
+        { left: "Sequential chain", right: "Each step's output is the next step's input" },
+        { left: "Classifier router", right: "A model assigns the input to a category that determines which branch runs" },
+        { left: "Repair loop", right: "An executor and validator cycle until the output passes or MAX_ITERATIONS is hit" },
+        { left: "Fan-out / fan-in", right: "Independent subtasks run in parallel, then an aggregator merges results" }
+      ]
     },
     {
       question: "A repair loop keeps producing the same failing output every iteration. What's the right design response?",

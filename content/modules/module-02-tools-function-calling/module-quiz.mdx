@@ -25,14 +25,14 @@ Score 80% or higher to mark this module complete.
       explanation: "The model picks tools purely from names, descriptions, and schemas in its context. A vague description means wrong or missed tool calls — tool design is prompt design."
     },
     {
-      question: "In function calling, who actually executes the function?",
-      options: [
-        { label: "The model runs it on the provider's servers" },
-        { label: "Your code — the model only returns a structured request naming the function and arguments", correct: true },
-        { label: "The API gateway" },
-        { label: "Nobody — it's simulated" }
-      ],
-      explanation: "The model emits {name, arguments}; your code executes the function and sends the result back as a new message. The model never runs anything itself."
+      type: 'match',
+      question: "Match each function-calling step to who or what performs it.",
+      pairs: [
+        { left: "Selects the tool name and generates arguments", right: "The model" },
+        { left: "Executes the function code", right: "Your application code" },
+        { left: "Validates arguments against the schema", right: "Your application code (or the SDK)" },
+        { left: "Decides whether to call another tool or finish", right: "The model" }
+      ]
     },
     {
       question: "What problem does the Model Context Protocol (MCP) solve?",
@@ -55,14 +55,15 @@ Score 80% or higher to mark this module complete.
       explanation: "Tool errors should flow back to the model as information, not crash the loop or vanish. The model can often recover — but only if it's told what failed."
     },
     {
-      question: "Why did the lab sandbox the code-runner tool?",
-      options: [
-        { label: "Sandboxes make code run faster" },
-        { label: "The code being run is model-generated and untrusted — a sandbox limits what damage it can do", correct: true },
-        { label: "Python requires it" },
-        { label: "To reduce token costs" }
-      ],
-      explanation: "Model output is untrusted input. Executing it with full filesystem/network access means one bad generation (or injection) can do real damage — sandbox by default."
+      type: 'order',
+      question: "Put the steps for hardening a tool against misuse in the right order.",
+      steps: [
+        "Define a strict schema with required fields, enums, and descriptions",
+        "Validate incoming arguments before executing",
+        "Sandbox execution so damage from bad arguments is contained",
+        "Return structured error information if execution fails",
+        "Log inputs and outputs for auditability"
+      ]
     },
     {
       question: "The model keeps calling a tool with arguments that fail schema validation. The best first fix is:",

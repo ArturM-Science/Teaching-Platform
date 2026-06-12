@@ -7,7 +7,7 @@ slug: "module-quiz"
 
 # Module 00 Quiz
 
-You've built a bare-metal agent from scratch. Time to prove the mental models stuck. Score 80% or higher to mark this module complete on your dashboard.
+Score 80% or higher to mark this module complete.
 
 <ModuleQuiz
   moduleSlug="module-00-mental-models"
@@ -25,6 +25,17 @@ You've built a bare-metal agent from scratch. Time to prove the mental models st
       explanation: "An LLM is a next-token predictor. Everything else — reasoning, tool use, agents — is built on top of repeated next-token prediction."
     },
     {
+      type: 'order',
+      question: "Put the agent loop steps in the correct order.",
+      steps: [
+        "Receive user input and build the full context",
+        "Send context to the model",
+        "Model outputs a tool call or a final answer",
+        "Execute the tool if one was called",
+        "Append the tool result to context and loop, or return the final answer"
+      ]
+    },
+    {
       question: "Your agent worked yesterday but gives a different answer today with the same prompt. The most likely explanation is:",
       options: [
         { label: "The model was retrained overnight" },
@@ -35,34 +46,14 @@ You've built a bare-metal agent from scratch. Time to prove the mental models st
       explanation: "With temperature > 0 the model samples from a probability distribution, so identical inputs can produce different outputs. This is expected behaviour, not a bug."
     },
     {
-      question: "What happens when a conversation exceeds the model's context window?",
-      options: [
-        { label: "The model automatically remembers the important parts" },
-        { label: "The request fails or older content must be dropped/summarised — the model cannot see what doesn't fit", correct: true },
-        { label: "The model slows down but sees everything" },
-        { label: "Nothing — context windows are unlimited on paid plans" }
-      ],
-      explanation: "The context window is a hard limit. Anything outside it simply does not exist for the model — managing what goes in it is a core agent-building skill."
-    },
-    {
-      question: "In the agent loop you built in the lab, what turns a plain LLM call into an agent?",
-      options: [
-        { label: "Using a more expensive model" },
-        { label: "The loop: the model picks a tool, your code executes it, the result goes back into the context, repeat until done", correct: true },
-        { label: "A system prompt that says 'You are an agent'" },
-        { label: "Streaming the output token by token" }
-      ],
-      explanation: "An agent is an LLM in a loop with tools: model decides → your code executes → result feeds back. The loop and tool execution live in YOUR code, not in the model."
-    },
-    {
-      question: "Why did the lab use a safe AST-based calculator instead of Python's eval()?",
-      options: [
-        { label: "eval() is too slow for production" },
-        { label: "The model's output is untrusted input — eval() would execute anything the model writes, including harmful code", correct: true },
-        { label: "eval() can't do multiplication" },
-        { label: "AST parsing gives more accurate maths" }
-      ],
-      explanation: "Tool inputs come from the model, and the model can be wrong or manipulated. Treat model output as untrusted user input — never pass it to eval() or a shell directly."
+      type: 'match',
+      question: "Match each context window concept to its consequence.",
+      pairs: [
+        { left: "Context window is a hard limit", right: "Anything outside it simply doesn't exist for the model" },
+        { left: "Temperature = 0", right: "Model picks the most likely token nearly every time" },
+        { left: "Token cost on input vs output", right: "Output tokens are billed at a higher rate — concise prompts help" },
+        { left: "Tool input is model-generated", right: "Treat it as untrusted — never pass directly to eval() or a shell" }
+      ]
     },
     {
       question: "Lowering temperature towards 0 makes the model:",
@@ -73,6 +64,16 @@ You've built a bare-metal agent from scratch. Time to prove the mental models st
         { label: "Use fewer tokens from the context window" }
       ],
       explanation: "Temperature scales the randomness of sampling. Near 0 the model almost always picks the top token — good for tool calls and structured output, less good for creative writing."
+    },
+    {
+      question: "Why did the lab use a safe AST-based calculator instead of Python's eval()?",
+      options: [
+        { label: "eval() is too slow for production" },
+        { label: "The model's output is untrusted input — eval() would execute anything the model writes, including harmful code", correct: true },
+        { label: "eval() can't do multiplication" },
+        { label: "AST parsing gives more accurate maths" }
+      ],
+      explanation: "Tool inputs come from the model, and the model can be wrong or manipulated. Treat model output as untrusted user input — never pass it to eval() or a shell directly."
     }
   ]}
 />

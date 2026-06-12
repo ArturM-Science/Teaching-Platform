@@ -15,6 +15,15 @@ Score 80% or higher to mark this module complete.
   next="Module 07 complete — Module 08: Security & Safety is next."
   questions={[
     {
+      type: 'match',
+      question: "Match each serving pattern to its defining trade-off.",
+      pairs: [
+        { left: "Synchronous (request/response)", right: "Simple to implement; user waits for the full response before seeing anything" },
+        { left: "Streaming (SSE/WebSocket)", right: "Tokens arrive progressively; better perceived latency for long agent runs" },
+        { left: "Async (fire-and-forget + poll)", right: "Request returns immediately; result fetched later — best for very long tasks" }
+      ]
+    },
+    {
       question: "What's the biggest shift when moving an agent from a notebook to a service?",
       options: [
         { label: "The code must be rewritten in a compiled language" },
@@ -23,16 +32,6 @@ Score 80% or higher to mark this module complete.
         { label: "Services can't use environment variables" }
       ],
       explanation: "In a notebook you are the error handler. A service needs explicit handling for concurrency, crashes, bad input, and secrets — the agent logic is the easy part."
-    },
-    {
-      question: "Why is streaming the default serving pattern for chat-style agents?",
-      options: [
-        { label: "It reduces total token cost" },
-        { label: "Agent responses take many seconds — streaming shows progress immediately instead of a long blank wait", correct: true },
-        { label: "It's the only pattern HTTP supports" },
-        { label: "It makes responses deterministic" }
-      ],
-      explanation: "Time-to-first-token beats time-to-full-response for perceived speed. For multi-second agent runs, sync = a frozen UI; streaming keeps the user engaged."
     },
     {
       question: "Your agent service runs multiple replicas behind a load balancer. Where should conversation state live?",
@@ -45,6 +44,17 @@ Score 80% or higher to mark this module complete.
       explanation: "In-process state breaks the moment a second replica exists or one restarts — requests land on a replica that's never seen the session. Externalise state; keep replicas stateless."
     },
     {
+      type: 'order',
+      question: "Put the steps for a safe agent service rollout in the correct order.",
+      steps: [
+        "Version the prompt and model config in source control",
+        "Deploy to a staging environment and run the eval suite",
+        "Release to a small percentage of production traffic",
+        "Monitor error rates, latency p99, and cost per request",
+        "Gradually increase traffic or roll back if metrics regress"
+      ]
+    },
+    {
       question: "The LLM provider starts returning 429 (rate limit) under load. The right pattern is:",
       options: [
         { label: "Retry immediately in a tight loop" },
@@ -53,16 +63,6 @@ Score 80% or higher to mark this module complete.
         { label: "Return a 500 to every user instantly" }
       ],
       explanation: "Immediate retries amplify the overload (thundering herd). Backoff + jitter spreads retries; a circuit breaker stops hammering a failing dependency."
-    },
-    {
-      question: "Why do prompts and model choices belong in config rather than hardcoded?",
-      options: [
-        { label: "Hardcoded strings are slower at runtime" },
-        { label: "You can change or roll back model/prompt behaviour without redeploying code — and run gradual rollouts", correct: true },
-        { label: "Python can't store long strings" },
-        { label: "Providers require it" }
-      ],
-      explanation: "Prompt and model changes are deployments of behaviour. Config (with versioning) lets you roll out gradually, A/B test, and roll back fast when quality drops."
     },
     {
       question: "In the lab, why does the service health-check more than just 'process is running'?",

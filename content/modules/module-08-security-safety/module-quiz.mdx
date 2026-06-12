@@ -25,6 +25,16 @@ Score 80% or higher to mark this module complete.
       explanation: "SQL injection was solved by separating code from data. LLMs have no such separation: a retrieved document, email, or webpage can carry instructions the model may follow."
     },
     {
+      type: 'match',
+      question: "Match each OWASP agentic risk to its core description.",
+      pairs: [
+        { left: "Prompt injection", right: "Malicious instructions embedded in content the model must read" },
+        { left: "Excessive agency", right: "Agent has more permissions or autonomy than its task requires" },
+        { left: "Insecure output handling", right: "Agent output is passed to another system without sanitisation" },
+        { left: "Supply chain risk", right: "A tool or dependency the agent relies on is compromised" }
+      ]
+    },
+    {
       question: "Why is prompt injection called 'the unsolvable problem'?",
       options: [
         { label: "Nobody has tried to fix it" },
@@ -35,24 +45,15 @@ Score 80% or higher to mark this module complete.
       explanation: "Delimiters, system-prompt warnings, and classifiers all help and all leak. You design assuming injection will sometimes succeed — and limit what success can do."
     },
     {
-      question: "OWASP's 'excessive agency' risk means:",
-      options: [
-        { label: "The agent runs too many iterations" },
-        { label: "The agent has more permissions, tools, or autonomy than its task needs, so a hijack or mistake does outsized damage", correct: true },
-        { label: "Too many agents in one system" },
-        { label: "The model is overconfident in its answers" }
-      ],
-      explanation: "An email-summarising agent that can also send emails turns one injected message into an exfiltration channel. Least privilege applies to agents exactly as to users."
-    },
-    {
-      question: "Given injection can't be fully prevented, the most load-bearing defence is:",
-      options: [
-        { label: "A stronger worded system prompt" },
-        { label: "Limiting blast radius — least-privilege tools, sandboxing, and human approval gates on irreversible actions", correct: true },
-        { label: "Blocking the word 'ignore' in inputs" },
-        { label: "Switching providers regularly" }
-      ],
-      explanation: "Assume compromise, contain damage. If a hijacked agent can only read what it needs and irreversible actions need approval, an injection becomes an incident, not a breach."
+      type: 'order',
+      question: "Put the defence-in-depth layers in order from innermost (closest to the model) to outermost (closest to the environment).",
+      steps: [
+        "System prompt: instructions and role definition",
+        "Input classifiers: flag suspicious content before the model sees it",
+        "Least-privilege tools: restrict what the agent can act on",
+        "Human approval gates: require confirmation for irreversible actions",
+        "Audit logging: record all actions for post-incident review"
+      ]
     },
     {
       question: "Your agent must process documents from untrusted sources. The right architecture treats retrieved content as:",

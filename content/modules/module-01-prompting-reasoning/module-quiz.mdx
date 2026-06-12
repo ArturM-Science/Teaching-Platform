@@ -7,7 +7,7 @@ slug: "module-quiz"
 
 # Module 01 Quiz
 
-Prove the prompting and reasoning patterns stuck. Score 80% or higher to mark this module complete.
+Score 80% or higher to mark this module complete.
 
 <ModuleQuiz
   moduleSlug="module-01-prompting-reasoning"
@@ -15,14 +15,14 @@ Prove the prompting and reasoning patterns stuck. Score 80% or higher to mark th
   next="Module 01 complete — Module 02: Tools & Function Calling is next."
   questions={[
     {
-      question: "In the Role–Task–Context–Format prompt anatomy, what is the Format section for?",
-      options: [
-        { label: "Telling the model which personality to adopt" },
-        { label: "Specifying exactly what shape the output must take, so downstream code can parse it", correct: true },
-        { label: "Listing the documents the model should read" },
-        { label: "Setting the temperature" }
-      ],
-      explanation: "Role sets who the model is, Task says what to do, Context supplies the material, and Format pins down the output shape — critical when code, not a human, consumes the answer."
+      type: 'match',
+      question: "Match each part of the Role–Task–Context–Format anatomy to what it provides.",
+      pairs: [
+        { left: "Role", right: "Sets the model's perspective and expertise frame" },
+        { left: "Task", right: "Defines exactly what the model must produce" },
+        { left: "Context", right: "Supplies the material the model reasons over" },
+        { left: "Format", right: "Pins down output shape so downstream code can parse it" }
+      ]
     },
     {
       question: "Why does 'think step by step' (chain-of-thought) change model behaviour?",
@@ -35,14 +35,15 @@ Prove the prompting and reasoning patterns stuck. Score 80% or higher to mark th
       explanation: "LLMs predict tokens conditioned on everything before. Writing out steps puts the intermediate reasoning into the context, improving the final answer — there's no separate reasoning engine."
     },
     {
-      question: "What distinguishes ReAct from plain chain-of-thought?",
-      options: [
-        { label: "ReAct interleaves reasoning steps with tool actions and observations, instead of reasoning in one pass", correct: true },
-        { label: "ReAct uses a bigger model" },
-        { label: "ReAct removes the need for prompts" },
-        { label: "ReAct only works with search engines" }
-      ],
-      explanation: "ReAct = Reason + Act: thought → action → observation → thought → … The model can react to real tool output mid-task instead of reasoning blind."
+      type: 'order',
+      question: "Put the ReAct loop phases in the correct order.",
+      steps: [
+        "Thought: reason about what to do next",
+        "Action: choose a tool and arguments",
+        "Observation: receive the tool's output",
+        "Thought: decide whether to continue or finish",
+        "Final answer: return the result to the user"
+      ]
     },
     {
       question: "What's the main benefit of structured outputs with Pydantic?",

@@ -15,6 +15,16 @@ Score 80% or higher to mark this module complete.
   next="Module 13 complete — Module 14: Claude Code is next."
   questions={[
     {
+      type: 'match',
+      question: "Match each Codex concept to what it does.",
+      pairs: [
+        { left: "AGENTS.md", right: "Persistent repo-level instructions the agent reads every run" },
+        { left: "Sandbox", right: "Bounded execution environment that limits what a bad command can damage" },
+        { left: "Git checkpoint", right: "Known-good state you can roll back to when the agent goes down a bad path" },
+        { left: "Definition of done", right: "A verifiable condition the agent checks before declaring the task finished" }
+      ]
+    },
+    {
       question: "What is Codex, in one sentence?",
       options: [
         { label: "A code autocomplete plugin" },
@@ -35,6 +45,17 @@ Score 80% or higher to mark this module complete.
       explanation: "Agents loop until 'done' — so 'done' must be checkable: tests pass, command output matches, behaviour reproduced. Vague specs produce confident wrong changes."
     },
     {
+      type: 'order',
+      question: "Put the steps of a well-run Codex task in the correct order.",
+      steps: [
+        "Write a spec with goal, context files, constraints, and definition of done",
+        "Codex reads AGENTS.md and the relevant repo files",
+        "Codex implements the change in a sandboxed environment",
+        "Codex runs tests or linting to verify the definition of done",
+        "You review the diff and merge or request changes"
+      ]
+    },
+    {
       question: "Why does Codex run in a sandbox with explicit permissions?",
       options: [
         { label: "To make execution faster" },
@@ -45,27 +66,7 @@ Score 80% or higher to mark this module complete.
       explanation: "Same principle as every module: least privilege + containment. Network and filesystem restrictions mean a mistake (or injection in repo content) has a bounded blast radius."
     },
     {
-      question: "What role do git checkpoints play in an agentic coding workflow?",
-      options: [
-        { label: "They make commits look professional" },
-        { label: "They're the undo mechanism — each checkpoint is a known-good state you can roll back to when the agent goes down a bad path", correct: true },
-        { label: "They speed up CI" },
-        { label: "They're required by Codex to run" }
-      ],
-      explanation: "Autonomy is safe when it's reversible. Frequent commits/checkpoints turn 'the agent ruined my branch' into 'git reset, try a better prompt'."
-    },
-    {
-      question: "What is AGENTS.md for?",
-      options: [
-        { label: "Marketing copy for your repo" },
-        { label: "Persistent repo-level instructions the agent reads every run — conventions, commands, and warnings it would otherwise have to rediscover", correct: true },
-        { label: "A list of all AI agents ever run on the repo" },
-        { label: "GitHub Actions configuration" }
-      ],
-      explanation: "AGENTS.md is standing context: build commands, code conventions, gotchas. Write it once and every future run starts already knowing the rules of your repo."
-    },
-    {
-      question: "When is a review/repair loop (agent reviews or re-attempts its own PR) most valuable?",
+      question: "When is a review/repair loop most valuable in a Codex workflow?",
       options: [
         { label: "Never — one attempt should be final" },
         { label: "When there's a verifiable signal (tests, lint, CI) the loop can use to detect and fix its own failures before a human looks", correct: true },

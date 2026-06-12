@@ -25,6 +25,18 @@ Score 80% or higher to mark this module complete.
       explanation: "The model remembers nothing between calls. Anything that should persist must be stored externally and re-inserted into context when relevant — that machinery is what we call memory."
     },
     {
+      type: 'order',
+      question: "Put the RAG pipeline steps in the correct order.",
+      steps: [
+        "Chunk source documents into passages",
+        "Embed each chunk into a vector and store it",
+        "Receive a user query and embed it",
+        "Retrieve the nearest chunks by similarity",
+        "Insert retrieved chunks into the prompt",
+        "Generate an answer conditioned on the retrieved context"
+      ]
+    },
+    {
       question: "What do embeddings let you do?",
       options: [
         { label: "Compress text losslessly" },
@@ -35,14 +47,14 @@ Score 80% or higher to mark this module complete.
       explanation: "An embedding maps text to a vector where distance ≈ semantic similarity. 'Refund my order' and 'I want my money back' land close together even with zero shared words."
     },
     {
-      question: "Put the core RAG pipeline in the right order:",
-      options: [
-        { label: "Generate → retrieve → embed → chunk" },
-        { label: "Chunk documents → embed chunks → retrieve relevant chunks for the query → generate with them in context", correct: true },
-        { label: "Embed the query → generate → chunk the answer" },
-        { label: "Retrieve everything → fine-tune the model" }
-      ],
-      explanation: "Index time: chunk + embed + store. Query time: embed the query, retrieve nearest chunks, stuff them into the prompt, generate. Retrieval quality caps answer quality."
+      type: 'match',
+      question: "Match each memory type to where it lives.",
+      pairs: [
+        { left: "In-context (working) memory", right: "The current conversation window — gone when the session ends" },
+        { left: "External semantic memory", right: "A vector store retrieved by similarity search" },
+        { left: "External episodic memory", right: "A structured log of past sessions the agent can replay" },
+        { left: "In-weights memory", right: "Knowledge baked into the model during training — not updatable at runtime" }
+      ]
     },
     {
       question: "What makes RAG 'agentic'?",
@@ -53,16 +65,6 @@ Score 80% or higher to mark this module complete.
         { label: "Caching previous answers" }
       ],
       explanation: "Classic RAG retrieves once, blindly, for every query. Agentic RAG puts retrieval behind tools: the model judges whether results answer the question and retries with better queries when they don't."
-    },
-    {
-      question: "Why does long-term memory need consolidation and forgetting, not just appending?",
-      options: [
-        { label: "Storage is expensive" },
-        { label: "An ever-growing store fills retrieval with stale and contradictory entries — old facts must be merged, updated, or dropped to stay useful", correct: true },
-        { label: "Vector databases have row limits" },
-        { label: "It doesn't — append-only is best practice" }
-      ],
-      explanation: "If 'user lives in London' and 'user lives in Lisbon' both sit in memory, retrieval becomes a coin flip. Consolidation resolves conflicts; forgetting prunes what no longer matters."
     },
     {
       question: "In the lab's research agent, what was the key test that memory actually worked?",
