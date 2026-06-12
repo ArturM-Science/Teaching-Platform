@@ -4,6 +4,8 @@ import { access } from 'fs/promises'
 import { join } from 'path'
 import { logOut } from '@/app/auth/actions'
 import { createClient } from '@/lib/supabase/server'
+import { getLessonsForModule } from '@/lib/content'
+import { ModuleProgressBar } from '@/components/ModuleProgressBar'
 
 async function hasContent(slug: string) {
   try {
@@ -58,18 +60,50 @@ export default async function DashboardPage() {
       .filter(Boolean) as string[]
   )
 
+  // Lesson-level progress: which lessons has this user opened?
+  const { data: lessonRows } = await supabase
+    .from('lesson_progress')
+    .select('module_slug, lesson_slug')
+    .eq('user_id', user.id)
+
+  const visitedByModule = new Map<string, number>()
+  for (const row of lessonRows ?? []) {
+    visitedByModule.set(row.module_slug, (visitedByModule.get(row.module_slug) ?? 0) + 1)
+  }
+
   const modulesWithStatus = await Promise.all(
-    modules.map(async m => ({
-      ...m,
-      status: (m.status === 'ready' || m.status === 'coming') && !(await hasContent(m.slug))
-        ? 'locked'
-        : m.status,
-      complete: completedSlugs.has(m.slug),
-    }))
+    modules.map(async m => {
+      const locked = (m.status === 'ready' || m.status === 'coming') && !(await hasContent(m.slug))
+      const complete = completedSlugs.has(m.slug)
+      let lessonTotal = 0
+      try {
+        lessonTotal = (await getLessonsForModule(m.slug)).length
+      } catch {}
+      const visited = Math.min(visitedByModule.get(m.slug) ?? 0, lessonTotal)
+      const percent = complete
+        ? 100
+        : lessonTotal > 0
+          ? Math.round((visited / lessonTotal) * 100)
+          : 0
+      return {
+        ...m,
+        status: locked ? 'locked' : m.status,
+        complete,
+        lessonTotal,
+        visited,
+        percent,
+      }
+    })
   )
 
   const completedCount = completedSlugs.size
-  const percentComplete = Math.round((completedCount / modules.length) * 100)
+  // Course progress is lesson-weighted: completed modules count in full,
+  // in-progress modules contribute their visited lessons
+  const totalLessons = modulesWithStatus.reduce((sum, m) => sum + m.lessonTotal, 0)
+  const earnedLessons = modulesWithStatus.reduce(
+    (sum, m) => sum + (m.complete ? m.lessonTotal : m.visited), 0
+  )
+  const percentComplete = totalLessons > 0 ? Math.round((earnedLessons / totalLessons) * 100) : 0
   const nextModule = modulesWithStatus.find(m => !m.complete && m.status === 'ready') ?? modulesWithStatus.find(m => m.status === 'ready')
   const readyCount = modulesWithStatus.filter(m => m.status === 'ready').length
   const productionCount = modulesWithStatus.filter(m => m.part.includes('Production')).length
@@ -156,7 +190,7 @@ export default async function DashboardPage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.14em] text-zinc-500">{part}</p>
                 </div>
                 <div>
-                  {modulesWithStatus.filter(m => m.part === part).map(m => {
+                  {modulesWithStatus.filter(m => m.part === part).map((m, rowIndex) => {
                     const isClickable = m.status === 'ready' || m.status === 'coming'
                     const row = (
                       <div className={`grid gap-4 border-b border-zinc-100 px-6 py-4 md:grid-cols-[64px_1fr_160px_96px] md:items-center ${isClickable ? 'transition hover:bg-zinc-50' : 'opacity-50'}`}>
@@ -168,6 +202,11 @@ export default async function DashboardPage() {
                         <div>
                           <p className="font-medium text-zinc-950">{m.title}</p>
                           <p className="mt-1 text-xs font-medium text-zinc-500">{m.part}</p>
+                          {m.lessonTotal > 0 && (
+                            <div className="mt-2 max-w-xs">
+                              <ModuleProgressBar percent={m.percent} complete={m.complete} delay={rowIndex * 60} />
+                            </div>
+                          )}
                         </div>
                         <p className="text-sm text-zinc-600">Lab: {m.lab}</p>
                         <p className={`text-sm font-semibold ${m.complete ? 'text-teal-700' : m.status === 'ready' ? 'text-zinc-700' : 'text-zinc-400'}`}>

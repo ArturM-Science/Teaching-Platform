@@ -3,6 +3,7 @@ import remarkGfm from 'remark-gfm'
 import Link from 'next/link'
 import { getMdxContent } from '@/lib/content'
 import { mdxComponents } from '@/components/mdx'
+import { recordLessonVisit } from '@/app/progress/actions'
 
 export default async function LessonPage({
   params,
@@ -11,6 +12,11 @@ export default async function LessonPage({
 }) {
   const { module, lesson } = await params
   const raw = await getMdxContent(module, lesson)
+
+  // Track progress; never block rendering if the table is missing or the user is anonymous
+  try {
+    await recordLessonVisit(module, lesson)
+  } catch {}
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
