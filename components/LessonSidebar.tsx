@@ -47,6 +47,7 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
               const href = `${moduleBase}/${lesson.slug}`
               const active = isActive(href)
               const isLab = lesson.slug.includes('lab')
+              const isExhibit = lesson.slug.includes('failure-museum')
 
               return (
                 <li key={lesson.slug}>
@@ -63,9 +64,11 @@ export function LessonSidebar({ moduleSlug, lessons }: Props) {
                         ? 'bg-zinc-950 text-white'
                         : isLab
                           ? 'bg-teal-300 text-zinc-950'
-                          : 'bg-white/10 text-zinc-300'
+                          : isExhibit
+                            ? 'bg-red-300 text-zinc-950'
+                            : 'bg-white/10 text-zinc-300'
                     }`}>
-                      {isLab ? 'Lab' : lesson.lesson}
+                      {isLab ? 'Lab' : isExhibit ? 'FM' : lesson.lesson}
                     </span>
                     <span className={active ? 'font-semibold' : ''}>{lesson.title}</span>
                   </Link>
