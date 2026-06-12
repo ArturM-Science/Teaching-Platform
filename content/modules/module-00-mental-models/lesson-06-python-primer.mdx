@@ -1,13 +1,13 @@
 ---
 title: "Just Enough Python for the Bare-Metal Agent"
 module: "module-00-mental-models"
-lesson: 6
+lesson: 5
 slug: "lesson-06-python-primer"
 ---
 
-# Lesson 6 . Just Enough Python for the Bare-Metal Agent
+# Lesson 5 . Just Enough Python for the Bare-Metal Agent
 
-If you have written Python before, skip this lesson and go straight to [Lesson 7](/modules/module-00-mental-models/lesson-06). If you have not, this lesson teaches exactly the Python you need for the next two lessons — no more, no less.
+If you have written Python before, skip this lesson and go straight to [Lesson 6](/modules/module-00-mental-models/lesson-06). If you have not, this lesson teaches exactly the Python you need for the next two lessons — no more, no less.
 
 This is not a full Python course. It covers the eight constructs the bare-metal agent uses, in the order you will meet them.
 
@@ -86,7 +86,7 @@ messages = [
 messages.append({"role": "assistant", "content": "An agent is a loop around a model call."})
 ```
 
-This `messages` list is the single most important data structure in this course. The agent in Lesson 7 is essentially code that grows this list in a loop.
+This `messages` list is the single most important data structure in this course. The agent in Lesson 6 is essentially code that grows this list in a loop.
 
 <Quiz
   question="After messages.append({'role': 'user', 'content': 'Hi'}), where does the new message end up?"
@@ -144,7 +144,7 @@ while True:
     print(f"You typed: {text}")
 ```
 
-`input(...)` pauses and waits for the user to type a line. You will use `while True` for your chat agent below, and `range(MAX_STEPS)` in Lesson 7 — the agent's safety cap on how many times it may loop.
+`input(...)` pauses and waits for the user to type a line. You will use `while True` for your chat agent below, and `range(MAX_STEPS)` in Lesson 6 — the agent's safety cap on how many times it may loop.
 
 ## 6. try / except and JSON
 
@@ -162,7 +162,7 @@ except json.JSONDecodeError:
     print("That was not valid JSON.")
 ```
 
-`json.loads` turns JSON text into a Python dict. This matters because in Lesson 7 the model replies with JSON text, and your code must survive the days when the model replies with something malformed.
+`json.loads` turns JSON text into a Python dict. This matters because in Lesson 6 the model replies with JSON text, and your code must survive the days when the model replies with something malformed.
 
 <Quiz
   question="The model returns broken JSON and your code calls json.loads on it inside a try/except block. What happens?"
@@ -175,7 +175,7 @@ except json.JSONDecodeError:
     {
       label: "Python runs the except branch and the program continues",
       correct: true,
-      explanation: "Correct. This is the parser boundary you will build in Lesson 7: untrusted model text gets converted safely, and failures are handled instead of fatal."
+      explanation: "Correct. This is the parser boundary you will build in Lesson 6: untrusted model text gets converted safely, and failures are handled instead of fatal."
     },
     {
       label: "json.loads fixes the JSON automatically",
@@ -272,7 +272,7 @@ Comment out your TODO 3 line and have the same conversation again. The agent for
 
 Set `TEMPERATURE = 0`, restart, and ask "Give me a name for a pet robot" three times (restart between runs). Then set `TEMPERATURE = 1.2` and repeat. At 0 you get nearly identical names; at 1.2 you get a different one each run.
 
-This is why the Lesson 7 agent runs at `temperature=0`: when output has to be parsed as JSON, you want boring and repeatable, not creative.
+This is why the Lesson 6 agent runs at `temperature=0`: when output has to be parsed as JSON, you want boring and repeatable, not creative.
 
 Also try `MAX_TOKENS = 20` and watch replies get cut off mid-sentence — that is the token cap from Lesson 2 in action.
 
@@ -328,7 +328,7 @@ for turn in range(5):
     ...
 ```
 
-That cap is the same idea as `MAX_STEPS` in the Lesson 7 agent — a hard limit so a loop can never run away.
+That cap is the same idea as `MAX_STEPS` in the Lesson 6 agent — a hard limit so a loop can never run away.
 
 </Solution>
 
@@ -354,7 +354,7 @@ That cap is the same idea as `MAX_STEPS` in the Lesson 7 agent — a hard limit 
 />
 
 <Callout type="key">
-Your chat agent is already half of the bare-metal agent. Lesson 7 adds the other half: instead of printing the model's reply to a human, the code parses it as JSON and executes the tool it asks for.
+Your chat agent is already half of the bare-metal agent. Lesson 6 adds the other half: instead of printing the model's reply to a human, the code parses it as JSON and executes the tool it asks for.
 </Callout>
 
-[← Lesson 5](/modules/module-00-mental-models/lesson-05) · [Next: Write the bare-metal agent →](/modules/module-00-mental-models/lesson-06)
+[← Lesson 4](/modules/module-00-mental-models/lesson-04) · [Next: Write the bare-metal agent →](/modules/module-00-mental-models/lesson-06)

@@ -1,17 +1,17 @@
 ---
 title: "Choosing Your First Agent Framework"
 module: "module-00-mental-models"
-lesson: 5
+lesson: 8
 slug: "lesson-05"
 ---
 
-# Lesson 5 . Choosing Your First Agent Framework
+# Lesson 8 . Choosing Your First Agent Framework
 
-The best first framework is not LangChain, LangGraph, CrewAI, or any agent SDK. The best first framework is a tiny loop you write yourself in plain Python, because it shows you where the model stops and your program begins.
+The best first framework is not LangChain, LangGraph, CrewAI, or any agent SDK. The best first framework is the tiny loop you just wrote yourself in plain Python, because it shows you where the model stops and your program begins. Now that you have built it, you are in a position to judge what the frameworks are actually selling.
 
-## Start with the smallest useful stack
+## You started with the smallest useful stack
 
-For your first agent, use:
+In the lab you used:
 
 - Python 3.11+
 - One model API client
@@ -19,13 +19,13 @@ For your first agent, use:
 - A fixed JSON response format
 - A hard `max_steps` limit
 
-That is enough to learn the core mechanics without hiding them behind framework vocabulary.
+That was enough to learn the core mechanics without hiding them behind framework vocabulary.
 
 <Callout type="key">
 Use a framework when you already understand the loop and need production conveniences. Do not use a framework to learn what an agent is.
 </Callout>
 
-## Why not start with LangChain or LangGraph?
+## Why you did not start with LangChain or LangGraph
 
 Frameworks are useful, but they compress several decisions into one line of code:
 
@@ -38,11 +38,11 @@ Frameworks are useful, but they compress several decisions into one line of code
 
 That compression is valuable later. At the beginning, it makes the important parts invisible.
 
-Imagine your agent calls the calculator tool three times and never finishes. If you built it yourself, you know where to inspect: the stop condition, the action parser, the message history, or the tool result. If a framework built it for you, the same bug can feel mysterious.
+Imagine your agent calls the calculator tool three times and never finishes. Because you built it yourself, you know where to inspect: the stop condition, the action parser, the message history, or the tool result. If a framework had built it for you, the same bug would feel mysterious.
 
-## The right first architecture
+## The architecture you built
 
-Build the first agent as four small pieces:
+Your lab agent was a few small pieces:
 
 ```text
 agent.py
@@ -58,11 +58,11 @@ prompts.py
   SYSTEM_PROMPT
 ```
 
-The model should only decide what action to request. Python should decide whether that request is allowed, call the tool, record the result, and decide whether the loop continues.
+The model only decides what action to request. Python decides whether that request is allowed, calls the tool, records the result, and decides whether the loop continues.
 
 ## The contract between model and code
 
-Your first agent needs a strict output contract. The simplest version is JSON:
+Your agent ran on a strict output contract. The simplest version is JSON:
 
 ```json
 {
@@ -82,7 +82,7 @@ To finish:
 }
 ```
 
-This contract is the real "framework" of the first agent. It tells the model what shapes it may output and tells your code what shapes it must handle.
+This contract was the real "framework" of your first agent. It told the model what shapes it may output and told your code what shapes it must handle.
 
 <Quiz
   question="Why is a strict JSON action format better than asking the model to 'tell us what tool to use' in normal prose?"
@@ -107,7 +107,7 @@ This contract is the real "framework" of the first agent. It tells the model wha
 
 ## When to introduce a real framework
 
-After the bare-metal lab, frameworks become easier to evaluate. You can ask what each one buys you:
+Now that you have built the bare-metal agent, frameworks are easier to evaluate. You can ask what each one buys you:
 
 | Need | Good next tool |
 |---|---|
@@ -116,10 +116,21 @@ After the bare-metal lab, frameworks become easier to evaluate. You can ask what
 | You want multiple role-based workers with tasks | CrewAI |
 | You want a broad ecosystem of chains, retrievers, and integrations | LangChain |
 
-For this course, the first step is still plain Python. Then Module 5 and Module 6 introduce orchestration and multi-agent patterns where frameworks start earning their keep.
+For this course, the first step was plain Python. Module 5 and Module 6 introduce orchestration and multi-agent patterns where frameworks start earning their keep.
 
 <Callout type="tip">
 The first agent should feel almost boring: one loop, one parser, one tool table, one stop condition. Boring is good. Boring code is inspectable code.
 </Callout>
 
-[← Lesson 4](/modules/module-00-mental-models/lesson-04) · [Next: Just enough Python →](/modules/module-00-mental-models/lesson-06-python-primer)
+<Checkpoint
+  moduleSlug="module-00-mental-models"
+  items={[
+    "I can draw the agent loop from memory: perceive, reason, act, observe, repeat",
+    "I can explain every line of my 50-line agent without referring to notes",
+    "I can predict what changes when temperature goes from 0.0 to 1.0",
+    "Judgment gate: I can name a problem where a plain LLM call beats an agent loop, and explain the tradeoff"
+  ]}
+  next="Module 0 complete. Move on to Module 1: Prompting & Reasoning."
+/>
+
+[← Lab](/modules/module-00-mental-models/lesson-05-lab) · [Failure Museum exhibit →](/modules/module-00-mental-models/failure-museum)
