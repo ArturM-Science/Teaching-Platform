@@ -1,0 +1,288 @@
+---
+title: "Production: Streaming, Persistence, and LangGraph Platform"
+module: "module-16-langgraph"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Streaming, Persistence, and LangGraph Platform
+
+A graph that works in a Jupyter notebook is not the same as one ready for production. Production means: streaming output to users as it generates, surviving server restarts, handling users who click "send" twice, and having somewhere to look when things go wrong.
+
+This lesson covers the practical layer between a working graph and a deployed one.
+
+---
+
+## Streaming Modes
+
+LangGraph has three streaming modes, selected via the `stream_mode` parameter.
+
+### stream_mode="values"
+
+Returns the full state dict after every node completes:
+
+```python
+for state in graph.stream(initial_state, config=config, stream_mode="values"):
+    print(state)
+# {"question": "...", "plan": "...", "result": "", ...}   <- after plan
+# {"question": "...", "plan": "...", "result": "...", ...} <- after execute
+```
+
+Use this when you want to display the complete current state at each step — for example, a progress dashboard.
+
+### stream_mode="updates"
+
+Returns only the dict returned by each node — the delta, not the full state:
+
+```python
+for update in graph.stream(initial_state, config=config, stream_mode="updates"):
+    print(update)
+# {"plan": {"plan": "1. ..., 2. ..., 3. ..."}}     <- dict with node name as key
+# {"execute": {"result": "The answer is..."}}
+```
+
+Each item is `{node_name: {fields_changed: values}}`. Use this when you want to show users what each step produced — lighter than transmitting the full state every time.
+
+### stream_mode="debug"
+
+Returns verbose internal events including node start, node end, and checkpoint events. Useful during development when you want to understand exactly what LangGraph is doing internally.
+
+```python
+for event in graph.stream(initial_state, config=config, stream_mode="debug"):
+    if event["type"] == "task":
+        print(f"Starting: {event['payload']['name']}")
+    elif event["type"] == "task_result":
+        print(f"Done: {event['payload']['name']}")
+```
+
+---
+
+## Token-Level Streaming with astream_events
+
+`stream()` yields state after each node. If you want token-by-token output from the model — the kind of streaming users expect in a chat interface — use `astream_events()`:
+
+```python
+import asyncio
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+async def stream_tokens():
+    async for event in graph.astream_events(
+        initial_state,
+        config=config,
+        version="v2",    # use v2 for LangGraph 0.2+
+    ):
+        if event["event"] == "on_chat_model_stream":
+            chunk = event["data"]["chunk"]
+            if chunk.content:
+                print(chunk.content, end="", flush=True)
+
+asyncio.run(stream_tokens())
+```
+
+Key event types:
+
+| Event | When it fires |
+|---|---|
+| `on_chain_start` | A node begins executing |
+| `on_chain_end` | A node finishes executing |
+| `on_chat_model_start` | A model call begins |
+| `on_chat_model_stream` | A token is generated (one event per token) |
+| `on_chat_model_end` | A model call completes |
+
+`astream_events` is async — it requires an async context. In a FastAPI application, call it inside an `async` endpoint and forward events to the client via Server-Sent Events.
+
+<Quiz
+  question="Which stream_mode gives you token-by-token output from the model?"
+  options={[
+    { text: "astream_events() with event type on_chat_model_stream — not a stream_mode but a separate async method", correct: true, explanation: "Correct. stream_mode controls state-level streaming (per node). Token-level streaming requires astream_events() and filtering for on_chat_model_stream events." },
+    { text: "stream_mode='tokens'", correct: false, explanation: "There is no 'tokens' stream_mode. The three modes are 'values', 'updates', and 'debug'. Token streaming uses the separate astream_events() method." },
+    { text: "stream_mode='debug' — it includes token events in its verbose output", correct: false, explanation: "debug mode includes internal LangGraph events, not token-level model output. Use astream_events() for tokens." }
+  ]}
+/>
+
+---
+
+## Double-Texting
+
+Double-texting is what happens when a user sends a second message before the first run completes. It is a common problem in chat interfaces backed by LangGraph. There are three strategies:
+
+### interrupt Mode
+
+Cancel the currently running task and start a new one with the new input:
+
+```python
+graph = builder.compile(checkpointer=checkpointer)
+# When a new message arrives for the same thread_id while it is running,
+# LangGraph cancels the current run and starts fresh
+```
+
+Use `interrupt` when the new message supersedes the old one — for example, the user changed their mind mid-generation.
+
+### rollback Mode
+
+Cancel the current task and roll back the checkpoint to before it started:
+
+```python
+# The new run starts from the checkpoint state before the cancelled run
+```
+
+Use `rollback` when you want the state to be as if the first (interrupted) message never happened. Safer than `interrupt` because you do not get a partially-executed state.
+
+### enqueue Mode
+
+Queue the new message. When the current run completes, process the queued message:
+
+```python
+# The first run completes normally, then the second message is processed
+```
+
+Use `enqueue` for chat interfaces where order matters — you want to process messages in sequence even if the user is typing fast.
+
+<Quiz
+  question="Which double-texting mode is safest for a user-facing chat application where message order matters?"
+  options={[
+    { text: "enqueue — the current run completes before processing the next message, preserving order", correct: true, explanation: "Correct. enqueue ensures messages are processed in order and no state is left in a partially-executed state. rollback is safer than interrupt for state integrity, but enqueue preserves message order." },
+    { text: "interrupt — cancelling the current run and starting fresh is always safest", correct: false, explanation: "interrupt discards the current run mid-execution, which can leave state in an inconsistent position. It is appropriate when the new message supersedes the old one, not as a general safety strategy." },
+    { text: "rollback — reverting state to before the interrupted run avoids inconsistency", correct: false, explanation: "rollback is safer than interrupt for state integrity, but it still means messages may be processed out of order if the user types quickly. enqueue is the right choice when order matters." }
+  ]}
+/>
+
+<Callout type="tip">
+For most chat applications, start with `enqueue`. It is the most predictable behaviour. Switch to `interrupt` only if users complain that responses are slow to cancel — for example in a coding assistant where the user wants to stop a long generation immediately.
+</Callout>
+
+---
+
+## Persistence in Production
+
+### SqliteSaver (single-server)
+
+The easiest production step up from `MemorySaver`:
+
+```python
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+with SqliteSaver.from_conn_string("./checkpoints.db") as checkpointer:
+    graph = builder.compile(checkpointer=checkpointer)
+    result = graph.invoke(state, config={"configurable": {"thread_id": "run-001"}})
+```
+
+The `checkpoints.db` file persists across process restarts. One limitation: SQLite does not support concurrent writes from multiple processes. If you have more than one server instance, use `PostgresSaver`.
+
+### PostgresSaver (multi-instance)
+
+```python
+from langgraph.checkpoint.postgres import PostgresSaver
+
+DATABASE_URL = "postgresql://user:password@localhost:5432/langgraph"
+with PostgresSaver.from_conn_string(DATABASE_URL) as checkpointer:
+    graph = builder.compile(checkpointer=checkpointer)
+```
+
+Multiple server instances can safely read and write checkpoints concurrently. The graph code is identical — only the checkpointer changes.
+
+<Callout type="tip">
+The checkpointer is the only thing that changes between development and production. Write your graph code once. Swap `MemorySaver()` for `SqliteSaver.from_conn_string("checkpoints.db")` for local production, or `PostgresSaver.from_conn_string(DATABASE_URL)` for multi-instance. No graph logic changes.
+</Callout>
+
+---
+
+## LangGraph Platform
+
+LangGraph Platform (also called LangGraph Cloud) is managed infrastructure for LangGraph graphs — no server to maintain, built-in double-texting handling, REST API, and Studio UI for visual debugging.
+
+### langgraph.json
+
+Every LangGraph Platform deployment starts with a config file:
+
+```json
+{
+  "dependencies": ["langchain-anthropic", "langgraph"],
+  "graphs": {
+    "research_pipeline": "./pipeline.py:graph"
+  },
+  "env": ".env"
+}
+```
+
+`graphs` maps a name to a Python module path and the compiled graph object.
+
+### Local Development Server
+
+```bash
+pip install langgraph-cli
+langgraph dev   # starts a local LangGraph server with Studio UI
+```
+
+The local server exposes a REST API and opens the Studio UI in your browser. You can test your graph, inspect checkpoints, and debug node execution without deploying.
+
+### REST API
+
+Once deployed, LangGraph Platform exposes:
+
+```
+POST   /runs                          → start a new run
+GET    /runs/{run_id}                 → check run status
+POST   /runs/{run_id}/cancel          → cancel a run
+GET    /threads/{thread_id}/state     → get current state for a thread
+POST   /threads/{thread_id}/state     → update state (human-in-the-loop)
+GET    /threads/{thread_id}/history   → get full state history
+```
+
+This REST API means your human-in-the-loop workflow can be driven by a web frontend — the user approves a result by calling `POST /threads/{thread_id}/state` and then `POST /runs` with `input: null` to resume.
+
+### Studio UI
+
+LangGraph Studio is a visual debugger that shows your graph structure, lets you step through execution node by node, inspect state at each checkpoint, and modify state before resuming. It is available at `http://localhost:8123/studio` when running `langgraph dev`.
+
+---
+
+## Observability: LangSmith
+
+LangSmith is Anthropic's tracing platform for LangChain/LangGraph applications. Every graph invocation becomes a trace you can inspect:
+
+```bash
+export LANGCHAIN_TRACING_V2=true
+export LANGCHAIN_API_KEY="ls__..."
+export LANGCHAIN_PROJECT="my-research-pipeline"
+```
+
+That is all the setup required. Once these environment variables are set, every `graph.invoke()` automatically sends a trace to LangSmith. Each trace shows:
+
+- Which nodes ran and in what order
+- How long each node took
+- What state went into each node and what came out
+- Every model call with input messages, output, token count, and latency
+
+<Callout type="insight">
+LangSmith traces are indispensable for debugging production failures. When a user reports "the pipeline gave a wrong answer", you pull up the trace for their `thread_id`, see exactly what each node produced, and identify where the pipeline went wrong — all without modifying code or adding print statements.
+</Callout>
+
+---
+
+## Production Checklist
+
+Before deploying a LangGraph graph:
+
+- [ ] Replace `MemorySaver` with `SqliteSaver` or `PostgresSaver`
+- [ ] All `thread_id` values are unique per logical conversation (use UUIDs)
+- [ ] Every conditional edge has a retry-count guard
+- [ ] `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` are set in production environment
+- [ ] Double-texting mode is configured (`enqueue` for most chat apps)
+- [ ] `astream_events` is used for token-level streaming to users (not `stream_mode="values"`)
+- [ ] No API keys are hardcoded — use environment variables
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "I can choose the right stream_mode (values / updates / debug) and use astream_events for token-level output",
+    "I understand the three double-texting strategies and when to use each",
+    "I can swap MemorySaver for SqliteSaver or PostgresSaver without changing graph logic",
+    "I know how to configure LangSmith tracing and what information a trace contains"
+  ]}
+  next="/modules/module-16-langgraph/lesson-06-lab"
+/>

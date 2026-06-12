@@ -1,0 +1,274 @@
+---
+title: "Streaming, Structured Outputs, and Vision"
+module: "module-15-anthropic-sdk"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Streaming, Structured Outputs, and Vision
+
+Three capabilities that transform what your agent can do: streaming turns a slow batch response into a live feed the user can watch; structured outputs let you parse model responses directly into typed data; vision lets the model reason about images alongside text. This lesson covers all three using only the raw SDK.
+
+## Streaming
+
+Without streaming, `messages.create()` waits for the entire response to be generated before returning. For a 500-token response at typical generation speed, that's a 5–10 second pause before anything appears. With streaming, you receive tokens as they are generated.
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()
+
+with client.messages.stream(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Explain the transformer architecture in 3 paragraphs."}]
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+
+print()  # newline after streaming completes
+```
+
+`client.messages.stream()` is a context manager. Inside the `with` block, `stream.text_stream` is a generator that yields each text token as a string. When the `with` block exits, the stream is closed.
+
+### Getting usage after streaming
+
+Usage statistics are only available after the stream completes. They are not available during the stream.
+
+```python
+with client.messages.stream(...) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    
+    # This MUST be inside the with block, after the loop finishes
+    final_message = stream.get_final_message()
+    
+print(f"Input tokens:  {final_message.usage.input_tokens}")
+print(f"Output tokens: {final_message.usage.output_tokens}")
+print(f"Stop reason:   {final_message.stop_reason}")
+```
+
+`stream.get_final_message()` returns the same `Message` object you would get from a non-streaming call. Call it after iterating the stream, not before.
+
+<Callout type="warning">
+Calling `stream.get_final_message()` before you finish iterating `stream.text_stream` will block until generation completes — which defeats the purpose of streaming. Always iterate the stream first, then get the final message.
+</Callout>
+
+<Quiz
+  question="Does response.usage work mid-stream — for example, after receiving 50 tokens but before the stream closes?"
+  options={[
+    { text: "Yes — usage is updated incrementally as tokens arrive", correct: false, explanation: "Usage statistics are computed server-side only after generation completes. They cannot be read mid-stream." },
+    { text: "No — usage is only available after the stream closes, via stream.get_final_message()", correct: true, explanation: "Correct. You must wait for the stream to finish before calling get_final_message() to read usage stats." },
+    { text: "Yes — but only input_tokens, not output_tokens", correct: false, explanation: "Neither input nor output tokens are available mid-stream. Both are only available after stream.get_final_message()." },
+    { text: "It depends on the model", correct: false, explanation: "Usage availability is an API contract, not model-specific. No model returns mid-stream usage." },
+  ]}
+/>
+
+### Streaming with tool use
+
+Streaming works with tool use too, but the ergonomics are different. Tool call inputs arrive as a stream of JSON fragments, so you typically let the stream complete and then work with `stream.get_final_message()` to get the fully-assembled tool_use blocks:
+
+```python
+with client.messages.stream(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    tools=[my_tool],
+    messages=messages,
+) as stream:
+    # Stream text tokens to the user as they arrive
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    
+    response = stream.get_final_message()
+
+# Now handle tool use as in Lesson 2
+if response.stop_reason == "tool_use":
+    ...
+```
+
+## Structured outputs
+
+Sometimes you need the model to return structured data — a JSON object you can parse into a Pydantic model, a list of items, a classification with a confidence score. The API has no native "JSON mode" switch, but there are two reliable techniques.
+
+### Technique 1: Explicit instruction + Pydantic validation
+
+Tell the model exactly what JSON to produce in the system prompt, and validate with Pydantic:
+
+```python
+from pydantic import BaseModel
+import json
+
+class SentimentResult(BaseModel):
+    sentiment: str          # "positive" | "negative" | "neutral"
+    confidence: float       # 0.0 to 1.0
+    key_phrases: list[str]
+
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    system="""You are a sentiment analysis API. Always respond with valid JSON only,
+no explanation. Use this exact schema:
+{"sentiment": "positive"|"negative"|"neutral", "confidence": 0.0-1.0, "key_phrases": [...]}""",
+    messages=[{"role": "user", "content": "The product broke after two days. Very disappointed."}]
+)
+
+raw_json = response.content[0].text
+result = SentimentResult.model_validate_json(raw_json)
+print(result.sentiment)    # "negative"
+print(result.confidence)   # e.g. 0.95
+```
+
+<Callout type="tip">
+Always validate with Pydantic — never assume the model returned valid JSON. Even well-instructed models occasionally add a trailing comma or wrap the JSON in markdown code fences. `model_validate_json()` gives you a clean error to handle rather than a cryptic `KeyError` buried in your business logic.
+</Callout>
+
+### Technique 2: JSON prefill
+
+The prefill technique is more reliable. You append an assistant message that starts with `{` — the model then continues from that point and is very unlikely to produce non-JSON:
+
+```python
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=256,
+    system="Respond only with JSON. No explanation, no markdown.",
+    messages=[
+        {"role": "user", "content": "Classify: 'The product broke after two days. Very disappointed.'"},
+        {"role": "assistant", "content": "{"},   # ← prefill forces JSON start
+    ]
+)
+
+# The response continues from where the prefill left off
+# Response text will be something like: '"sentiment": "negative", "confidence": 0.95, ...}'
+# Reconstruct the full JSON by prepending the prefill character
+raw = "{" + response.content[0].text
+result = SentimentResult.model_validate_json(raw)
+```
+
+The prefill trick works because the model generates a continuation of the assistant message, not a fresh response. Starting from `{` makes any non-JSON continuation grammatically wrong in the model's learned distribution.
+
+<Quiz
+  question="What does the prefill technique do — why does prepending an assistant message that starts with '{' help produce valid JSON?"
+  options={[
+    { text: "It activates a hidden JSON mode in the API", correct: false, explanation: "There is no hidden JSON mode. The prefill works by conditioning the model's continuation." },
+    { text: "The model generates a continuation of the assistant message, so starting with '{' makes non-JSON continuations extremely unlikely", correct: true, explanation: "Correct. The model treats the prefill as the beginning of its own response and generates what comes next. Starting from '{' strongly biases toward valid JSON structure." },
+    { text: "It forces the model to use a smaller output vocabulary", correct: false, explanation: "Vocabulary is not restricted. The effect is probabilistic — the '{' start strongly conditions the distribution toward JSON-shaped text." },
+    { text: "It only works with claude-opus models", correct: false, explanation: "The prefill technique works with all Claude models that support the messages API." },
+  ]}
+/>
+
+## Vision
+
+Claude can reason about images. Images are passed as content blocks inside user messages, just like text — but with `"type": "image"` instead of `"type": "text"`.
+
+### Base64 images
+
+```python
+import base64
+from pathlib import Path
+
+def encode_image(path: str) -> str:
+    return base64.standard_b64encode(Path(path).read_bytes()).decode("utf-8")
+
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",   # image/png | image/gif | image/webp
+                        "data": encode_image("diagram.jpg"),
+                    }
+                },
+                {
+                    "type": "text",
+                    "text": "What does this architecture diagram show? List the components."
+                }
+            ]
+        }
+    ]
+)
+
+print(response.content[0].text)
+```
+
+### URL images
+
+If the image is publicly accessible on the web, you can pass the URL directly without downloading or base64-encoding:
+
+```python
+{
+    "type": "image",
+    "source": {
+        "type": "url",
+        "url": "https://example.com/diagram.png"
+    }
+}
+```
+
+<Callout type="note">
+Vision is supported on claude-3 models and newer (claude-3-haiku, claude-3-sonnet, claude-3-opus, claude-3-5-sonnet, claude-3-5-haiku, claude-sonnet-4-6, etc.). If you pass an image to a model that doesn't support vision, the API returns a 400 error. When in doubt, check the Anthropic documentation for the specific model's capabilities.
+</Callout>
+
+### Mixing text and images
+
+You can pass multiple images and intersperse them with text in a single user message. The model reasons about all content blocks together:
+
+```python
+messages=[{
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "Here are two screenshots. What changed between them?"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": before_b64}},
+        {"type": "text", "text": "Before:"},
+        {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": after_b64}},
+        {"type": "text", "text": "After:"},
+    ]
+}]
+```
+
+### Vision with structured outputs
+
+Combining vision and structured outputs is powerful for document parsing, UI testing, and image classification:
+
+```python
+from pydantic import BaseModel
+
+class InvoiceData(BaseModel):
+    vendor: str
+    total_amount: float
+    currency: str
+    line_items: list[str]
+
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=512,
+    system="Extract invoice data as JSON matching this schema exactly: "
+           "{vendor: str, total_amount: float, currency: str, line_items: [str]}",
+    messages=[{
+        "role": "user",
+        "content": [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": invoice_b64}},
+            {"type": "text", "text": "Extract the invoice data."},
+            # Prefill forces JSON
+        ]
+    }, {"role": "assistant", "content": "{"}]
+)
+
+invoice = InvoiceData.model_validate_json("{" + response.content[0].text)
+```
+
+<Checkpoint
+  moduleSlug="module-15-anthropic-sdk"
+  items={[
+    "I can use client.messages.stream() and iterate stream.text_stream",
+    "I know that usage stats require stream.get_final_message() after the stream closes",
+    "I can use the prefill technique to force valid JSON output",
+    "I can pass base64 and URL images in user message content blocks",
+  ]}
+  next="/modules/module-15-anthropic-sdk/lesson-04"
+/>

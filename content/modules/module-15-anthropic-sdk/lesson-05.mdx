@@ -1,0 +1,327 @@
+---
+title: "Production: Retries, Rate Limits, and Cost Control"
+module: "module-15-anthropic-sdk"
+lesson: 5
+slug: "lesson-05"
+---
+
+# Production: Retries, Rate Limits, and Cost Control
+
+A working agent and a production agent are different things. A working agent returns the right answer in a clean environment. A production agent handles flaky networks, rate-limit spikes, token budget overruns, and cost tracking — without crashing, without silently dropping requests, and without burning money unnecessarily.
+
+This lesson covers the four pillars of production reliability with the raw Anthropic SDK: error handling, retry strategies, token counting, and prompt caching.
+
+## Error types
+
+The SDK exposes a hierarchy of exception classes. Catching the right level of specificity makes the difference between a useful error message and a silent failure.
+
+```python
+import anthropic
+
+try:
+    response = client.messages.create(...)
+except anthropic.RateLimitError as e:
+    # HTTP 429 — you've exceeded requests-per-minute or tokens-per-minute
+    print(f"Rate limited. Retry after: {e.response.headers.get('retry-after')} seconds")
+except anthropic.APIStatusError as e:
+    # Any non-2xx HTTP response (includes RateLimitError as a subclass)
+    print(f"API error {e.status_code}: {e.message}")
+except anthropic.APIConnectionError as e:
+    # Network-level failure — DNS, TCP, etc.
+    print(f"Connection failed: {e}")
+except anthropic.APITimeoutError as e:
+    # Request exceeded the configured timeout
+    print(f"Request timed out: {e}")
+```
+
+The hierarchy is:
+- `anthropic.APIError` (base class)
+  - `anthropic.APIConnectionError` — network problems
+  - `anthropic.APITimeoutError` — request timeout
+  - `anthropic.APIStatusError` — non-2xx HTTP responses
+    - `anthropic.RateLimitError` — 429
+    - `anthropic.AuthenticationError` — 401
+    - `anthropic.PermissionDeniedError` — 403
+    - `anthropic.NotFoundError` — 404
+    - `anthropic.BadRequestError` — 400
+
+Catch the most specific exception you can handle. Catch `APIStatusError` as a fallback for unexpected HTTP errors. Let `APIConnectionError` and `APITimeoutError` propagate to your retry layer.
+
+## Built-in retries
+
+The Anthropic client has built-in retry logic that activates automatically for `429` (rate limit) and `5xx` (server error) responses:
+
+```python
+client = anthropic.Anthropic(
+    max_retries=3,        # default is 2
+    timeout=30.0,         # seconds; default is 600
+)
+```
+
+With `max_retries=3`, the SDK will retry up to 3 times with exponential backoff before raising an exception. This handles transient rate limit spikes without any code on your part.
+
+<Callout type="note">
+Built-in retries only cover `429` and `5xx` responses. They do not retry `400` (bad request — fix the input), `401` (authentication — fix the key), or `403` (permission denied). For `400` errors during development, read `e.message` carefully — it usually tells you exactly what's wrong with the request.
+</Callout>
+
+## Custom retry with tenacity
+
+For finer control — custom backoff curves, jitter, retry on specific tool errors, or retrying your whole agent loop rather than just one API call — use `tenacity`:
+
+```bash
+pip install tenacity
+```
+
+```python
+from tenacity import (
+    retry,
+    wait_exponential,
+    stop_after_attempt,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+import logging
+import anthropic
+
+logger = logging.getLogger(__name__)
+
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=1, max=60),
+    stop=stop_after_attempt(5),
+    retry=retry_if_exception_type(anthropic.RateLimitError),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+def resilient_create(**kwargs):
+    """Wraps messages.create() with retry logic for rate limit errors."""
+    return client.messages.create(**kwargs)
+
+
+# Use it exactly like client.messages.create()
+response = resilient_create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello"}]
+)
+```
+
+`wait_exponential(min=1, max=60)` means the first retry waits 1s, second waits 2s, third 4s, and so on up to a 60s cap. `stop_after_attempt(5)` gives up after 5 total attempts and re-raises the last exception.
+
+### Retry on both rate limits and connection errors
+
+```python
+from tenacity import retry_if_exception_type
+
+@retry(
+    wait=wait_exponential(multiplier=1, min=1, max=60),
+    stop=stop_after_attempt(5),
+    retry=(
+        retry_if_exception_type(anthropic.RateLimitError) |
+        retry_if_exception_type(anthropic.APIConnectionError) |
+        retry_if_exception_type(anthropic.APITimeoutError)
+    ),
+)
+def resilient_create(**kwargs):
+    return client.messages.create(**kwargs)
+```
+
+<Quiz
+  question="The built-in max_retries=3 parameter retries on which status codes by default?"
+  options={[
+    { text: "All non-2xx responses including 400 and 401", correct: false, explanation: "400 (bad request) and 401 (authentication error) are client errors — retrying them won't help because the request itself is wrong. The SDK only retries transient errors." },
+    { text: "429 (rate limit) and 5xx (server errors)", correct: true, explanation: "Correct. The built-in retry logic covers 429 Too Many Requests and 5xx server-side errors, which are the transient failures that benefit from waiting and retrying." },
+    { text: "Only 429 (rate limit)", correct: false, explanation: "Both 429 and 5xx errors are retried by default. 5xx errors indicate server-side problems that often resolve on retry." },
+    { text: "429, 5xx, and connection errors", correct: false, explanation: "Connection errors (network failures) are handled differently — they raise APIConnectionError. The built-in retry does cover those too, but the question's answer '429 and 5xx' is the most accurate description of the HTTP status codes." },
+  ]}
+/>
+
+## Token counting
+
+Before making an expensive call, you can count the tokens it will consume:
+
+```python
+count = client.messages.count_tokens(
+    model="claude-sonnet-4-6",
+    system="You are a research assistant.",
+    messages=[{"role": "user", "content": "Summarise the French Revolution in 500 words."}],
+    tools=[my_tool_schema],   # include if you're passing tools
+)
+
+print(f"This call will consume ~{count.input_tokens} input tokens")
+```
+
+`count_tokens()` calls the API but does not generate any response — it returns only the token count. This is useful for:
+
+- **Budgeting:** checking that a document fits in the context window before sending it
+- **Development:** understanding why a call is expensive
+- **Testing:** verifying that your prompt is not ballooning unexpectedly
+
+<Callout type="warning">
+`count_tokens()` makes a real API call. It is fast and cheap, but it is not free. Use it in development and testing to understand your cost profile. Do not call it before every production inference — the overhead adds latency and cost. A better pattern is to count tokens once per prompt template, not once per user request.
+</Callout>
+
+## Usage tracking
+
+Every response includes a `usage` object. Track it to build a cost model for your agent:
+
+```python
+response = client.messages.create(...)
+
+print(f"Input tokens:        {response.usage.input_tokens}")
+print(f"Output tokens:       {response.usage.output_tokens}")
+print(f"Cache read tokens:   {response.usage.cache_read_input_tokens}")   # 0 if no cache hit
+print(f"Cache create tokens: {response.usage.cache_creation_input_tokens}")  # 0 if already cached
+```
+
+Pricing (approximate, check anthropic.com/pricing for current rates):
+- `input_tokens`: charged at the full input rate
+- `output_tokens`: charged at the output rate (typically 3-5× the input rate)
+- `cache_read_input_tokens`: charged at ~10% of the input rate (the cache hit discount)
+- `cache_creation_input_tokens`: charged at ~125% of the input rate (one-time cost to write the cache)
+
+A simple cost tracker:
+
+```python
+class CostTracker:
+    PRICE = {
+        "claude-sonnet-4-6": {
+            "input": 3.00 / 1_000_000,       # $ per token
+            "output": 15.00 / 1_000_000,
+            "cache_read": 0.30 / 1_000_000,
+            "cache_write": 3.75 / 1_000_000,
+        },
+        "claude-haiku-4-5-20251001": {
+            "input": 0.80 / 1_000_000,
+            "output": 4.00 / 1_000_000,
+            "cache_read": 0.08 / 1_000_000,
+            "cache_write": 1.00 / 1_000_000,
+        },
+    }
+
+    def __init__(self):
+        self.total_input = 0
+        self.total_output = 0
+        self.total_cache_read = 0
+        self.total_cache_write = 0
+        self.calls = 0
+
+    def record(self, model: str, usage):
+        self.total_input += usage.input_tokens
+        self.total_output += usage.output_tokens
+        self.total_cache_read += getattr(usage, "cache_read_input_tokens", 0)
+        self.total_cache_write += getattr(usage, "cache_creation_input_tokens", 0)
+        self.calls += 1
+
+    def estimated_usd(self, model: str) -> float:
+        p = self.PRICE.get(model, self.PRICE["claude-sonnet-4-6"])
+        return (
+            self.total_input * p["input"]
+            + self.total_output * p["output"]
+            + self.total_cache_read * p["cache_read"]
+            + self.total_cache_write * p["cache_write"]
+        )
+
+    def summary(self, model: str):
+        print(f"--- Cost Summary ({self.calls} calls) ---")
+        print(f"  Input tokens:      {self.total_input:,}")
+        print(f"  Output tokens:     {self.total_output:,}")
+        print(f"  Cache reads:       {self.total_cache_read:,}")
+        print(f"  Cache writes:      {self.total_cache_write:,}")
+        print(f"  Estimated cost:    ${self.estimated_usd(model):.4f}")
+```
+
+## Prompt caching
+
+Prompt caching is the single most impactful cost-reduction technique for agents with large, repeated system prompts. If your agent always starts with the same 2,000-word system prompt, you can cache it so subsequent calls only pay 10% of its cost.
+
+### How it works
+
+Mark content blocks with `"cache_control": {"type": "ephemeral"}`. The first call writes the cache (paid at 125% of normal input cost). Subsequent calls that hit the cache pay only 10% of the cached tokens' cost. The cache TTL is 5 minutes.
+
+```python
+SYSTEM_PROMPT_TEXT = """You are a research assistant with the following knowledge base:
+
+[Your very long system prompt here — tool descriptions, examples, domain knowledge...]
+
+Total: ~2,000 tokens
+"""
+
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    system=[
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT_TEXT,
+            "cache_control": {"type": "ephemeral"}   # ← cache this block
+        }
+    ],
+    messages=[{"role": "user", "content": "What is the capital of France?"}]
+)
+
+# First call: cache_creation_input_tokens > 0, cache_read_input_tokens == 0
+# Subsequent calls within 5 min: cache_read_input_tokens > 0, cache_creation_input_tokens == 0
+print(f"Cache write: {response.usage.cache_creation_input_tokens}")
+print(f"Cache read:  {response.usage.cache_read_input_tokens}")
+```
+
+<Quiz
+  question="What does cache_read_input_tokens > 0 in the response tell you?"
+  options={[
+    { text: "That the model re-read its training data for this request", correct: false, explanation: "cache_read_input_tokens has nothing to do with training data. It tracks prompt cache hits." },
+    { text: "That the prompt cache was hit — some input tokens were served from cache at the discounted rate rather than being processed fresh", correct: true, explanation: "Correct. cache_read_input_tokens > 0 means the cached content block was found in the 5-minute cache, and you were charged the cache hit rate (~10% of normal) for those tokens." },
+    { text: "That you are being charged less than the standard rate for all input tokens", correct: false, explanation: "Only the cached tokens get the discount. Uncached input tokens are still charged at the full input rate." },
+    { text: "That the cache TTL was extended", correct: false, explanation: "A cache hit does extend the TTL (resets it to 5 minutes), but cache_read_input_tokens specifically measures how many tokens were served from cache." },
+  ]}
+/>
+
+### When caching helps and when it doesn't
+
+Caching is most effective when:
+- Your system prompt is large (500+ tokens) and repeated across many calls
+- Your agent runs in a loop where the same context is sent repeatedly within 5 minutes
+- You have tool schemas that are sent on every call
+
+Caching does NOT help when:
+- Each call has a completely different system prompt
+- Calls are spaced more than 5 minutes apart (cache expires)
+- Your system prompt is small (< 100 tokens) — the overhead isn't worth it
+- Each user has a unique large system prompt (no sharing between users)
+
+<Callout type="tip">
+For agent loops, put everything stable at the top of your system prompt (tool documentation, domain knowledge, persona) and mark it with `cache_control`. Keep the dynamic per-call instructions at the bottom without `cache_control`. This maximises cache hits while still allowing flexibility.
+</Callout>
+
+## Model selection for cost control
+
+Model choice is the biggest cost lever. Use the cheapest model that can reliably handle the task:
+
+| Model | Best for | Relative cost |
+|---|---|---|
+| `claude-haiku-4-5-20251001` | Classification, routing, simple extraction, worker sub-tasks | 1× |
+| `claude-sonnet-4-6` | Complex reasoning, code generation, orchestration, most production tasks | ~10× |
+| `claude-opus-4-8` | Hardest reasoning tasks, research, maximum quality needed | ~30× |
+
+A practical pattern: use `haiku` for the critic and worker tasks, `sonnet` for the orchestrator, and only pull `opus` when quality tests show `sonnet` is insufficient.
+
+```python
+# Orchestrator — needs to reason about which tools to use
+orchestrator_model = "claude-sonnet-4-6"
+
+# Workers — do well-defined sub-tasks
+worker_model = "claude-haiku-4-5-20251001"
+
+# Never use opus unless you've measured that sonnet isn't good enough
+```
+
+<Checkpoint
+  moduleSlug="module-15-anthropic-sdk"
+  items={[
+    "I know the Anthropic exception hierarchy and which exceptions to catch at which level",
+    "I can configure max_retries and implement custom retry logic with tenacity",
+    "I can use count_tokens() to budget a call before making it",
+    "I understand cache_read_input_tokens and cache_creation_input_tokens in the usage object",
+    "I can add cache_control to a system prompt block and understand the 5-minute TTL",
+  ]}
+  next="/modules/module-15-anthropic-sdk/lesson-06-lab"
+/>

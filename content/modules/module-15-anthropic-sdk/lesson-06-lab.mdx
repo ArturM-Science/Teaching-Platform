@@ -1,0 +1,671 @@
+---
+title: "Lab: Production Research Agent — Raw Anthropic SDK"
+module: "module-15-anthropic-sdk"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab: Production Research Agent — Raw Anthropic SDK
+
+You have learned the API contract, tool use, streaming, multi-agent patterns, and production reliability. Now you combine them. This lab is a capstone for the entire module: build a production-grade research agent using only the `anthropic` package — no LangChain, no LangGraph, no frameworks.
+
+<LabBrief title="Production Research Agent — Raw Anthropic SDK" time="2–3 hours">
+#### Objective
+Build an async multi-tool research agent using ONLY the `anthropic` package. The agent must: use at least 3 tools (web search stub, calculator, file writer), support prompt caching on its system prompt, track cost per run, handle rate limits with exponential backoff, and support async parallel tool execution.
+
+#### Setup
+```bash
+pip install anthropic tenacity pydantic
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+#### Deliverables
+- `agent.py` — async agent loop with tool dispatch and MAX_STEPS guard
+- `tools.py` — 3 tool schemas + implementations + TOOL_MAP
+- `cost_tracker.py` — accumulates usage across calls, prints summary at exit
+- `prompts.py` — system prompt with `cache_control` block
+
+#### Hard constraints
+- Must use `anthropic.AsyncAnthropic()` — sync client fails the rubric
+- Prompt caching must be enabled on the system prompt block
+- Rate limit errors must be retried with exponential backoff using `tenacity`
+- Cost tracker must print: input tokens, output tokens, cache hits, estimated USD
+- All tool errors must return `{"error": "...", "retryable": bool}` — no unhandled exceptions
+- `MAX_STEPS` must be ≤ 10
+</LabBrief>
+
+## Run this lab
+
+**Option A — local terminal (VS Code, Windows Terminal, etc.)**
+
+Start your terminal, activate a virtual environment, install the dependencies, and run `python agent.py`. Do not start it from within Claude Code — the `ANTHROPIC_API_KEY` env var is suppressed in Claude's shell.
+
+**Option B — Google Colab**
+
+Everything pre-installed, runs in the browser, no local setup needed. Open the notebook linked below — it contains the same starter code and solution reveals as this page.
+
+---
+
+## Project structure
+
+```
+research_agent/
+├── agent.py          ← main entry point
+├── tools.py          ← tool schemas, implementations, TOOL_MAP
+├── cost_tracker.py   ← usage accumulator
+└── prompts.py        ← cached system prompt
+```
+
+---
+
+## Starter code
+
+### `prompts.py`
+
+```python
+# prompts.py
+
+SYSTEM_PROMPT_BLOCKS = [
+    {
+        "type": "text",
+        "text": """You are a research assistant. You have access to three tools:
+
+1. web_search(query: str) — Search the web for information. Returns a list of result snippets.
+   Use this when you need factual information you don't already know.
+
+2. calculate(expression: str) — Evaluate a mathematical expression. Returns the numeric result.
+   Use this for any arithmetic, percentage calculations, or unit conversions.
+
+3. write_file(filename: str, content: str) — Write content to a local file.
+   Use this when asked to save results, create a report, or export data.
+
+Strategy:
+- Think about what information you need before calling tools.
+- Use web_search to gather facts, calculate for numbers, write_file to persist results.
+- When you have enough information to answer the question, stop calling tools and respond directly.
+- Always cite your sources (mention which search results you used).
+""",
+        # TODO 1: Add cache_control to this block so the system prompt is cached
+        # Hint: add "cache_control": {"type": "ephemeral"} as a key in this dict
+    }
+]
+```
+
+<details>
+<summary>Reveal solution — TODO 1</summary>
+
+```python
+SYSTEM_PROMPT_BLOCKS = [
+    {
+        "type": "text",
+        "text": """...""",
+        "cache_control": {"type": "ephemeral"}   # ← add this
+    }
+]
+```
+
+</details>
+
+---
+
+### `tools.py`
+
+```python
+# tools.py
+import json
+import asyncio
+from pathlib import Path
+
+
+# --- Tool schemas ---
+
+WEB_SEARCH_SCHEMA = {
+    "name": "web_search",
+    "description": "Search the web for current information. Returns up to 5 result snippets with titles and URLs. Use for factual questions, news, and any information you are not certain about.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "The search query. Be specific — include key terms, date ranges if relevant."
+            }
+        },
+        "required": ["query"]
+    }
+}
+
+CALCULATE_SCHEMA = {
+    "name": "calculate",
+    "description": "Evaluate a mathematical expression. Supports basic arithmetic, percentages, and Python math functions (sqrt, log, etc.). Returns the numeric result as a float.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": "A Python math expression, e.g. '2 ** 10', '(15 / 100) * 2400', 'math.sqrt(144)'"
+            }
+        },
+        "required": ["expression"]
+    }
+}
+
+WRITE_FILE_SCHEMA = {
+    "name": "write_file",
+    "description": "Write text content to a local file. Use to save research results, create reports, or export data. Returns the absolute file path.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "filename": {
+                "type": "string",
+                "description": "Filename including extension, e.g. 'research_report.txt'. Do not include path separators."
+            },
+            "content": {
+                "type": "string",
+                "description": "The text content to write to the file."
+            }
+        },
+        "required": ["filename", "content"]
+    }
+}
+
+ALL_TOOL_SCHEMAS = [WEB_SEARCH_SCHEMA, CALCULATE_SCHEMA, WRITE_FILE_SCHEMA]
+
+
+# --- Tool implementations ---
+
+async def web_search(query: str) -> dict:
+    """
+    Stub implementation. In production, replace with a real search API call
+    (e.g., Brave Search, Serper, or SerpAPI).
+    """
+    # TODO 2: This is a stub. For now, return realistic fake results.
+    # In a real implementation, you would use httpx or aiohttp to call a search API.
+    await asyncio.sleep(0.1)  # simulate network latency
+    
+    return {
+        "query": query,
+        "results": [
+            {
+                "title": f"Result 1 for: {query}",
+                "snippet": f"This is a sample result about {query}. It contains relevant information.",
+                "url": "https://example.com/result1"
+            },
+            {
+                "title": f"Result 2 for: {query}",
+                "snippet": f"Another perspective on {query} with additional context and data.",
+                "url": "https://example.com/result2"
+            },
+        ]
+    }
+
+
+async def calculate(expression: str) -> dict:
+    """Evaluate a math expression safely."""
+    import math
+    try:
+        # TODO 3: This uses eval() which is unsafe for production.
+        # For a real system, use a safe expression parser like simpleeval.
+        allowed_names = {"math": math, "abs": abs, "round": round, "min": min, "max": max}
+        result = eval(expression, {"__builtins__": {}}, allowed_names)  # noqa: S307
+        return {"result": float(result), "expression": expression}
+    except Exception as e:
+        return {"error": str(e), "retryable": False}
+
+
+async def write_file(filename: str, content: str) -> dict:
+    """Write content to a file in the current directory."""
+    # Sanitise: prevent path traversal
+    safe_name = Path(filename).name
+    output_path = Path(".") / safe_name
+    try:
+        output_path.write_text(content, encoding="utf-8")
+        return {"path": str(output_path.resolve()), "bytes_written": len(content.encode())}
+    except Exception as e:
+        return {"error": str(e), "retryable": False}
+
+
+ASYNC_TOOL_MAP = {
+    "web_search": web_search,
+    "calculate": calculate,
+    "write_file": write_file,
+}
+```
+
+<details>
+<summary>Reveal solution — TODO 2 (real web search with httpx)</summary>
+
+```python
+async def web_search(query: str) -> dict:
+    """
+    Real implementation using Brave Search API.
+    Set BRAVE_API_KEY in your environment.
+    pip install httpx
+    """
+    import os
+    import httpx
+    
+    api_key = os.environ.get("BRAVE_API_KEY")
+    if not api_key:
+        return {"error": "BRAVE_API_KEY not set", "retryable": False}
+    
+    async with httpx.AsyncClient() as http_client:
+        response = await http_client.get(
+            "https://api.search.brave.com/res/v1/web/search",
+            params={"q": query, "count": 5},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        data = response.json()
+    
+    results = []
+    for item in data.get("web", {}).get("results", []):
+        results.append({
+            "title": item.get("title"),
+            "snippet": item.get("description"),
+            "url": item.get("url"),
+        })
+    
+    return {"query": query, "results": results}
+```
+
+</details>
+
+---
+
+### `cost_tracker.py`
+
+```python
+# cost_tracker.py
+
+class CostTracker:
+    """Accumulates token usage across all API calls in a session."""
+
+    # Approximate prices in USD per token (check anthropic.com/pricing for current rates)
+    PRICES = {
+        "claude-sonnet-4-6": {
+            "input":       3.00 / 1_000_000,
+            "output":     15.00 / 1_000_000,
+            "cache_read":  0.30 / 1_000_000,
+            "cache_write": 3.75 / 1_000_000,
+        },
+        "claude-haiku-4-5-20251001": {
+            "input":       0.80 / 1_000_000,
+            "output":      4.00 / 1_000_000,
+            "cache_read":  0.08 / 1_000_000,
+            "cache_write": 1.00 / 1_000_000,
+        },
+    }
+
+    def __init__(self, model: str = "claude-sonnet-4-6"):
+        self.model = model
+        self.calls = 0
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.cache_read_tokens = 0
+        self.cache_write_tokens = 0
+
+    def record(self, usage) -> None:
+        """Record usage from a response.usage object."""
+        # TODO 4: Implement this method.
+        # Extract input_tokens, output_tokens, cache_read_input_tokens,
+        # cache_creation_input_tokens from usage and accumulate them.
+        pass
+
+    def estimated_usd(self) -> float:
+        """Calculate estimated cost in USD."""
+        # TODO 5: Implement this method using self.PRICES[self.model].
+        # Return 0.0 if the model isn't in the PRICES dict.
+        return 0.0
+
+    def print_summary(self) -> None:
+        """Print a formatted cost summary."""
+        print("\n" + "=" * 40)
+        print(f"  Cost Summary ({self.calls} API call{'s' if self.calls != 1 else ''})")
+        print("=" * 40)
+        print(f"  Input tokens:      {self.input_tokens:>10,}")
+        print(f"  Output tokens:     {self.output_tokens:>10,}")
+        print(f"  Cache reads:       {self.cache_read_tokens:>10,}")
+        print(f"  Cache writes:      {self.cache_write_tokens:>10,}")
+        print(f"  Estimated cost:    ${self.estimated_usd():>10.4f}")
+        if self.cache_read_tokens > 0:
+            savings = self.cache_read_tokens * (
+                self.PRICES.get(self.model, {}).get("input", 0)
+                - self.PRICES.get(self.model, {}).get("cache_read", 0)
+            )
+            print(f"  Cache savings:     ${savings:>10.4f}")
+        print("=" * 40)
+```
+
+<details>
+<summary>Reveal solution — TODOs 4 and 5</summary>
+
+```python
+def record(self, usage) -> None:
+    self.calls += 1
+    self.input_tokens += usage.input_tokens
+    self.output_tokens += usage.output_tokens
+    self.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0)
+    self.cache_write_tokens += getattr(usage, "cache_creation_input_tokens", 0)
+
+def estimated_usd(self) -> float:
+    p = self.PRICES.get(self.model, self.PRICES["claude-sonnet-4-6"])
+    return (
+        self.input_tokens * p["input"]
+        + self.output_tokens * p["output"]
+        + self.cache_read_tokens * p["cache_read"]
+        + self.cache_write_tokens * p["cache_write"]
+    )
+```
+
+</details>
+
+---
+
+### `agent.py`
+
+```python
+# agent.py
+import asyncio
+import json
+import sys
+
+import anthropic
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+import logging
+
+from prompts import SYSTEM_PROMPT_BLOCKS
+from tools import ALL_TOOL_SCHEMAS, ASYNC_TOOL_MAP
+from cost_tracker import CostTracker
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
+MODEL = "claude-sonnet-4-6"
+MAX_STEPS = 10
+tracker = CostTracker(model=MODEL)
+
+# TODO 6: Create an AsyncAnthropic client.
+# Hint: client = anthropic.AsyncAnthropic()
+client = None  # replace this
+
+
+def make_resilient_create(async_client):
+    """
+    Wrap the async client's messages.create() with retry logic.
+    Returns an async function with the same signature.
+    """
+    # TODO 7: Use @retry from tenacity to add exponential backoff for RateLimitError.
+    # The decorator should:
+    #   - Wait: exponential backoff, min=1s, max=60s
+    #   - Stop: after 5 attempts
+    #   - Retry on: anthropic.RateLimitError
+    #   - Log before sleeping: before_sleep_log(logger, logging.WARNING)
+    async def create(**kwargs):
+        return await async_client.messages.create(**kwargs)
+    return create
+
+
+async def execute_tool(block) -> dict:
+    """Execute a single tool call. Always returns a dict (never raises)."""
+    if block.name not in ASYNC_TOOL_MAP:
+        return {"error": f"Unknown tool: {block.name!r}", "retryable": False}
+    try:
+        return await ASYNC_TOOL_MAP[block.name](**block.input)
+    except Exception as e:
+        return {"error": str(e), "retryable": True}
+
+
+async def run_agent(user_question: str) -> str:
+    """
+    Full async agent loop with tool use, parallel tool execution,
+    convergence guard, and cost tracking.
+    """
+    # TODO 8: Implement the agent loop.
+    # Steps:
+    #   1. Build the initial messages list: [{"role": "user", "content": user_question}]
+    #   2. Loop up to MAX_STEPS times:
+    #      a. Call messages.create() with model, max_tokens, system, messages, tools
+    #      b. Record usage: tracker.record(response.usage)
+    #      c. If stop_reason == "end_turn": extract text and return it
+    #      d. If stop_reason != "tool_use": raise RuntimeError
+    #      e. Append full assistant message to messages
+    #      f. Execute all tool_use blocks in PARALLEL with asyncio.gather
+    #      g. Build tool_results list and append as user message
+    #   3. If loop exhausts MAX_STEPS: raise RuntimeError
+    #
+    # Hint: to run tools in parallel:
+    #   tool_blocks = [b for b in response.content if b.type == "tool_use"]
+    #   results = await asyncio.gather(*[execute_tool(b) for b in tool_blocks], return_exceptions=True)
+    
+    raise NotImplementedError("TODO 8: implement the agent loop")
+
+
+async def main():
+    question = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else (
+        "Search for the latest AI benchmarks, calculate what percentage 90 is of 100, "
+        "and write a summary report to 'ai_summary.txt'."
+    )
+
+    print(f"\nQuestion: {question}\n")
+    print("-" * 60)
+
+    try:
+        answer = await run_agent(question)
+        print("\n" + "=" * 60)
+        print("Answer:")
+        print(answer)
+    except Exception as e:
+        print(f"\nAgent failed: {e}")
+        raise
+    finally:
+        tracker.print_summary()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+<details>
+<summary>Reveal solution — TODOs 6, 7, and 8 (complete agent.py)</summary>
+
+```python
+# agent.py — complete solution
+import asyncio
+import json
+import sys
+
+import anthropic
+from tenacity import (
+    retry,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+    before_sleep_log,
+)
+import logging
+
+from prompts import SYSTEM_PROMPT_BLOCKS
+from tools import ALL_TOOL_SCHEMAS, ASYNC_TOOL_MAP
+from cost_tracker import CostTracker
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
+MODEL = "claude-sonnet-4-6"
+MAX_STEPS = 10
+tracker = CostTracker(model=MODEL)
+
+# TODO 6 — solved
+client = anthropic.AsyncAnthropic()
+
+
+def make_resilient_create(async_client):
+    # TODO 7 — solved
+    @retry(
+        wait=wait_exponential(multiplier=1, min=1, max=60),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception_type(anthropic.RateLimitError),
+        before_sleep=before_sleep_log(logger, logging.WARNING),
+    )
+    async def create(**kwargs):
+        return await async_client.messages.create(**kwargs)
+    return create
+
+resilient_create = make_resilient_create(client)
+
+
+async def execute_tool(block) -> dict:
+    if block.name not in ASYNC_TOOL_MAP:
+        return {"error": f"Unknown tool: {block.name!r}", "retryable": False}
+    try:
+        return await ASYNC_TOOL_MAP[block.name](**block.input)
+    except Exception as e:
+        return {"error": str(e), "retryable": True}
+
+
+async def run_agent(user_question: str) -> str:
+    # TODO 8 — solved
+    messages = [{"role": "user", "content": user_question}]
+
+    for step in range(MAX_STEPS):
+        response = await resilient_create(
+            model=MODEL,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT_BLOCKS,
+            tools=ALL_TOOL_SCHEMAS,
+            messages=messages,
+        )
+        tracker.record(response.usage)
+
+        print(f"[Step {step + 1}] stop_reason={response.stop_reason}, "
+              f"input={response.usage.input_tokens}, output={response.usage.output_tokens}")
+
+        if response.stop_reason == "end_turn":
+            text_blocks = [b for b in response.content if b.type == "text"]
+            return text_blocks[0].text if text_blocks else ""
+
+        if response.stop_reason != "tool_use":
+            raise RuntimeError(f"Unexpected stop_reason: {response.stop_reason!r}")
+
+        # Append assistant message (must come before tool_results)
+        messages.append({"role": "assistant", "content": response.content})
+
+        # Execute all tool calls in parallel
+        tool_blocks = [b for b in response.content if b.type == "tool_use"]
+        raw_results = await asyncio.gather(
+            *[execute_tool(b) for b in tool_blocks],
+            return_exceptions=True
+        )
+
+        tool_results = []
+        for block, result in zip(tool_blocks, raw_results):
+            if isinstance(result, Exception):
+                result = {"error": str(result), "retryable": True}
+            is_error = "error" in result
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(result),
+                **({"is_error": True} if is_error else {}),
+            })
+            print(f"  Tool {block.name!r}: {'ERROR' if is_error else 'OK'}")
+
+        messages.append({"role": "user", "content": tool_results})
+
+    raise RuntimeError(f"Agent did not converge after {MAX_STEPS} steps")
+
+
+async def main():
+    question = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else (
+        "Search for the latest AI benchmarks, calculate what percentage 90 is of 100, "
+        "and write a summary report to 'ai_summary.txt'."
+    )
+    print(f"\nQuestion: {question}\n" + "-" * 60)
+    try:
+        answer = await run_agent(question)
+        print("\n" + "=" * 60 + "\nAnswer:\n" + answer)
+    except Exception as e:
+        print(f"\nAgent failed: {e}")
+        raise
+    finally:
+        tracker.print_summary()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+</details>
+
+---
+
+## Running the agent
+
+```bash
+# Default question (multi-tool demo)
+python agent.py
+
+# Custom question
+python agent.py "What is 17 to the power of 4? Save the answer to result.txt."
+```
+
+Expected output:
+
+```
+Question: What is 17 to the power of 4? Save the answer to result.txt.
+------------------------------------------------------------
+[Step 1] stop_reason=tool_use, input=842, output=67
+  Tool 'calculate': OK
+[Step 2] stop_reason=tool_use, input=932, output=54
+  Tool 'write_file': OK
+[Step 3] stop_reason=end_turn, input=1024, output=89
+
+============================================================
+Answer:
+17 to the power of 4 is 83,521. I've saved this result to result.txt.
+
+========================================
+  Cost Summary (3 API calls)
+========================================
+  Input tokens:           2,798
+  Output tokens:            210
+  Cache reads:            1,684
+  Cache writes:             842
+  Estimated cost:        $0.0118
+  Cache savings:         $0.0046
+========================================
+```
+
+<Callout type="insight">
+Notice the cache pattern: the first call writes the cache (`cache_creation_input_tokens = 842`). Calls 2 and 3 read from cache (`cache_read_input_tokens = 842` each). The system prompt costs full price once, then 10% on every subsequent call within the 5-minute window. On a long research session with 20+ steps, this adds up to real savings.
+</Callout>
+
+## Extension challenges
+
+If you finish early, try one of these:
+
+1. **Streaming output** — modify the agent loop to use `async_client.messages.stream()` and print tokens as they arrive. Hint: streaming and tool use work together (see Lesson 3).
+
+2. **Critic loop** — after the agent returns its answer, add a critic worker that scores the answer on accuracy and completeness. If the score is below 7/10, run the agent again with the critic's feedback appended.
+
+3. **Conversation mode** — wrap `run_agent()` in a `while True` loop that reads questions from stdin, maintaining conversation history across turns. How does this affect caching?
+
+4. **Real web search** — swap the stub `web_search` for a real Brave Search or Serper API call (see the solution reveal for `tools.py`). Test with a time-sensitive question.
+
+<Checkpoint
+  moduleSlug="module-15-anthropic-sdk"
+  items={[
+    "My agent runs end-to-end: it receives a question, calls tools, and returns an answer",
+    "Prompt caching is enabled and I can see cache_read_tokens > 0 on the second API call",
+    "Rate limit errors are retried automatically with exponential backoff",
+    "The cost tracker prints input tokens, output tokens, cache hits, and estimated USD",
+    "Tool errors return {error, retryable} dicts — no unhandled exceptions propagate",
+  ]}
+  next="/modules/module-15-anthropic-sdk"
+/>

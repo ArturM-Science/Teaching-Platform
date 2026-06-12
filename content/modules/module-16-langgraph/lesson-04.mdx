@@ -1,0 +1,285 @@
+---
+title: "Multi-Agent Graphs: Subgraphs, Fan-out, and the Send API"
+module: "module-16-langgraph"
+lesson: 4
+slug: "lesson-04"
+---
+
+# Multi-Agent Graphs: Subgraphs, Fan-out, and the Send API
+
+Running nodes one after another is useful. Running them in parallel is faster. But parallel execution introduces a problem: if two branches both write to the same state field, which one wins?
+
+This lesson covers three techniques for building multi-agent graphs: **subgraphs** for reusable sub-pipelines, **reducers** for safely merging parallel writes, and the **Send API** for dynamic fan-out over lists whose length you do not know at compile time.
+
+---
+
+## Subgraphs
+
+A subgraph is a compiled `StateGraph` used as a node inside a parent graph. The parent treats it as a black box — it calls it with state, the subgraph runs, and the parent gets back updated state.
+
+```python
+# --- child graph ---
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+
+class ChildState(TypedDict):
+    query: str
+    findings: str
+
+def search(state: ChildState) -> dict:
+    # imagine a real search here
+    return {"findings": f"Results for: {state['query']}"}
+
+def summarise(state: ChildState) -> dict:
+    return {"findings": f"Summary: {state['findings'][:100]}"}
+
+child_builder = StateGraph(ChildState)
+child_builder.add_node("search", search)
+child_builder.add_node("summarise", summarise)
+child_builder.set_entry_point("search")
+child_builder.add_edge("search", "summarise")
+child_builder.add_edge("summarise", END)
+child_graph = child_builder.compile()
+
+# --- parent graph ---
+class ParentState(TypedDict):
+    question: str
+    query: str
+    findings: str
+    report: str
+
+def prepare(state: ParentState) -> dict:
+    return {"query": state["question"]}
+
+def write_report(state: ParentState) -> dict:
+    return {"report": f"Report based on: {state['findings']}"}
+
+parent_builder = StateGraph(ParentState)
+parent_builder.add_node("prepare", prepare)
+parent_builder.add_node("researcher", child_graph)   # subgraph as node
+parent_builder.add_node("write_report", write_report)
+parent_builder.set_entry_point("prepare")
+parent_builder.add_edge("prepare", "researcher")
+parent_builder.add_edge("researcher", "write_report")
+parent_builder.add_edge("write_report", END)
+parent_graph = parent_builder.compile()
+```
+
+**State compatibility**: the child's state (`ChildState`) must overlap with the parent's state (`ParentState`) on the shared fields. LangGraph uses the overlapping field names to pass data into the subgraph and read results back out. Fields that exist only in the child are local to the subgraph and are not written back to the parent.
+
+When to use subgraphs:
+- The sub-pipeline has its own internal state that the parent does not need to see
+- The sub-pipeline is reused in multiple parent graphs
+- You want to isolate a complex workflow (search → rank → summarise) behind a single node name
+
+---
+
+## Fan-out and Reducers
+
+### The Problem with Parallel Writes
+
+When two nodes run in parallel and both return an update to the same field, LangGraph needs to know how to merge them. By default, it uses the last-write-wins rule — the second update overwrites the first. For most fields that is fine. For a list of results, you want to append. For a dict of results, you want to merge.
+
+That is what **reducers** are for.
+
+### Declaring a Reducer
+
+A reducer is an annotation on a state field that tells LangGraph how to merge updates from multiple branches:
+
+```python
+from typing import Annotated, TypedDict
+import operator
+
+class ResearchState(TypedDict):
+    question: str
+    queries: list[str]
+    # Without a reducer, parallel branches would overwrite each other
+    # With operator.add, lists are concatenated
+    findings: Annotated[list[str], operator.add]
+```
+
+`Annotated[list[str], operator.add]` means: when two branches both return `{"findings": ["some result"]}`, concatenate the lists. The final state will have all results from all branches.
+
+You can use any function as a reducer:
+
+```python
+def merge_dicts(a: dict, b: dict) -> dict:
+    return {**a, **b}
+
+class MultiState(TypedDict):
+    metadata: Annotated[dict, merge_dicts]
+```
+
+<Callout type="insight">
+Fan-out edges run branches in parallel within one `invoke()` call. Without a reducer, only one branch's writes survive. With a reducer, all branches contribute their results and LangGraph merges them using your function. Declare reducers on any field that multiple parallel branches write to.
+</Callout>
+
+<Quiz
+  question="What is a reducer in LangGraph and why is it needed for parallel branches?"
+  options={[
+    { text: "A function that merges updates from multiple parallel branches into a single state field", correct: true, explanation: "Correct. Without a reducer, the last parallel branch to write a field wins and all others are discarded. A reducer like operator.add concatenates lists from all branches." },
+    { text: "A function that reduces the size of the state dict to save memory", correct: false, explanation: "Reducers are about merging concurrent writes, not about memory. The name comes from the map-reduce pattern, not compression." },
+    { text: "A special node that aggregates results after a fan-out", correct: false, explanation: "A reducer is a function annotation on a TypedDict field, not a node. An aggregator node is separate and runs after all branches complete." }
+  ]}
+/>
+
+---
+
+## Static Fan-out
+
+You can fan out to multiple branches using `add_conditional_edges` with a list of destinations:
+
+```python
+def fan_out(state: ResearchState) -> list[str]:
+    return ["branch_a", "branch_b", "branch_c"]
+
+builder.add_conditional_edges("planner", fan_out, ["branch_a", "branch_b", "branch_c"])
+builder.add_edge("branch_a", "aggregator")
+builder.add_edge("branch_b", "aggregator")
+builder.add_edge("branch_c", "aggregator")
+```
+
+LangGraph runs `branch_a`, `branch_b`, and `branch_c` in parallel. The `aggregator` node runs after all three complete and their results are merged via reducers.
+
+Static fan-out works when you know the branches at compile time. When you have a list of items to process and the length is unknown until runtime, use the Send API.
+
+---
+
+## The Send API: Dynamic Fan-out
+
+The Send API allows a node to dispatch work to another node dynamically — one invocation of the worker node per item in a list.
+
+```python
+from langgraph.constants import Send
+
+def dispatch_queries(state: ResearchState) -> list[Send]:
+    """Fan out: one worker invocation per query."""
+    return [
+        Send("worker", {"query": q, "findings": []})
+        for q in state["queries"]
+    ]
+```
+
+`Send("worker", {...})` creates a task for the `worker` node with its own local state. Each worker runs independently and in parallel. The workers return updates to the shared state — with a reducer, those updates are merged.
+
+### Full Map-Reduce Example
+
+```python
+# map_reduce.py
+from typing import Annotated, TypedDict
+import operator
+from langgraph.graph import StateGraph, END
+from langgraph.constants import Send
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+class PipelineState(TypedDict):
+    topic: str
+    queries: list[str]
+    findings: Annotated[list[str], operator.add]  # reducer: append
+    report: str
+
+class WorkerState(TypedDict):
+    query: str
+    findings: Annotated[list[str], operator.add]
+
+# ---- Nodes ----
+
+def planner(state: PipelineState) -> dict:
+    """Generate 3 research sub-queries from the topic."""
+    response = model.invoke(
+        f"Generate exactly 3 distinct research sub-questions about: {state['topic']}\n"
+        f"Return only the questions, one per line, no numbering."
+    )
+    queries = [q.strip() for q in response.content.strip().split("\n") if q.strip()][:3]
+    return {"queries": queries, "findings": []}
+
+def worker(state: WorkerState) -> dict:
+    """Research one query and return findings."""
+    response = model.invoke(f"Research this question in 2-3 sentences: {state['query']}")
+    return {"findings": [response.content]}
+
+def aggregator(state: PipelineState) -> dict:
+    """Synthesise all findings into a report."""
+    findings_text = "\n\n".join(
+        f"Finding {i+1}: {f}" for i, f in enumerate(state["findings"])
+    )
+    response = model.invoke(
+        f"Topic: {state['topic']}\n\nFindings:\n{findings_text}\n\n"
+        f"Write a concise 3-paragraph report synthesising these findings."
+    )
+    return {"report": response.content}
+
+# ---- Fan-out routing ----
+
+def dispatch(state: PipelineState) -> list[Send]:
+    """Dispatch one worker per query."""
+    return [Send("worker", {"query": q, "findings": []}) for q in state["queries"]]
+
+# ---- Graph ----
+
+builder = StateGraph(PipelineState)
+builder.add_node("planner", planner)
+builder.add_node("worker", worker)
+builder.add_node("aggregator", aggregator)
+
+builder.set_entry_point("planner")
+builder.add_conditional_edges("planner", dispatch, ["worker"])
+builder.add_edge("worker", "aggregator")
+builder.add_edge("aggregator", END)
+
+graph = builder.compile()
+
+# ---- Run ----
+
+if __name__ == "__main__":
+    result = graph.invoke({
+        "topic": "How does transformer attention work?",
+        "queries": [],
+        "findings": [],
+        "report": "",
+    })
+    print("=== Report ===")
+    print(result["report"])
+    print(f"\nQueries researched: {result['queries']}")
+    print(f"Findings collected: {len(result['findings'])}")
+```
+
+<Quiz
+  question="When does the Send API have an advantage over static fan-out edges?"
+  options={[
+    { text: "When the number of parallel branches is determined at runtime, not at graph-compile time", correct: true, explanation: "Correct. Static fan-out requires you to name each branch in add_conditional_edges. The Send API lets a node return a list of Send objects at runtime — one per item in a list of unknown length." },
+    { text: "When you want branches to run sequentially rather than in parallel", correct: false, explanation: "The Send API produces parallel execution, just like static fan-out. Sequential execution uses add_edge." },
+    { text: "When you need each branch to have its own independent TypedDict schema", correct: false, explanation: "Each Send receives its own state snapshot, but all workers share the same TypedDict. The advantage of Send is dynamic count, not schema isolation." }
+  ]}
+/>
+
+---
+
+## Subgraphs vs Send: When to Use Which
+
+| Need | Use |
+|---|---|
+| A reusable sub-pipeline with its own internal state | Subgraph |
+| Parallel execution over a fixed, named set of branches | Static fan-out (add_conditional_edges with list) |
+| Parallel execution over a dynamic list of items | Send API |
+| A complex workflow that appears in multiple parent graphs | Subgraph |
+| Processing each item in a list through the same node | Send API |
+
+<Callout type="tip">
+The Send API is the right tool for the lab pipeline: you do not know how many research queries the planner will generate until it runs. Static fan-out would require you to hard-code "branch_1", "branch_2", "branch_3" at compile time. With Send, the planner returns `[Send("worker", ...) for q in queries]` and LangGraph handles the rest.
+</Callout>
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "I can compile a StateGraph and use it as a node inside a parent graph",
+    "I can annotate state fields with reducers using Annotated[list[str], operator.add]",
+    "I can write a dispatch function that returns a list of Send objects for dynamic fan-out",
+    "I can explain when to use subgraphs versus the Send API"
+  ]}
+  next="/modules/module-16-langgraph/lesson-05"
+/>

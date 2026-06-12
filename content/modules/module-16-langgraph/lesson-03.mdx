@@ -1,0 +1,279 @@
+---
+title: "Checkpointing and Human-in-the-Loop"
+module: "module-16-langgraph"
+lesson: 3
+slug: "lesson-03"
+---
+
+# Checkpointing and Human-in-the-Loop
+
+What happens if your 5-node pipeline crashes on node 4? Without checkpointing, you restart from the beginning and pay for nodes 1–3 again. With checkpointing, you restart from node 4 — the graph picks up exactly where it left off.
+
+Checkpointing also enables something more interesting than crash recovery: **human-in-the-loop**. You can pause the graph before a specific node, let a human inspect the state, optionally modify it, and then resume. This lesson covers both.
+
+---
+
+## Why Checkpointing?
+
+There are four reasons to checkpoint:
+
+1. **Crash recovery** — long pipelines fail partway through. Checkpointing means you restart from the last successful node.
+2. **Human review** — pause before a consequential node (send an email, deploy code, publish a report) and let a human approve.
+3. **Time-travel debugging** — replay the graph from any earlier state to understand why it took a wrong path.
+4. **Cost control** — if you are paying per token, not re-running successful nodes after a crash saves money.
+
+---
+
+## The Three Checkpointers
+
+LangGraph ships three checkpointers out of the box:
+
+| Checkpointer | Storage | When to use |
+|---|---|---|
+| `MemorySaver` | In-process memory | Development and testing only |
+| `SqliteSaver` | SQLite file on disk | Single-server production |
+| `PostgresSaver` | PostgreSQL database | Multi-instance production |
+
+They all have the same interface — you only change the checkpointer when you compile the graph. The graph code itself does not change.
+
+<Callout type="warning">
+`MemorySaver` is lost when the process restarts. Use it to get the API right in development, then switch to `SqliteSaver` before deploying. `SqliteSaver` is the easiest upgrade — just a file path. `PostgresSaver` is for deployments where multiple processes need to share checkpoint state.
+</Callout>
+
+---
+
+## Adding a Checkpointer
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+# Development
+memory = MemorySaver()
+graph = builder.compile(checkpointer=memory)
+
+# Production (single server)
+with SqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
+    graph = builder.compile(checkpointer=checkpointer)
+```
+
+### The Thread ID
+
+Once the graph has a checkpointer, every invocation requires a `config` dict with a `thread_id`:
+
+```python
+config = {"configurable": {"thread_id": "research-run-001"}}
+result = graph.invoke(initial_state, config=config)
+```
+
+The `thread_id` identifies this particular run. All checkpoints for this run are stored under this key. If you use the same `thread_id` twice, the second run will resume from where the first left off — which is useful for human-in-the-loop and dangerous if you do not intend it.
+
+<Quiz
+  question="What happens if two invocations share the same thread_id?"
+  options={[
+    { text: "The second invocation resumes from the checkpoint left by the first, rather than starting fresh", correct: true, explanation: "Correct. thread_id is the key LangGraph uses to look up checkpoints. Same thread_id = same run, so the second call continues from where the first stopped." },
+    { text: "The second invocation raises an error because the thread_id is already in use", correct: false, explanation: "LangGraph does not raise an error. It silently resumes from the existing checkpoint, which is the intended behaviour for human-in-the-loop workflows." },
+    { text: "The two invocations run in parallel, sharing state through the checkpointer", correct: false, explanation: "Invocations with the same thread_id are sequential, not parallel. The second run picks up from the checkpoint of the first." }
+  ]}
+/>
+
+---
+
+## Inspecting State
+
+```python
+# Get the current state of a thread
+state_snapshot = graph.get_state(config)
+print(state_snapshot.values)        # the state dict
+print(state_snapshot.next)          # which node runs next (if paused)
+print(state_snapshot.config)        # the config including checkpoint_id
+
+# Get the full history of all states for a thread
+for snapshot in graph.get_state_history(config):
+    print(snapshot.config["configurable"]["checkpoint_id"])
+    print(snapshot.values)
+    print("---")
+```
+
+`get_state_history()` returns states in reverse chronological order — most recent first.
+
+### Injecting State Updates
+
+You can modify the state between nodes:
+
+```python
+# Correct a field before resuming
+graph.update_state(config, {"approved": True, "review": "Manually approved by operator"})
+```
+
+This is how a human-in-the-loop workflow works: the graph pauses, you inspect the state, you call `update_state` if needed, then you resume.
+
+---
+
+## Human-in-the-Loop: interrupt_before
+
+`interrupt_before` tells LangGraph to pause before a specific node completes. The graph stores a checkpoint right before that node and returns control to the caller:
+
+```python
+graph = builder.compile(
+    checkpointer=MemorySaver(),
+    interrupt_before=["review"],   # pause before the review node runs
+)
+
+config = {"configurable": {"thread_id": "hil-demo-001"}}
+
+# First call: graph runs plan → execute, then pauses before review
+graph.invoke(initial_state, config=config)
+
+# Inspect the state
+state = graph.get_state(config)
+print("Result so far:", state.values["result"])
+print("Next node:", state.next)   # ('review',)
+
+# Optional: override the result before review sees it
+# graph.update_state(config, {"result": "corrected result"})
+
+# Resume: pass None as input — LangGraph continues from the checkpoint
+final = graph.invoke(None, config=config)
+```
+
+The key detail: **passing `None` as the first argument to `invoke()` means "resume from checkpoint, do not inject new state"**. LangGraph reads the most recent checkpoint for the `thread_id` and continues from there.
+
+<Callout type="insight">
+`interrupt_before` is more powerful than putting an `input()` call inside a node. With `input()`, the graph process blocks — you cannot shut it down, move it to a queue, or persist the pause across a process restart. With `interrupt_before`, the pause is a checkpoint. You can restart the process, inspect the state via an API, modify it, and resume from a completely different machine.
+</Callout>
+
+<Quiz
+  question="What does graph.invoke(None, config=config) do when interrupt_before is set?"
+  options={[
+    { text: "It resumes execution from the most recent checkpoint for the given thread_id", correct: true, explanation: "Correct. None as the input tells LangGraph not to inject new state — just continue from the checkpoint. The thread_id in config identifies which run to resume." },
+    { text: "It restarts the graph from the beginning with an empty state", correct: false, explanation: "None does not reset the graph. It is the signal to resume, not restart. To restart, you would use a new thread_id." },
+    { text: "It raises an error because None is not a valid state dict", correct: false, explanation: "None is the documented way to resume a paused graph. LangGraph uses the checkpoint stored under the thread_id instead." }
+  ]}
+/>
+
+---
+
+## interrupt_after
+
+`interrupt_after` pauses after a node completes — useful when you want to inspect what a node produced before deciding whether to continue:
+
+```python
+graph = builder.compile(
+    checkpointer=MemorySaver(),
+    interrupt_after=["execute"],   # pause after execute, before review
+)
+```
+
+The difference:
+- `interrupt_before=["review"]` — the review node has not run yet. You can inspect the result and decide not to run review at all.
+- `interrupt_after=["execute"]` — execute has finished. You see what execute produced and decide whether to continue to review.
+
+Both pause at the same moment in practice (between execute and review), but the semantics differ for observability and for human modification of state.
+
+---
+
+## Time-Travel Debugging
+
+Every state in `get_state_history()` has a `checkpoint_id`. You can replay the graph from any historical state:
+
+```python
+# List all checkpoints
+history = list(graph.get_state_history(config))
+for h in history:
+    print(h.config["configurable"]["checkpoint_id"], h.values.get("retry_count"))
+
+# Replay from an earlier checkpoint
+old_checkpoint_id = history[-2].config["configurable"]["checkpoint_id"]
+replay_config = {
+    "configurable": {
+        "thread_id": "research-run-001",
+        "checkpoint_id": old_checkpoint_id,
+    }
+}
+graph.invoke(None, config=replay_config)
+```
+
+This is time-travel: you wind the graph back to an earlier state and run forward from there. Useful for debugging why a graph took an unexpected path, or for replaying with a corrected state.
+
+---
+
+## Complete Example: Human-in-the-Loop Research Review
+
+```python
+# hil_graph.py
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.memory import MemorySaver
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+class ResearchState(TypedDict):
+    question: str
+    result: str
+    human_feedback: str
+    approved: bool
+
+def researcher(state: ResearchState) -> dict:
+    response = model.invoke(f"Research and answer: {state['question']}")
+    return {"result": response.content}
+
+def synthesiser(state: ResearchState) -> dict:
+    response = model.invoke(
+        f"Refine this answer based on feedback.\n"
+        f"Original: {state['result']}\n"
+        f"Feedback: {state['human_feedback']}"
+    )
+    return {"result": response.content}
+
+builder = StateGraph(ResearchState)
+builder.add_node("researcher", researcher)
+builder.add_node("synthesiser", synthesiser)
+builder.set_entry_point("researcher")
+builder.add_edge("researcher", "synthesiser")
+builder.add_edge("synthesiser", END)
+
+checkpointer = MemorySaver()
+graph = builder.compile(
+    checkpointer=checkpointer,
+    interrupt_before=["synthesiser"],
+)
+
+if __name__ == "__main__":
+    config = {"configurable": {"thread_id": "demo-001"}}
+    initial = {"question": "Explain transformer attention", "result": "", "human_feedback": "", "approved": False}
+
+    # Phase 1: run until interrupted
+    graph.invoke(initial, config=config)
+    state = graph.get_state(config)
+    print("=== Researcher output (review this) ===")
+    print(state.values["result"])
+
+    # Phase 2: human provides feedback
+    feedback = input("\nYour feedback (press Enter to approve as-is): ")
+    if feedback:
+        graph.update_state(config, {"human_feedback": feedback})
+
+    # Phase 3: resume
+    final = graph.invoke(None, config=config)
+    print("\n=== Final synthesised answer ===")
+    print(final["result"])
+```
+
+<Callout type="tip">
+In a web application, "Phase 1" happens in one HTTP request, the interrupt stores the checkpoint, and "Phase 3" happens in a second HTTP request minutes or hours later. The checkpoint is what bridges the two requests. This is why `MemorySaver` will not work in production web apps — the process may restart between the two requests.
+</Callout>
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "I can add a MemorySaver or SqliteSaver checkpointer when compiling a graph",
+    "I understand that thread_id identifies a run and that reusing it resumes from the checkpoint",
+    "I can use interrupt_before to pause a graph for human review and resume with graph.invoke(None, config)",
+    "I can inspect state history and replay from a historical checkpoint for debugging"
+  ]}
+  next="/modules/module-16-langgraph/lesson-04"
+/>

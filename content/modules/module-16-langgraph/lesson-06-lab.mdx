@@ -1,0 +1,588 @@
+---
+title: "Lab — Resumable Research Pipeline with LangGraph"
+module: "module-16-langgraph"
+lesson: 6
+slug: "lesson-06-lab"
+---
+
+# Lab — Resumable Research Pipeline with LangGraph
+
+<LabBrief title="Resumable Research Pipeline with LangGraph" time="2–3 hours">
+#### Objective
+Build a 5-node research pipeline with full `SqliteSaver` checkpointing, parallel researchers via the Send API, a critic that can trigger repairs, and a human-in-the-loop approval gate before synthesis. The pipeline must survive a process restart and resume from checkpoint.
+
+#### Setup
+```bash
+pip install langgraph langchain-anthropic "langgraph[sqlite]"
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+#### Deliverables
+- `state.py` — `ResearchState` TypedDict with reducer for parallel findings
+- `nodes.py` — all 5 node functions: planner, researcher, critic, synthesiser, plus dispatch routing
+- `pipeline.py` — full LangGraph graph with SqliteSaver checkpointing
+- `runner.py` — CLI that streams node updates, pauses for human approval, and resumes
+- `README.md` — ASCII/Mermaid graph diagram and one paragraph explaining what `interrupt_before` gives you that a simple `input()` check inside a node does not
+
+#### Hard constraints
+- Must use `SqliteSaver` — persistence must survive a process restart
+- Parallel researchers must use the Send API (not static fan-out edges)
+- Must use `interrupt_before=["synthesiser"]` for human approval
+- Runner must print state updates after each node (`stream_mode="updates"`)
+- Retry guard: max 2 critic-triggered repairs (tracked via `repair_count` in state)
+- No hardcoded API keys — all secrets via environment variables
+</LabBrief>
+
+---
+
+## Pipeline Architecture
+
+```
+                    ┌─────────────────────────────┐
+                    │         PLANNER              │
+                    │  generates N search queries  │
+                    └────────────┬────────────────┘
+                                 │  Send API (dynamic fan-out)
+              ┌──────────────────┼──────────────────┐
+              ▼                  ▼                  ▼
+         RESEARCHER          RESEARCHER          RESEARCHER
+         (query 1)           (query 2)           (query N)
+              │                  │                  │
+              └──────────────────┴──────────────────┘
+                          findings merged by reducer
+                                 │
+                    ┌────────────▼────────────────┐
+                    │          CRITIC              │
+                    │   evaluates all findings     │
+                    └────────────┬────────────────┘
+                                 │
+                    ┌────────────▼────────────────┐
+               ┌── no, repair_count < 2           │
+               │    route back to PLANNER         │
+               │                                  │
+               └──────────────────────────────────┘
+                    ┌────────────▼────────────────┐
+                    │   [interrupt_before here]   │
+                    │       SYNTHESISER            │
+                    │   human approves before      │
+                    │    this node runs            │
+                    └────────────┬────────────────┘
+                                 │
+                               END
+```
+
+**Five nodes**: `planner` → (Send API) → `researcher` → `critic` → [human gate] → `synthesiser`
+
+---
+
+## Run This Lab
+
+**Option A — local terminal** (VS Code, Windows Terminal, etc.):
+
+Follow the setup instructions above, then:
+
+```bash
+# Create a project directory
+mkdir research-pipeline && cd research-pipeline
+
+# Create the files below, then run:
+python runner.py "What are the long-term effects of remote work on productivity?"
+```
+
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
+
+---
+
+## Starter Code
+
+Create four files. Each has `TODO` markers where you fill in the logic.
+
+### state.py
+
+```python
+# state.py
+from typing import Annotated, TypedDict
+import operator
+
+
+class ResearchState(TypedDict):
+    # The user's research question
+    topic: str
+
+    # Planner fills these
+    queries: list[str]
+
+    # TODO: Declare 'findings' with a reducer so parallel researchers can
+    # all write to it without overwriting each other.
+    # Hint: Annotated[list[str], operator.add]
+    findings: list[str]   # replace with reducer annotation
+
+    # Critic output
+    critique: str
+    critique_passed: bool
+    repair_count: int
+
+    # Human gate
+    human_feedback: str
+
+    # Final output
+    report: str
+
+
+class WorkerState(TypedDict):
+    """Local state for each parallel researcher worker."""
+    query: str
+    # TODO: Declare 'findings' with the same reducer as ResearchState
+    findings: list[str]   # replace with reducer annotation
+```
+
+---
+
+### nodes.py
+
+```python
+# nodes.py
+from langchain_anthropic import ChatAnthropic
+from langgraph.constants import Send
+from state import ResearchState, WorkerState
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+
+def planner(state: ResearchState) -> dict:
+    """Generate 3 targeted search queries for the topic."""
+    # TODO: Call the model and ask it to generate exactly 3 search queries
+    # for state["topic"]. Parse the response into a list of strings.
+    # Return {"queries": [...], "findings": [], "repair_count": state.get("repair_count", 0)}
+    pass
+
+
+def researcher(state: WorkerState) -> dict:
+    """Research one query and return findings as a single-item list."""
+    # TODO: Call the model with state["query"] and return
+    # {"findings": [response.content]}
+    # The reducer will concatenate these from all parallel workers.
+    pass
+
+
+def critic(state: ResearchState) -> dict:
+    """Evaluate the collected findings and decide if they are sufficient."""
+    # TODO: Call the model to evaluate state["findings"] for state["topic"].
+    # Ask it to reply PASS or FAIL with a one-sentence reason.
+    # Parse the response and return:
+    # {"critique": text, "critique_passed": bool, "repair_count": state["repair_count"] + 1}
+    pass
+
+
+def synthesiser(state: ResearchState) -> dict:
+    """Synthesise findings into a final report. Human must approve before this runs."""
+    # TODO: Call the model with state["topic"], state["findings"], and
+    # optionally state["human_feedback"]. Return {"report": response.content}
+    pass
+
+
+# ---- Routing functions ----
+
+def dispatch_researchers(state: ResearchState) -> list[Send]:
+    """Fan out: one researcher per query."""
+    # TODO: Return [Send("researcher", {"query": q, "findings": []}) for q in state["queries"]]
+    pass
+
+
+def route_after_critic(state: ResearchState) -> str:
+    """Route to synthesiser if critique passed or max retries reached, else replanner."""
+    # TODO: Check state["critique_passed"] and state["repair_count"].
+    # Return "synthesiser" if passed or repair_count >= 2, else return "planner".
+    pass
+```
+
+---
+
+### pipeline.py
+
+```python
+# pipeline.py
+from langgraph.graph import StateGraph, END
+from langgraph.checkpoint.sqlite import SqliteSaver
+from state import ResearchState
+from nodes import planner, researcher, critic, synthesiser, dispatch_researchers, route_after_critic
+
+DB_PATH = "checkpoints.db"
+
+
+def build_graph(checkpointer):
+    builder = StateGraph(ResearchState)
+
+    # TODO: Add nodes
+    # builder.add_node("planner", planner)
+    # builder.add_node("researcher", researcher)
+    # builder.add_node("critic", critic)
+    # builder.add_node("synthesiser", synthesiser)
+
+    # TODO: Set entry point to "planner"
+
+    # TODO: Add edge from planner to researchers using add_conditional_edges
+    # and the dispatch_researchers routing function
+    # Note: the target list is ["researcher"]
+
+    # TODO: Add edge from researcher to critic
+
+    # TODO: Add conditional edge from critic using route_after_critic
+    # mapping: {"synthesiser": "synthesiser", "planner": "planner"}
+
+    # TODO: Add edge from synthesiser to END
+
+    graph = builder.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["synthesiser"],   # Human approval gate
+    )
+    return graph
+
+
+def get_graph():
+    """Return a compiled graph with SqliteSaver persistence."""
+    checkpointer = SqliteSaver.from_conn_string(DB_PATH)
+    return build_graph(checkpointer), checkpointer
+```
+
+---
+
+### runner.py
+
+```python
+# runner.py
+import sys
+import uuid
+from pipeline import get_graph
+from state import ResearchState
+
+def run_pipeline(topic: str, thread_id: str | None = None):
+    graph, checkpointer = get_graph()
+
+    if thread_id is None:
+        thread_id = str(uuid.uuid4())
+        print(f"Starting new run: thread_id={thread_id}")
+    else:
+        print(f"Resuming run: thread_id={thread_id}")
+
+    config = {"configurable": {"thread_id": thread_id}}
+
+    # Initial state (only used when starting fresh)
+    initial_state: ResearchState = {
+        "topic": topic,
+        "queries": [],
+        "findings": [],
+        "critique": "",
+        "critique_passed": False,
+        "repair_count": 0,
+        "human_feedback": "",
+        "report": "",
+    }
+
+    # TODO: Stream graph.stream() with stream_mode="updates"
+    # Print the node name and key fields after each node completes.
+    # Stop when the stream ends (the graph has hit interrupt_before or END).
+
+    # --- Check if paused for human approval ---
+    state = graph.get_state(config)
+    if state.next == ("synthesiser",):
+        print("\n=== HUMAN APPROVAL GATE ===")
+        print(f"Findings collected: {len(state.values['findings'])}")
+        print(f"Critique: {state.values['critique']}")
+        print("\nFindings preview:")
+        for i, f in enumerate(state.values["findings"][:2]):
+            print(f"  [{i+1}] {f[:120]}...")
+
+        feedback = input("\nEnter feedback for synthesiser (press Enter to approve as-is): ").strip()
+        if feedback:
+            graph.update_state(config, {"human_feedback": feedback})
+
+        # TODO: Resume the graph by calling graph.stream(None, config=config, stream_mode="updates")
+        # and printing updates as before.
+
+    # Print final report
+    final = graph.get_state(config)
+    print("\n" + "="*60)
+    print("FINAL REPORT")
+    print("="*60)
+    print(final.values.get("report", "(no report generated)"))
+    print(f"\nThread ID: {thread_id}  (save this to resume)")
+    return thread_id
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: python runner.py '<topic>' [thread_id]")
+        sys.exit(1)
+
+    topic = sys.argv[1]
+    thread_id = sys.argv[2] if len(sys.argv) > 2 else None
+    run_pipeline(topic, thread_id)
+```
+
+---
+
+## Solution Blocks
+
+Work through the TODOs yourself before opening these. Each solution is the minimum correct implementation — your version may differ and still be correct.
+
+<details>
+<summary>Solution: state.py — reducer annotation</summary>
+
+```python
+from typing import Annotated, TypedDict
+import operator
+
+
+class ResearchState(TypedDict):
+    topic: str
+    queries: list[str]
+    findings: Annotated[list[str], operator.add]   # reducer: append from parallel workers
+    critique: str
+    critique_passed: bool
+    repair_count: int
+    human_feedback: str
+    report: str
+
+
+class WorkerState(TypedDict):
+    query: str
+    findings: Annotated[list[str], operator.add]
+```
+
+The key insight: `Annotated[list[str], operator.add]` tells LangGraph to concatenate lists when two parallel branches both return `{"findings": [...]}`. Without this, the last branch's findings overwrite all others.
+</details>
+
+<details>
+<summary>Solution: nodes.py — planner</summary>
+
+```python
+def planner(state: ResearchState) -> dict:
+    prompt = (
+        f"Generate exactly 3 distinct research sub-questions about:\n{state['topic']}\n\n"
+        f"Return only the questions, one per line, no numbering, no preamble."
+    )
+    response = model.invoke(prompt)
+    queries = [q.strip() for q in response.content.strip().split("\n") if q.strip()][:3]
+    return {
+        "queries": queries,
+        "findings": [],          # reset findings for this attempt
+        "repair_count": state.get("repair_count", 0),
+    }
+```
+</details>
+
+<details>
+<summary>Solution: nodes.py — researcher</summary>
+
+```python
+def researcher(state: WorkerState) -> dict:
+    response = model.invoke(
+        f"Research this question thoroughly in 3-4 sentences:\n{state['query']}"
+    )
+    return {"findings": [response.content]}
+```
+
+Returning a single-item list `[response.content]` is intentional. The reducer (`operator.add`) concatenates lists from all parallel workers. If all three workers return `["finding"]`, the final state has `findings = ["finding1", "finding2", "finding3"]`.
+</details>
+
+<details>
+<summary>Solution: nodes.py — critic</summary>
+
+```python
+def critic(state: ResearchState) -> dict:
+    findings_text = "\n".join(f"- {f}" for f in state["findings"])
+    prompt = (
+        f"Evaluate whether these findings sufficiently answer the topic.\n\n"
+        f"Topic: {state['topic']}\n\nFindings:\n{findings_text}\n\n"
+        f"Reply with PASS or FAIL followed by a one-sentence explanation."
+    )
+    text = model.invoke(prompt).content
+    return {
+        "critique": text,
+        "critique_passed": text.strip().upper().startswith("PASS"),
+        "repair_count": state["repair_count"] + 1,
+    }
+```
+</details>
+
+<details>
+<summary>Solution: nodes.py — synthesiser</summary>
+
+```python
+def synthesiser(state: ResearchState) -> dict:
+    findings_text = "\n\n".join(f"Finding {i+1}: {f}" for i, f in enumerate(state["findings"]))
+    feedback_section = (
+        f"\n\nHuman feedback to incorporate: {state['human_feedback']}"
+        if state.get("human_feedback") else ""
+    )
+    prompt = (
+        f"Topic: {state['topic']}\n\nResearch findings:\n{findings_text}"
+        f"{feedback_section}\n\n"
+        f"Write a comprehensive, well-structured 3-paragraph report synthesising these findings."
+    )
+    return {"report": model.invoke(prompt).content}
+```
+</details>
+
+<details>
+<summary>Solution: nodes.py — dispatch_researchers and route_after_critic</summary>
+
+```python
+def dispatch_researchers(state: ResearchState) -> list[Send]:
+    return [Send("researcher", {"query": q, "findings": []}) for q in state["queries"]]
+
+
+def route_after_critic(state: ResearchState) -> str:
+    if state["critique_passed"] or state["repair_count"] >= 2:
+        return "synthesiser"
+    return "planner"
+```
+</details>
+
+<details>
+<summary>Solution: pipeline.py — build_graph</summary>
+
+```python
+def build_graph(checkpointer):
+    builder = StateGraph(ResearchState)
+
+    builder.add_node("planner", planner)
+    builder.add_node("researcher", researcher)
+    builder.add_node("critic", critic)
+    builder.add_node("synthesiser", synthesiser)
+
+    builder.set_entry_point("planner")
+
+    builder.add_conditional_edges("planner", dispatch_researchers, ["researcher"])
+    builder.add_edge("researcher", "critic")
+    builder.add_conditional_edges(
+        "critic",
+        route_after_critic,
+        {"synthesiser": "synthesiser", "planner": "planner"},
+    )
+    builder.add_edge("synthesiser", END)
+
+    return builder.compile(
+        checkpointer=checkpointer,
+        interrupt_before=["synthesiser"],
+    )
+```
+</details>
+
+<details>
+<summary>Solution: runner.py — streaming and resume</summary>
+
+```python
+def run_pipeline(topic: str, thread_id: str | None = None):
+    graph, checkpointer = get_graph()
+
+    if thread_id is None:
+        thread_id = str(uuid.uuid4())
+        print(f"Starting new run: thread_id={thread_id}")
+    else:
+        print(f"Resuming run: thread_id={thread_id}")
+
+    config = {"configurable": {"thread_id": thread_id}}
+
+    initial_state: ResearchState = {
+        "topic": topic, "queries": [], "findings": [],
+        "critique": "", "critique_passed": False,
+        "repair_count": 0, "human_feedback": "", "report": "",
+    }
+
+    print("\n--- Phase 1: Research ---")
+    for update in graph.stream(initial_state, config=config, stream_mode="updates"):
+        node_name = list(update.keys())[0]
+        node_data = update[node_name]
+        print(f"[{node_name}] ", end="")
+        if "queries" in node_data:
+            print(f"generated {len(node_data['queries'])} queries")
+        elif "findings" in node_data:
+            print(f"found {len(node_data['findings'])} result(s)")
+        elif "critique" in node_data:
+            passed = node_data.get("critique_passed", False)
+            print(f"critique: {'PASS' if passed else 'FAIL'} | repairs: {node_data.get('repair_count', 0)}")
+        else:
+            print("done")
+
+    state = graph.get_state(config)
+    if state.next == ("synthesiser",):
+        print("\n=== HUMAN APPROVAL GATE ===")
+        print(f"Findings: {len(state.values['findings'])} collected")
+        print(f"Critique: {state.values['critique']}")
+        for i, f in enumerate(state.values["findings"][:2]):
+            print(f"  [{i+1}] {f[:120]}...")
+
+        feedback = input("\nEnter feedback (Enter to approve): ").strip()
+        if feedback:
+            graph.update_state(config, {"human_feedback": feedback})
+
+        print("\n--- Phase 2: Synthesis ---")
+        for update in graph.stream(None, config=config, stream_mode="updates"):
+            node_name = list(update.keys())[0]
+            print(f"[{node_name}] done")
+
+    final = graph.get_state(config)
+    print("\n" + "="*60)
+    print("FINAL REPORT")
+    print("="*60)
+    print(final.values.get("report", "(no report generated)"))
+    print(f"\nThread ID: {thread_id}")
+    return thread_id
+```
+</details>
+
+---
+
+## Verification Checklist
+
+After completing the lab, verify each constraint:
+
+**Persistence across restart:**
+```bash
+# Start the pipeline, copy the thread_id printed at the end, then Ctrl+C before approval
+python runner.py "Effects of sleep deprivation on cognition"
+
+# In a new terminal, resume using the thread_id
+python runner.py "Effects of sleep deprivation on cognition" <thread-id-from-above>
+```
+The pipeline should resume from the human approval gate — not restart from the planner.
+
+**Send API (not static fan-out):**
+Open `nodes.py` and confirm `dispatch_researchers` returns `[Send("researcher", {...}) for q in queries]`. Static fan-out would use `["researcher_1", "researcher_2", ...]` with hard-coded node names.
+
+**Reducer:**
+Add `print(state["findings"])` at the start of the `critic` node temporarily. Run the pipeline and confirm `findings` contains entries from all 3 researchers, not just one.
+
+**Retry guard:**
+Temporarily change `route_after_critic` to always return `"planner"` and run the pipeline. It should loop at most 2 times, then route to `"synthesiser"`.
+
+---
+
+## Extension Challenges
+
+If you finish early, try one of these:
+
+1. **Add LangSmith tracing**: set `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` and inspect the trace in the LangSmith UI. Find where the most tokens were spent.
+
+2. **Add a source-citation node**: after the researchers, add a node that extracts key claims from findings and marks each with which query generated it. Pass this structured output to the critic.
+
+3. **Async streaming**: rewrite `runner.py` to use `astream_events()` and print tokens as they stream from the synthesiser node — before the full response is complete.
+
+4. **PostgresSaver**: replace `SqliteSaver` with `PostgresSaver` using a local Postgres instance (Docker: `docker run -p 5432:5432 -e POSTGRES_PASSWORD=pw postgres`). Confirm the graph still works and checkpoints survive.
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "My pipeline uses SqliteSaver and checkpoints survive a process restart",
+    "Parallel researchers are dispatched with the Send API and findings are merged by a reducer",
+    "The graph pauses at interrupt_before=['synthesiser'] and resumes with graph.stream(None, config)",
+    "The runner prints stream_mode='updates' after each node",
+    "The repair_count guard stops critic loops after 2 attempts",
+    "My README includes the Mermaid diagram and explains what interrupt_before gives you that input() does not"
+  ]}
+  next="/modules/module-16-langgraph/index"
+/>

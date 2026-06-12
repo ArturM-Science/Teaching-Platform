@@ -1,0 +1,334 @@
+---
+title: "Your First Graph: From Linear to Conditional"
+module: "module-16-langgraph"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Your First Graph: From Linear to Conditional
+
+The smallest possible LangGraph program is a straight line: node A → node B → END. That is useful for understanding the mechanics, but not for anything production-worthy. Real agent workflows branch, loop, and retry.
+
+In this lesson you will build a 3-node `plan → execute → review` graph, add a conditional routing edge after review, and protect it with a retry-count guard so it cannot loop forever.
+
+---
+
+## The Graph We Are Building
+
+Three nodes, one conditional edge:
+
+```
+plan → execute → review → (approved?) → END
+                    ↑           ↓
+                    └── (retry) ←┘
+```
+
+The `review` node evaluates the result. If it approves, execution ends. If not, it routes back to `plan` for another attempt — but only up to 2 times. After 2 retries, the graph gives up and returns whatever it has.
+
+---
+
+## The State
+
+```python
+from typing import TypedDict
+
+class ResearchState(TypedDict):
+    question: str
+    plan: str
+    result: str
+    review: str
+    approved: bool
+    retry_count: int
+```
+
+Every field that any node reads or writes is declared here. `retry_count` is the guard — we will increment it in the `review` node and check it in the routing function.
+
+---
+
+## The Nodes
+
+```python
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+def plan(state: ResearchState) -> dict:
+    """Create a research plan for the question."""
+    prompt = (
+        f"Create a concise 3-step research plan to answer this question:\n"
+        f"{state['question']}\n\n"
+        f"If this is a retry (attempt {state['retry_count'] + 1}), "
+        f"improve on the previous plan:\n{state.get('plan', 'none')}"
+    )
+    response = model.invoke(prompt)
+    return {"plan": response.content}
+
+def execute(state: ResearchState) -> dict:
+    """Execute the plan and produce a result."""
+    prompt = (
+        f"Follow this research plan and provide a detailed answer:\n"
+        f"Plan: {state['plan']}\n\n"
+        f"Question: {state['question']}"
+    )
+    response = model.invoke(prompt)
+    return {"result": response.content}
+
+def review(state: ResearchState) -> dict:
+    """Critique the result and decide whether it is good enough."""
+    prompt = (
+        f"You are a critical reviewer. Evaluate this answer to the question.\n\n"
+        f"Question: {state['question']}\n"
+        f"Answer: {state['result']}\n\n"
+        f"Reply with:\n"
+        f"APPROVED: <one sentence why> — if the answer is complete and accurate\n"
+        f"REJECTED: <one sentence why> — if the answer has significant gaps"
+    )
+    response = model.invoke(prompt)
+    review_text = response.content
+    approved = review_text.strip().upper().startswith("APPROVED")
+    return {
+        "review": review_text,
+        "approved": approved,
+        "retry_count": state["retry_count"] + 1,
+    }
+```
+
+Notice that `review` increments `retry_count` — it does this whether the answer was approved or rejected. This means `retry_count` tracks how many review cycles have completed, not just failures.
+
+<Callout type="insight">
+The `review` node does two things: it sets `approved` (a boolean) and it increments `retry_count`. The routing function reads both. This is a common LangGraph pattern: the node does the work, and the routing function makes the control-flow decision. Keep decision logic in routing functions — nodes should focus on their primary task.
+</Callout>
+
+---
+
+## The Routing Function
+
+```python
+from langgraph.graph import END
+
+def route_after_review(state: ResearchState) -> str:
+    """Decide where to go after review."""
+    if state["approved"]:
+        return END
+    elif state["retry_count"] >= 2:
+        # Give up — return what we have after 2 attempts
+        return END
+    else:
+        return "plan"
+```
+
+The routing function returns a string. LangGraph uses that string to look up the next node. `END` is the sentinel that stops execution.
+
+<Callout type="warning">
+Always add a retry-count guard to any conditional edge that can loop. A routing function that returns "plan" unconditionally when `approved` is False will loop forever if the model never produces an approvable answer. Two or three retries is usually enough — after that, return what you have or raise an error.
+</Callout>
+
+<Quiz
+  question="In a conditional edge, what does the routing function return?"
+  options={[
+    { text: "A string — the name of the next node to execute, or END", correct: true, explanation: "Correct. LangGraph calls the routing function with the current state and uses the returned string to select the next node." },
+    { text: "A boolean — True to continue, False to stop", correct: false, explanation: "Routing functions return strings, not booleans. The string is matched against node names or END." },
+    { text: "A new state dict — the state to pass to the next node", correct: false, explanation: "Routing functions only decide which node runs next. They do not modify state." }
+  ]}
+/>
+
+---
+
+## Wiring the Graph
+
+```python
+from langgraph.graph import StateGraph, END
+
+builder = StateGraph(ResearchState)
+
+# Add nodes
+builder.add_node("plan", plan)
+builder.add_node("execute", execute)
+builder.add_node("review", review)
+
+# Set entry point
+builder.set_entry_point("plan")
+
+# Unconditional edges
+builder.add_edge("plan", "execute")
+builder.add_edge("execute", "review")
+
+# Conditional edge after review
+builder.add_conditional_edges(
+    "review",
+    route_after_review,
+    {
+        END: END,
+        "plan": "plan",
+    }
+)
+
+graph = builder.compile()
+```
+
+Let us visualise what we built:
+
+```python
+print(graph.get_graph().draw_mermaid())
+```
+
+```
+graph TD;
+    __start__ --> plan;
+    plan --> execute;
+    execute --> review;
+    review --> plan;
+    review --> __end__;
+```
+
+---
+
+## Running the Graph
+
+### Synchronous Invocation
+
+```python
+initial_state = {
+    "question": "What are the main causes of the 2008 financial crisis?",
+    "plan": "",
+    "result": "",
+    "review": "",
+    "approved": False,
+    "retry_count": 0,
+}
+
+result = graph.invoke(initial_state)
+print("Final answer:", result["result"])
+print("Approved:", result["approved"])
+print("Attempts:", result["retry_count"])
+```
+
+`graph.invoke()` blocks until the graph reaches `END` and returns the final state dict.
+
+### Streaming Invocation
+
+```python
+for snapshot in graph.stream(initial_state):
+    # snapshot is a dict: {"node_name": state_after_node}
+    node_name = list(snapshot.keys())[0]
+    print(f"--- after {node_name} ---")
+    node_state = snapshot[node_name]
+    if node_name == "review":
+        print(f"  approved: {node_state.get('approved')}")
+        print(f"  retries: {node_state.get('retry_count')}")
+```
+
+`graph.stream()` is a generator that yields one dict per node completion. Each dict has the node name as key and the state snapshot as value. This is useful for watching the graph execute step by step.
+
+<Quiz
+  question="How do you prevent an infinite retry loop in a LangGraph conditional edge?"
+  options={[
+    { text: "Add a retry_count field to state, increment it in the review node, and check it in the routing function", correct: true, explanation: "Correct. The routing function checks retry_count and returns END when the limit is reached, regardless of whether the answer was approved." },
+    { text: "Set max_iterations on the StateGraph constructor", correct: false, explanation: "There is no max_iterations parameter on StateGraph. You must implement the guard yourself via state." },
+    { text: "Use a try/except block around graph.invoke() to catch infinite loop errors", correct: false, explanation: "LangGraph does not raise an error for infinite loops — it will run indefinitely. The guard must be in your routing logic." }
+  ]}
+/>
+
+---
+
+## Complete Working Code
+
+Here is the full program in one file:
+
+```python
+# research_graph.py
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+# ---------- State ----------
+
+class ResearchState(TypedDict):
+    question: str
+    plan: str
+    result: str
+    review: str
+    approved: bool
+    retry_count: int
+
+# ---------- Nodes ----------
+
+def plan(state: ResearchState) -> dict:
+    prompt = (
+        f"Create a concise 3-step research plan to answer:\n{state['question']}\n\n"
+        f"Previous plan (if retrying): {state.get('plan', 'none')}"
+    )
+    return {"plan": model.invoke(prompt).content}
+
+def execute(state: ResearchState) -> dict:
+    prompt = (
+        f"Follow this plan and provide a detailed answer:\n"
+        f"Plan: {state['plan']}\n\nQuestion: {state['question']}"
+    )
+    return {"result": model.invoke(prompt).content}
+
+def review(state: ResearchState) -> dict:
+    prompt = (
+        f"Evaluate this answer.\nQuestion: {state['question']}\n"
+        f"Answer: {state['result']}\n\n"
+        f"Reply APPROVED or REJECTED with a one-sentence reason."
+    )
+    text = model.invoke(prompt).content
+    return {
+        "review": text,
+        "approved": text.strip().upper().startswith("APPROVED"),
+        "retry_count": state["retry_count"] + 1,
+    }
+
+# ---------- Routing ----------
+
+def route_after_review(state: ResearchState) -> str:
+    if state["approved"] or state["retry_count"] >= 2:
+        return END
+    return "plan"
+
+# ---------- Graph ----------
+
+builder = StateGraph(ResearchState)
+builder.add_node("plan", plan)
+builder.add_node("execute", execute)
+builder.add_node("review", review)
+builder.set_entry_point("plan")
+builder.add_edge("plan", "execute")
+builder.add_edge("execute", "review")
+builder.add_conditional_edges("review", route_after_review, {END: END, "plan": "plan"})
+graph = builder.compile()
+
+# ---------- Run ----------
+
+if __name__ == "__main__":
+    result = graph.invoke({
+        "question": "What caused the 2008 financial crisis?",
+        "plan": "", "result": "", "review": "",
+        "approved": False, "retry_count": 0,
+    })
+    print("=== Final Answer ===")
+    print(result["result"])
+    print(f"\nApproved: {result['approved']} | Attempts: {result['retry_count']}")
+```
+
+This is approximately 60 lines. It is a complete, production-ready skeleton — the only missing pieces are checkpointing (Lesson 3) and parallel execution (Lesson 4).
+
+<Callout type="tip">
+Notice that the graph definition (nodes + edges) is completely separate from the execution (`graph.invoke`). This separation is deliberate — you can swap in a different graph for testing, change the entry point, or add nodes without touching your run logic.
+</Callout>
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "I can write a 3-node graph with plan → execute → review flow",
+    "I can write a routing function that returns a node name or END based on state",
+    "I have added a retry_count guard to prevent infinite loops",
+    "I can invoke the graph synchronously with invoke() and observe node-by-node with stream()"
+  ]}
+  next="/modules/module-16-langgraph/lesson-03"
+/>

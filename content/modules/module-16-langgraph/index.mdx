@@ -1,0 +1,89 @@
+---
+title: "LangGraph — Stateful Agent Workflows"
+module: "module-16-langgraph"
+slug: "index"
+---
+
+# LangGraph — Stateful Agent Workflows
+
+**Framework Elective · Optional · Prerequisite: Module 06**
+
+Most agent frameworks hide the control flow from you. LangGraph does the opposite: you draw the graph explicitly, declare exactly what state flows through it, and the framework executes it. That explicitness is what makes LangGraph the right tool for production workflows that need checkpointing, human review, and crash recovery.
+
+This module is a deep-dive elective. You will build a resumable, checkpointed research pipeline with conditional routing and human-in-the-loop approval — the kind of workflow that would be painful to build with raw SDK calls.
+
+---
+
+## Why LangGraph?
+
+When you call a model in a loop yourself, you are responsible for:
+
+- Keeping the conversation history in memory
+- Deciding when to stop or retry
+- Saving progress if the process crashes
+- Pausing for a human to review something
+- Running sub-tasks in parallel and merging results
+
+LangGraph handles all of this through one abstraction: a **directed graph** where nodes are Python functions and edges define control flow. State moves through the graph, every node can read it and return updates, and a checkpointer records a snapshot after every node — so you can pause, inspect, modify, and resume at any point.
+
+Anthropic recommends LangGraph for complex, multi-step agentic workflows that need fine-grained control. It is framework-neutral about models — you can use Claude, GPT, or any LangChain-compatible model.
+
+<Callout type="note">
+This module assumes you are comfortable with Module 06 (Multi-Agent Systems). You should know what an orchestrator is, what fan-out/fan-in means, and why stateful agents are harder than stateless ones. If those terms are unfamiliar, complete Module 06 first.
+</Callout>
+
+---
+
+## What You Will Build
+
+By the end of this module you will have a **Resumable Research Pipeline**: a 5-node LangGraph graph that:
+
+1. Plans a research strategy for a question
+2. Dispatches parallel researchers via the Send API (dynamic fan-out)
+3. Runs a critic node that can trigger repairs (conditional loop with retry guard)
+4. Pauses for human approval before synthesis (`interrupt_before`)
+5. Synthesises a final report
+
+The pipeline checkpoints after every node using `SqliteSaver`, survives process restarts, and streams live updates to the terminal.
+
+---
+
+<LearningObjectives items={[
+  "Explain the TypedDict state model and why nodes return dicts of updates rather than full state objects",
+  "Build graphs with both unconditional and conditional edges, including retry-guard loops",
+  "Add SqliteSaver checkpointing and use interrupt_before to pause a graph for human review",
+  "Fan out work dynamically over a list using the Send API and merge results with reducers",
+  "Deploy a LangGraph graph to production using streaming, double-texting modes, and LangGraph Platform"
+]} />
+
+---
+
+## Module Map
+
+| Lesson | Title | Key Concept |
+|--------|-------|-------------|
+| 1 | Graphs, Nodes, and State | TypedDict state · node return convention · compile |
+| 2 | Your First Graph: Linear to Conditional | Full working graph · conditional edges · retry guard |
+| 3 | Checkpointing and Human-in-the-Loop | MemorySaver · interrupt_before · time-travel |
+| 4 | Multi-Agent Graphs: Subgraphs, Fan-out, Send | Reducers · Send API · map-reduce pattern |
+| 5 | Production: Streaming, Persistence, Platform | stream_mode · double-texting · LangGraph Cloud |
+| Lab | Resumable Research Pipeline | Full project with checkpointing, parallel researchers, human gate |
+
+---
+
+## Setup
+
+Install dependencies before starting Lesson 1:
+
+```bash
+pip install langgraph langchain-anthropic "langgraph[sqlite]"
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+Python 3.11+ is recommended. All code examples in this module are tested against LangGraph 0.2.x.
+
+---
+
+<Callout type="tip">
+Optional elective — this module is not required to complete the AI Agents course. Take it when you want deep control over agent workflows, or when you are evaluating LangGraph for a production system.
+</Callout>

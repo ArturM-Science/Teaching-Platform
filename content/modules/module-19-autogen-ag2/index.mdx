@@ -1,0 +1,31 @@
+---
+title: "AutoGen / AG2 — Conversational Multi-Agent Systems"
+module: "module-19-autogen-ag2"
+---
+
+# AutoGen / AG2
+
+**Framework Elective · Optional · Prerequisite: Module 06**
+
+AutoGen (now AG2 in its community fork) pioneered the conversational multi-agent model: agents take turns speaking in a shared thread, and a GroupChatManager decides who speaks next. AG2 adds event-driven architecture and explicit DiGraph workflows for production use. Both are covered in this module.
+
+<LearningObjectives items={[
+  "Build AssistantAgent and UserProxyAgent with custom system messages and termination conditions",
+  "Wire agents into a GroupChat with LLM-based speaker selection",
+  "Implement nested chats — one agent spawning a sub-conversation",
+  "Upgrade to AG2's DiGraphGroupChat for explicit, auditable conversation graphs",
+  "Tune max_consecutive_auto_reply and termination conditions for production reliability",
+]} />
+
+## Module map
+
+| Lesson | Topic |
+|---|---|
+| 1 | Mental model — conversation threads vs graph edges |
+| 2 | Your first GroupChat — agents, manager, and termination |
+| 3 | Nested chats and tool use inside agents |
+| 4 | AG2 — DiGraphGroupChat and event-driven architecture |
+| 5 | Production — cost, reliability, and the LLM speaker selection trade-off |
+| 6 | Lab — Build an iterative code review system with nested chats |
+
+> **Coming soon** — lessons are being written. Check back next session.

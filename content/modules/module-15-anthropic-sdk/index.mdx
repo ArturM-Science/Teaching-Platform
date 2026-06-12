@@ -1,0 +1,73 @@
+---
+title: "Anthropic Python SDK — Raw API, Full Control"
+module: "module-15-anthropic-sdk"
+slug: "index"
+---
+
+# Anthropic Python SDK — Raw API, Full Control
+
+**Framework Elective · Optional · Prerequisite: Module 06**
+
+Most framework tutorials hide the API behind layers of abstraction. This module tears off the cover. You will use the raw `anthropic` Python package — no LangChain, no LangGraph, no wrappers — and build a production-grade tool-using agent from scratch.
+
+By the end, every line of your agent does exactly what you wrote. No magic. No hidden retries you didn't ask for. No prompt templates you can't see.
+
+<LearningObjectives items={[
+  "Read and write the Messages API format fluently — roles, content blocks, tool schemas, and tool results",
+  "Build a complete agent loop with tool use, convergence guards, and error handling using only the anthropic package",
+  "Use streaming, structured outputs, and vision with the raw API",
+  "Compose orchestrator-worker multi-agent patterns with both sync and async clients",
+  "Control cost and reliability in production: prompt caching, token counting, retries, and rate limit handling"
+]} />
+
+## Why the raw SDK?
+
+Every AI framework — LangGraph, CrewAI, AutoGen, LlamaIndex — is built on top of the same Messages API you are about to learn. When something breaks in a framework, the debugging trail leads here. When a framework lacks a feature, you extend it here. When you need to understand what a framework is actually doing, you read it here.
+
+The raw SDK also has real advantages beyond pedagogy:
+
+- **Zero overhead.** No middleware, no event bus, no state machine. Just Python.
+- **Full observability.** Every token, every role, every content block is yours to inspect.
+- **Perfect for simple pipelines.** A linear orchestrator-worker chain is 50 lines with the raw SDK, not 200 lines of graph configuration.
+- **Foundation for framework work.** After this module, framework abstractions will feel transparent rather than opaque.
+
+<Callout type="insight">
+This module is an elective. Take it after Module 06 (Multi-Agent Systems) if you want to understand the layer beneath LangGraph or CrewAI before (or instead of) a framework-specific module. It is not required for the capstone — but learners who complete it consistently debug framework code faster.
+</Callout>
+
+## What you will build
+
+Over six lessons you will construct a **production research agent** that:
+
+1. Accepts a user question
+2. Decides which tools to call (web search stub, calculator, file writer)
+3. Executes tools, feeds results back to the model, and loops until done
+4. Streams output to the terminal token by token
+5. Caches its system prompt so repeated calls are 60–90% cheaper
+6. Tracks token cost per run and prints a summary
+7. Retries rate-limit errors automatically with exponential backoff
+
+All of this in pure Python with one dependency: `anthropic`.
+
+## Module map
+
+| Lesson | Title | Key skill |
+|---|---|---|
+| 1 | The API Contract: Messages, Roles, and Content Blocks | Anatomy of a `messages.create()` call |
+| 2 | Tool Use: Schemas, the Loop, and Convergence | Full agent loop with tool dispatch |
+| 3 | Streaming, Structured Outputs, and Vision | `stream.text_stream`, JSON prefill, image blocks |
+| 4 | Multi-Agent Patterns with the Raw SDK | Orchestrator-worker, async parallel, critic loop |
+| 5 | Production: Retries, Rate Limits, and Cost Control | `tenacity`, prompt caching, `count_tokens()` |
+| Lab | Production Research Agent | Capstone: combine all five lessons |
+
+## Prerequisites
+
+- Python 3.10 or later
+- An Anthropic API key (`export ANTHROPIC_API_KEY="sk-ant-..."`)
+- Module 06 (Multi-Agent Systems) — you should already know what an orchestrator-worker pattern is conceptually; this module shows you how to implement it at the API level
+
+```bash
+pip install anthropic
+```
+
+That is the only dependency until the lab (which also uses `tenacity` and `pydantic`).

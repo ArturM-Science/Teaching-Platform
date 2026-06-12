@@ -1,0 +1,303 @@
+---
+title: "Graphs, Nodes, and State — The LangGraph Mental Model"
+module: "module-16-langgraph"
+lesson: 1
+slug: "lesson-01"
+---
+
+# Graphs, Nodes, and State — The LangGraph Mental Model
+
+Most people write agent loops by hand: call the model, check the output, decide what to do next, loop. That works for simple cases. LangGraph takes a different approach — you draw the control flow as a graph, declare the shared state as a typed schema, and let the framework execute the loop for you.
+
+This lesson covers the four building blocks of every LangGraph program: **state**, **nodes**, **edges**, and **compilation**. Get these right and every more advanced pattern in this module will make immediate sense.
+
+---
+
+## The Core Idea
+
+A LangGraph graph is a directed graph where:
+
+- **Nodes** are plain Python functions. Each node reads from shared state and returns a dict of updates.
+- **Edges** connect nodes. An unconditional edge always goes from A to B. A conditional edge calls a routing function that returns a string — the name of the next node to run.
+- **State** is a `TypedDict` — a Python dict with type annotations. Every node in the graph reads from and writes to this shared object.
+- **Compilation** turns the graph definition into an executable object.
+
+Here is the smallest possible LangGraph program:
+
+```python
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+
+# 1. Declare state
+class MyState(TypedDict):
+    message: str
+    reply: str
+
+# 2. Define a node
+def greet(state: MyState) -> dict:
+    return {"reply": f"Hello, {state['message']}!"}
+
+# 3. Build the graph
+builder = StateGraph(MyState)
+builder.add_node("greet", greet)
+builder.set_entry_point("greet")
+builder.add_edge("greet", END)
+
+# 4. Compile and run
+graph = builder.compile()
+result = graph.invoke({"message": "world", "reply": ""})
+print(result["reply"])  # Hello, world!
+```
+
+That is the entire mental model. Everything else in LangGraph is an elaboration of these four steps.
+
+---
+
+## State: The Shared Contract
+
+The `TypedDict` is not just for type checking. It is the contract that every node in the graph agrees to. Any field that any node reads or writes must be declared here — nothing can be passed between nodes outside of state.
+
+```python
+from typing import TypedDict
+
+class ResearchState(TypedDict):
+    question: str       # the user's research question
+    plan: str           # the plan node will fill this
+    result: str         # the execute node will fill this
+    review: str         # the review node will fill this
+    approved: bool      # the review node sets this
+    retry_count: int    # guards against infinite loops
+```
+
+Why `TypedDict` instead of a dataclass or plain dict?
+
+- **Type safety**: your IDE catches field typos before runtime
+- **Introspection**: LangGraph reads the TypedDict schema at compile time to understand what fields exist — it uses this for checkpointing and for reducer annotations (covered in Lesson 4)
+- **Compatibility**: `TypedDict` instances are plain dicts at runtime, so they work everywhere dicts work
+
+<Callout type="insight">
+Think of the state TypedDict as a shared whiteboard. Every node can read anything on it and write to any field it owns. No node hides data from another by keeping it in a local variable — if information needs to survive past one node, it must live in state.
+</Callout>
+
+---
+
+## Nodes: Functions That Return Updates
+
+A node is a plain Python function with this signature:
+
+```python
+def my_node(state: MyState) -> dict:
+    # read from state
+    # do work
+    # return only the fields that changed
+    return {"field_i_changed": new_value}
+```
+
+Two rules that trip up everyone new to LangGraph:
+
+**Rule 1: Return a dict of updates, not the full state.**
+
+The node does not need to return every field. It returns only the fields it changed. LangGraph merges those updates into the current state. If you return the full state object, LangGraph still merges it correctly — but you create more work for yourself and you cannot use reducers (Lesson 4).
+
+**Rule 2: Do not modify state in place.**
+
+The `state` argument is the current state snapshot. Mutating it directly is undefined behaviour in LangGraph — the graph may be running nodes concurrently, and in-place mutation causes race conditions. Always return a new dict.
+
+```python
+# WRONG — mutating in place
+def bad_node(state: MyState) -> dict:
+    state["result"] = "done"   # do not do this
+    return state
+
+# CORRECT — return updates only
+def good_node(state: MyState) -> dict:
+    return {"result": "done"}
+```
+
+<Callout type="warning">
+Never mutate the state dict in place. Return a dict of the fields you changed. This immutability is what makes checkpointing safe — LangGraph can snapshot state between nodes without worrying that a node will reach back and change a field after the snapshot was taken.
+</Callout>
+
+<Quiz
+  question="What should a LangGraph node return?"
+  options={[
+    { text: "A dict containing only the fields that changed", correct: true, explanation: "Correct. LangGraph merges these partial updates into the full state. You only return what changed." },
+    { text: "The complete state object with all fields populated", correct: false, explanation: "Returning the full state works but is not the intended pattern — and it breaks reducer annotations used in parallel fan-out." },
+    { text: "Nothing — nodes modify state in place via the state argument", correct: false, explanation: "Never mutate state in place. That causes race conditions in parallel graphs and breaks checkpointing." }
+  ]}
+/>
+
+---
+
+## Edges: Wiring Control Flow
+
+### Unconditional Edges
+
+An unconditional edge always goes from one node to the next:
+
+```python
+builder.add_edge("plan", "execute")
+builder.add_edge("execute", "review")
+```
+
+### Conditional Edges
+
+A conditional edge calls a routing function after a node completes. The routing function receives the current state and returns a string — the name of the next node (or `END`):
+
+```python
+def route_after_review(state: ResearchState) -> str:
+    if state["approved"]:
+        return END
+    elif state["retry_count"] >= 2:
+        return END          # give up after 2 retries
+    else:
+        return "plan"       # loop back and try again
+
+builder.add_conditional_edges(
+    "review",               # from this node
+    route_after_review,     # call this function
+    {                       # map return values to node names
+        END: END,
+        "plan": "plan",
+    }
+)
+```
+
+The third argument — the mapping dict — is optional when your routing function returns exact node names or `END`. It is required when you want to use short aliases like `"retry"` instead of the full node name.
+
+### Entry Point and END
+
+Every graph needs an entry point (the first node to run) and at least one path to `END`:
+
+```python
+builder.set_entry_point("plan")   # first node
+builder.add_edge("synthesise", END)  # terminal edge
+```
+
+`END` is a sentinel string imported from `langgraph.graph`. It signals that execution should stop and the final state should be returned to the caller.
+
+<Quiz
+  question="What is END in LangGraph and why is it needed?"
+  options={[
+    { text: "A sentinel value that signals the graph should stop executing and return the final state", correct: true, explanation: "Correct. Without a path to END, the graph would run forever. Every terminal node needs an edge to END." },
+    { text: "A special node that cleans up resources after execution", correct: false, explanation: "END is not a node — it is a sentinel string. No cleanup code runs at END." },
+    { text: "The name of the last node you add to the graph", correct: false, explanation: "END is imported from langgraph.graph. It is not automatically assigned to the last node you add." }
+  ]}
+/>
+
+---
+
+## Compilation
+
+Once you have defined nodes and edges, you compile the graph:
+
+```python
+graph = builder.compile()
+```
+
+Compilation does several things:
+
+1. **Validates the graph**: checks that all nodes referenced in edges actually exist, that there is an entry point, and that every path eventually reaches `END` (or a conditional edge)
+2. **Wires up reducers**: inspects the state TypedDict for `Annotated` fields and sets up merge functions for parallel branches
+3. **Returns a `CompiledStateGraph`**: this object has `invoke()`, `stream()`, and `astream_events()` methods
+
+### Running the Graph
+
+```python
+# Synchronous — blocks until graph reaches END
+result = graph.invoke({"question": "What is quantum entanglement?", "retry_count": 0, ...})
+
+# Streaming — yields state snapshots after each node
+for snapshot in graph.stream({"question": "...", "retry_count": 0, ...}):
+    print(snapshot)
+```
+
+### Visualising the Graph
+
+```python
+# Print a Mermaid diagram — paste into mermaid.live to render
+print(graph.get_graph().draw_mermaid())
+```
+
+```
+graph TD;
+    __start__ --> plan;
+    plan --> execute;
+    execute --> review;
+    review --> plan;
+    review --> __end__;
+```
+
+<Callout type="tip">
+Run `graph.get_graph().draw_mermaid()` after compiling every graph you build. It is the fastest way to catch wiring mistakes — a missing edge or a dead-end node shows up immediately in the diagram.
+</Callout>
+
+---
+
+## Why TypedDict? A Comparison
+
+| Approach | What you manage | What LangGraph manages |
+|---|---|---|
+| Raw SDK loop | History, retries, state, checkpoints | Nothing |
+| LangGraph | TypedDict schema, node logic | State merging, checkpointing, routing |
+
+With the raw SDK you own the loop entirely. That is fine for 30-line scripts. For a 5-node graph with parallel branches, retry logic, and crash recovery, you want LangGraph to own the loop.
+
+<Callout type="insight">
+The key shift: with raw SDK calls, you manage a list of messages and call the model yourself. With LangGraph, the graph IS the loop. You declare what nodes exist and how they connect — LangGraph handles execution order, state merging, and checkpointing. Your job is to write clean node functions and wire them correctly.
+</Callout>
+
+---
+
+## Putting It Together: A Minimal Annotated Graph
+
+```python
+from typing import TypedDict
+from langgraph.graph import StateGraph, END
+from langchain_anthropic import ChatAnthropic
+
+model = ChatAnthropic(model="claude-opus-4-5")
+
+class PlanState(TypedDict):
+    question: str
+    plan: str
+    answer: str
+
+def planner(state: PlanState) -> dict:
+    response = model.invoke(
+        f"Create a 3-step plan to answer: {state['question']}"
+    )
+    return {"plan": response.content}
+
+def answerer(state: PlanState) -> dict:
+    response = model.invoke(
+        f"Follow this plan:\n{state['plan']}\n\nAnswer: {state['question']}"
+    )
+    return {"answer": response.content}
+
+builder = StateGraph(PlanState)
+builder.add_node("planner", planner)
+builder.add_node("answerer", answerer)
+builder.set_entry_point("planner")
+builder.add_edge("planner", "answerer")
+builder.add_edge("answerer", END)
+
+graph = builder.compile()
+result = graph.invoke({"question": "Why is the sky blue?", "plan": "", "answer": ""})
+print(result["answer"])
+```
+
+This is a complete, runnable LangGraph program. In the next lesson you will extend this pattern to include conditional edges and a retry loop.
+
+---
+
+<Checkpoint
+  moduleSlug="module-16-langgraph"
+  items={[
+    "I can explain what a TypedDict state is and why nodes return partial updates rather than the full state",
+    "I can distinguish unconditional edges from conditional edges and write a routing function",
+    "I can set an entry point, wire edges to END, and compile a StateGraph",
+    "I understand why LangGraph manages the loop instead of me writing one manually"
+  ]}
+  next="/modules/module-16-langgraph/lesson-02"
+/>

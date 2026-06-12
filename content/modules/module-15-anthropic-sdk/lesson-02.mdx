@@ -1,0 +1,272 @@
+---
+title: "Tool Use: Schemas, the Loop, and Convergence"
+module: "module-15-anthropic-sdk"
+lesson: 2
+slug: "lesson-02"
+---
+
+# Tool Use: Schemas, the Loop, and Convergence
+
+An agent that only generates text is a chatbot. An agent that can call tools is a system. This lesson teaches you the exact mechanics of tool use in the Anthropic API: how to define a tool, how to detect when the model wants to call one, how to execute it and feed results back, and how to write a loop that converges safely.
+
+## Defining a tool
+
+A tool is a JSON object with three required fields:
+
+```python
+get_weather_tool = {
+    "name": "get_weather",
+    "description": "Get the current weather for a location. Returns temperature and conditions.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "location": {
+                "type": "string",
+                "description": "City name, e.g. 'London' or 'New York, NY'"
+            },
+            "unit": {
+                "type": "string",
+                "enum": ["celsius", "fahrenheit"],
+                "description": "Temperature unit"
+            }
+        },
+        "required": ["location"]
+    }
+}
+```
+
+The `description` field is the most important part — it tells the model when and why to call the tool. A vague description produces unreliable tool selection. A precise description with examples produces reliable tool selection.
+
+The `input_schema` follows JSON Schema. The model reads this to know what arguments to pass, so every property needs a clear `description`.
+
+<Callout type="tip">
+Write tool descriptions as if you were explaining the tool to a smart colleague who can't see your code. Include: what the tool does, what it returns, and any important constraints (e.g., "only works for US cities", "returns data in UTC").
+</Callout>
+
+## Passing tools to the API
+
+```python
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    tools=[get_weather_tool],
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}]
+)
+```
+
+When you pass tools, the model may choose to call one. It signals this by returning `stop_reason == "tool_use"` and including one or more `tool_use` content blocks in the response.
+
+## Handling a tool_use response
+
+```python
+if response.stop_reason == "tool_use":
+    for block in response.content:
+        if block.type == "tool_use":
+            print(f"Model wants to call: {block.name}")
+            print(f"With input: {block.input}")
+            print(f"Tool call ID: {block.id}")
+```
+
+The `block.input` is already parsed into a Python dict. The `block.id` is a unique string like `"toolu_01XFDUDYJgAACTvnkyLAND"` — you need it when you return the result.
+
+## Executing the tool and returning the result
+
+After calling the tool, you must:
+1. Append the **full assistant message** (including the `tool_use` block) to your messages list
+2. Append a **new user message** containing a `tool_result` block
+
+```python
+import json
+
+# Step 1: execute the tool
+def get_weather(location, unit="celsius"):
+    # Real implementation would call a weather API
+    return {"temperature": 14, "condition": "cloudy", "unit": unit}
+
+# Step 2: append the full assistant message first
+messages.append({"role": "assistant", "content": response.content})
+
+# Step 3: append the tool result as a new user message
+tool_results = []
+for block in response.content:
+    if block.type == "tool_use":
+        result = get_weather(**block.input)
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": block.id,
+            "content": json.dumps(result)
+        })
+
+messages.append({"role": "user", "content": tool_results})
+```
+
+<Callout type="warning">
+You MUST append the complete assistant message (with its `tool_use` blocks) to history before adding the `tool_result`. If you skip the assistant message and only add the `tool_result`, the API will return a `400` error because there is a `tool_result` in history with no matching `tool_use` block. The message order must always be: `assistant (with tool_use)` → `user (with tool_result)`.
+</Callout>
+
+<Quiz
+  question="What happens if you forget to return a tool_result for a tool_use block?"
+  options={[
+    { text: "The model silently ignores the missing result and continues", correct: false, explanation: "The API does not silently recover. It validates message history and returns an error if tool_use blocks lack matching tool_result blocks." },
+    { text: "The API returns a 400 error because tool_use blocks in history must have matching tool_result blocks", correct: true, explanation: "Correct. The Anthropic API validates that every tool_use block in history has a corresponding tool_result. Missing results cause immediate validation errors." },
+    { text: "The model retries the tool call automatically", correct: false, explanation: "The API has no auto-retry mechanism. You control the loop entirely." },
+    { text: "The model hallucinates a tool result and continues", correct: false, explanation: "The API validates message structure before passing anything to the model." },
+  ]}
+/>
+
+## The full agent loop
+
+Now we can assemble the complete loop. The key insight is that you keep calling `messages.create()` until `stop_reason != "tool_use"`.
+
+```python
+import anthropic
+import json
+
+client = anthropic.Anthropic()
+
+TOOLS = [get_weather_tool]
+TOOL_MAP = {"get_weather": get_weather}
+MAX_STEPS = 10
+
+
+def run_agent(user_question: str) -> str:
+    messages = [{"role": "user", "content": user_question}]
+    steps = 0
+
+    while steps < MAX_STEPS:
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            tools=TOOLS,
+            messages=messages,
+        )
+        steps += 1
+
+        if response.stop_reason == "end_turn":
+            # Model finished — extract and return the text
+            text_blocks = [b for b in response.content if b.type == "text"]
+            return text_blocks[0].text if text_blocks else ""
+
+        if response.stop_reason != "tool_use":
+            # max_tokens or stop_sequence — handle as needed
+            raise RuntimeError(f"Unexpected stop_reason: {response.stop_reason}")
+
+        # Append the full assistant message (includes tool_use blocks)
+        messages.append({"role": "assistant", "content": response.content})
+
+        # Execute all tool calls and collect results
+        tool_results = []
+        for block in response.content:
+            if block.type != "tool_use":
+                continue
+            if block.name not in TOOL_MAP:
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps({"error": f"Unknown tool: {block.name}"}),
+                    "is_error": True,
+                })
+                continue
+            try:
+                result = TOOL_MAP[block.name](**block.input)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result),
+                })
+            except Exception as e:
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps({"error": str(e)}),
+                    "is_error": True,
+                })
+
+        # Append tool results as a new user message
+        messages.append({"role": "user", "content": tool_results})
+
+    raise RuntimeError(f"Agent did not converge after {MAX_STEPS} steps")
+
+
+# Run it
+answer = run_agent("What's the weather in Tokyo and London?")
+print(answer)
+```
+
+This is a complete, production-usable agent loop in about 50 lines. Let's examine its convergence properties.
+
+## Convergence: why agents get stuck and how to stop it
+
+An agent loop has three exit conditions:
+
+1. **Normal exit:** `stop_reason == "end_turn"` — the model decided it was done.
+2. **Step limit:** `steps >= MAX_STEPS` — we hit our guard and raise an error.
+3. **Unexpected stop_reason:** `"max_tokens"` or `"stop_sequence"` — we raise rather than silently continue.
+
+The step limit is non-negotiable. Without it, a bug in your tool (e.g., always returning an error) can cause the agent to call the same tool forever, burning tokens until you manually kill the process.
+
+A more sophisticated convergence check detects repeated failures:
+
+```python
+last_tool_calls = None
+
+# Inside the loop, before executing tools:
+current_tool_calls = [(b.name, json.dumps(b.input, sort_keys=True))
+                      for b in response.content if b.type == "tool_use"]
+
+if current_tool_calls == last_tool_calls:
+    raise RuntimeError("Agent is stuck: same tool calls on consecutive steps")
+
+last_tool_calls = current_tool_calls
+```
+
+This catches the common failure mode where the model tries the same failing tool call over and over.
+
+<Quiz
+  question="Why do we append the full assistant message (including tool_use blocks) rather than just the text?"
+  options={[
+    { text: "Because the API requires assistant messages to always be a list, not a string", correct: false, explanation: "The messages array accepts both string and list content. That's not the reason." },
+    { text: "Because tool_result blocks reference tool_use block IDs — if the tool_use blocks aren't in history, the API can't match results to calls", correct: true, explanation: "Correct. The tool_use_id in each tool_result must match the id of a tool_use block in the preceding assistant message. Without the assistant message in history, the IDs have nothing to reference." },
+    { text: "Because we need the text content for display purposes", correct: false, explanation: "Display is a separate concern. The reason for appending the full message is structural — the API needs to see the tool_use blocks to validate the tool_result IDs." },
+    { text: "Because the API compresses duplicate content between calls", correct: false, explanation: "The API has no compression or deduplication. You send the full history on every call." },
+  ]}
+/>
+
+## The FailureMuseum: "The Missing tool_result"
+
+<Callout type="warning">
+**Failure case: The Infinite Loop**
+
+A developer builds a weather agent. Their tool implementation raises a `KeyError` when the city isn't found. They catch the exception but forget to include the `tool_result` in the messages history. The conversation history now has a `tool_use` block with no matching `tool_result`. The API rejects the next call with a 400 error. The developer adds error handling but mistakenly appends the `tool_result` to `messages` before appending the assistant message. Now the order is: `user → tool_result → assistant (with tool_use)` instead of `user → assistant (with tool_use) → user (with tool_result)`. The API rejects again.
+
+**Fix:** Always follow this exact order:
+1. `messages.append({"role": "assistant", "content": response.content})`
+2. Collect all tool results
+3. `messages.append({"role": "user", "content": tool_results})`
+
+Never append the user tool_result message before the assistant message. Never skip the assistant message.
+</Callout>
+
+## Recap: the four-step dance
+
+Every tool call involves exactly four steps. Memorise this sequence:
+
+```
+1. API call   →  response with stop_reason="tool_use" and tool_use blocks
+2. Append     →  full assistant message (with tool_use blocks) to messages
+3. Execute    →  run the tool, collect result
+4. Append     →  user message with tool_result blocks to messages
+   ↓
+repeat from step 1 until stop_reason == "end_turn"
+```
+
+<Checkpoint
+  moduleSlug="module-15-anthropic-sdk"
+  items={[
+    "I can write a complete tool schema with name, description, and input_schema",
+    "I know the correct message order: assistant (tool_use) → user (tool_result)",
+    "I can write the full agent loop with a MAX_STEPS guard",
+    "I understand why appending the full assistant message is required",
+  ]}
+  next="/modules/module-15-anthropic-sdk/lesson-03"
+/>
