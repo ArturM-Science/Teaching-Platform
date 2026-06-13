@@ -10,7 +10,13 @@ export default async function ModulePage({
   params: Promise<{ module: string }>
 }) {
   const { module } = await params
-  const raw = await getMdxContent(module, 'index')
+  let raw: string
+  try {
+    raw = await getMdxContent(module, 'index')
+  } catch (e) {
+    console.error(`[ModulePage] getMdxContent failed for ${module}/index:`, e)
+    throw e
+  }
 
   return (
     <div className="px-4 py-6 sm:px-6 lg:px-10 lg:py-10">

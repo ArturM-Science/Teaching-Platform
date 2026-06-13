@@ -132,23 +132,25 @@ Progress server action: `app/progress/actions.ts` → `markModuleComplete(module
 
 Migrations in `supabase/migrations/`:
 - `001_initial_schema.sql` — users, courses, modules, progress, workshops, RLS policies
-- `002_seed_course_modules.sql` — seeds the AI Agents course + all 15 module rows (run this in the Supabase SQL editor if not done yet)
+- `002_seed_course_modules.sql` — seeds the AI Agents course + all 21 module rows (already run)
 
 ## Dashboard
 
 `app/dashboard/page.tsx` fetches the user's completed slugs from Supabase and shows:
 - Green ✓ badge on completed modules
 - "Completed" label instead of "Ready"
-- Progress widget in the sidebar: "X / 15 modules completed" with a progress bar
+- Progress widget in the sidebar: "X / 21 modules completed" with a progress bar
 
 ## What's Next
 
-- Add `moduleSlug` prop to all `<Checkpoint>` usages in existing MDX files (Module 06 labs already have it; earlier modules do not)
 - Mobile sidebar: collapse into a slide-out drawer on small screens
 - Workshop scheduling panel (currently placeholder in dashboard sidebar)
-- **Next module to build: Module 07** — Evaluation (how evaluation changes with multi-agent systems is a natural bridge from Module 06)
 - Landing page: test on mobile — hero 3D canvas sizing, nav, CTA buttons
 - Landing page: consider adding a testimonials or social-proof section below the curriculum
+
+## Content Status (as of 2026-06-13)
+
+All 21 modules (00–20) have full MDX content and are listed in the dashboard. `moduleSlug` prop is present on every `<Checkpoint>` across all modules. No content modules remain to be built.
 
 ## Landing Page (animated hero added 2026-06-01)
 
