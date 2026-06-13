@@ -1,31 +1,81 @@
 ---
 title: "Google ADK — Hierarchical Agents & Vertex AI"
 module: "module-17-google-adk"
+slug: "index"
 ---
 
 # Google Agent Development Kit (ADK)
 
 **Framework Elective · Optional · Prerequisite: Module 06**
 
-Google's Agent Development Kit (ADK 2.0) is an engineering-first framework built around hierarchical agent trees and the A2A (Agent-to-Agent) protocol. It integrates natively with Vertex AI for one-command managed deployment and supports cross-framework invocation — an ADK agent can call a LangGraph or CrewAI agent as a peer.
+Google's Agent Development Kit (ADK 2.0) is built around one central idea: agents form a tree, and the root delegates to branches. That hierarchical model — combined with one-command deployment to Vertex AI and the A2A (Agent-to-Agent) open protocol for cross-framework calls — makes ADK the right choice when you need auditability, managed infrastructure, and the ability to call LangGraph or CrewAI agents as peers.
+
+<Callout type="note">
+This module assumes you are comfortable with Module 06 (Multi-Agent Systems). You should know what an orchestrator is, what fan-out/fan-in means, and why session state matters in multi-agent pipelines. If those terms are unfamiliar, complete Module 06 first.
+</Callout>
+
+---
+
+## What You Will Build
+
+By the end of this module you will have a **Multi-Agent Research System**: a three-tier ADK pipeline that:
+
+1. Decomposes a research question with a planner (`LlmAgent`)
+2. Searches web and academic sources concurrently (`ParallelAgent`)
+3. Synthesises findings into a draft and runs a critic quality gate (`LoopAgent`)
+4. Persists session state across restarts with `DatabaseSessionService` (SQLite)
+5. Is verifiable locally with `adk dev` and deployable to Vertex AI with `adk deploy`
+
+---
 
 <LearningObjectives items={[
-  "Define agents with the ADK 2.0 API and wire tools using WorkflowNode patterns",
-  "Build hierarchical agent trees where root agents delegate to sub-agents",
+  "Build hierarchical agent trees where a root LlmAgent delegates to sub-agents",
+  "Compose SequentialAgent, ParallelAgent, and LoopAgent for different control flows",
+  "Use the @tool decorator and ToolContext to pass data through session state",
+  "Persist sessions with DatabaseSessionService and manage cross-session memory",
   "Use the A2A protocol to call agents across framework boundaries",
-  "Run parallel agents with ParallelAgent and manage shared session state",
   "Deploy to Vertex AI Agent Engine with adk deploy",
 ]} />
 
-## Module map
+---
 
-| Lesson | Topic |
-|---|---|
-| 1 | ADK mental model — hierarchical trees and the A2A protocol |
-| 2 | Your first ADK agent — tools, sessions, and the Runner |
-| 3 | State and memory — short-term, long-term, DatabaseSessionService |
-| 4 | Multi-agent patterns — SequentialAgent, ParallelAgent, subagents |
-| 5 | Production — Vertex AI deployment, observability, cost |
-| 6 | Lab — Build and deploy a multi-agent research system |
+## Module Map
 
-> **Coming soon** — lessons are being written. Check back next session.
+| Lesson | Title | Key Concept |
+|--------|-------|-------------|
+| 1 | ADK Mental Model | Hierarchical trees · LlmAgent, SequentialAgent, ParallelAgent, LoopAgent · A2A |
+| 2 | Your First ADK Agent | @tool decorator · Runner · run_async() · adk dev · built-in tools |
+| 3 | State and Memory | session state · ToolContext · DatabaseSessionService · MemoryService |
+| 4 | Multi-Agent Patterns | SequentialAgent · ParallelAgent · LoopAgent · LlmAgent orchestrator · AgentTool |
+| 5 | Production | adk deploy · Vertex AI · Cloud Trace · cost model · adk eval |
+| Lab | Multi-Agent Research System | Full project: planner → parallel search → critic loop → Vertex AI deploy |
+
+---
+
+## Setup
+
+Install dependencies before starting Lesson 1:
+
+```bash
+pip install google-adk>=2.2.0
+
+# For Vertex AI deployment (Lesson 5 and Lab — optional):
+pip install "google-cloud-aiplatform[adk]"
+
+# Authenticate with Google (for Vertex AI):
+gcloud auth application-default login
+```
+
+Set your API key (get one free at [aistudio.google.com](https://aistudio.google.com)):
+
+```bash
+export GOOGLE_API_KEY="your-google-ai-studio-key"
+```
+
+Python 3.10–3.13 required. All code examples are tested against ADK 2.2.x.
+
+---
+
+<Callout type="tip">
+Optional elective — this module is not required to complete the AI Agents course. Take it when you want managed, auditable multi-agent deployment on Google Cloud, or when you are evaluating ADK for a production system.
+</Callout>
