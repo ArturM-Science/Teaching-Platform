@@ -31,7 +31,7 @@ By the end of this module you will have a **Multi-Agent Research System**: a thr
 <LearningObjectives items={[
   "Build hierarchical agent trees where a root LlmAgent delegates to sub-agents",
   "Compose SequentialAgent, ParallelAgent, and LoopAgent for different control flows",
-  "Use the @tool decorator and ToolContext to pass data through session state",
+  "Define tools as plain Python functions and use ToolContext to pass data through session state",
   "Persist sessions with DatabaseSessionService and manage cross-session memory",
   "Use the A2A protocol to call agents across framework boundaries",
   "Deploy to Vertex AI Agent Engine with adk deploy",
@@ -44,7 +44,7 @@ By the end of this module you will have a **Multi-Agent Research System**: a thr
 | Lesson | Title | Key Concept |
 |--------|-------|-------------|
 | 1 | ADK Mental Model | Hierarchical trees · LlmAgent, SequentialAgent, ParallelAgent, LoopAgent · A2A |
-| 2 | Your First ADK Agent | @tool decorator · Runner · run_async() · adk dev · built-in tools |
+| 2 | Your First ADK Agent | Plain function tools · Runner · run_async() · adk dev · built-in tools |
 | 3 | State and Memory | session state · ToolContext · DatabaseSessionService · MemoryService |
 | 4 | Multi-Agent Patterns | SequentialAgent · ParallelAgent · LoopAgent · LlmAgent orchestrator · AgentTool |
 | 5 | Production | adk deploy · Vertex AI · Cloud Trace · cost model · adk eval |

@@ -94,11 +94,9 @@ root_orchestrator (LlmAgent)
 # tools.py — research tools for the ADK lab
 # TODO: implement the stub functions to return real data (or keep stubs for now)
 
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 
 
-@tool
 def plan_research(question: str, tool_context: ToolContext) -> dict:
     """Break a research question into two focused sub-questions.
 
@@ -121,7 +119,6 @@ def plan_research(question: str, tool_context: ToolContext) -> dict:
     return {"sub_questions": sub_questions, "original_question": question}
 
 
-@tool
 def search_web(tool_context: ToolContext) -> dict:
     """Search the web for the first sub-question in the research plan.
 
@@ -150,7 +147,6 @@ def search_web(tool_context: ToolContext) -> dict:
     return {"results": results, "sub_question": sub_question}
 
 
-@tool
 def search_academic(tool_context: ToolContext) -> dict:
     """Search academic databases for the second sub-question in the research plan.
 
@@ -178,7 +174,6 @@ def search_academic(tool_context: ToolContext) -> dict:
     return {"results": results, "sub_question": sub_question}
 
 
-@tool
 def synthesise_results(tool_context: ToolContext) -> dict:
     """Combine web and academic results into a synthesis draft.
 
@@ -216,7 +211,6 @@ def synthesise_results(tool_context: ToolContext) -> dict:
     return {"draft": draft, "source_count": total_sources}
 
 
-@tool
 def critique_synthesis(tool_context: ToolContext) -> dict:
     """Review the synthesis draft and produce a verdict.
 

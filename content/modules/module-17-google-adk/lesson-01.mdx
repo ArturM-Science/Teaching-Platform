@@ -47,9 +47,6 @@ An agent backed by a language model. It reasons, calls tools, and decides what t
 
 ```python
 from google.adk.agents import LlmAgent
-from google.adk.tools import tool
-
-@tool
 def search_web(query: str) -> dict:
     """Search the web for a given query and return results."""
     # Real implementation would call a search API
@@ -145,12 +142,9 @@ The four workflow agent types compose naturally. A `SequentialAgent` can contain
 
 ## Tools in ADK
 
-Tools are Python functions decorated with `@tool`. The decorator reads the function's docstring for the description and its type hints for the parameter schema. ADK passes this schema to the LLM so it knows how to call the tool correctly.
+Tools are plain Python functions — no decorator needed in ADK 2.x. ADK inspects each function automatically: the docstring becomes the tool description, and the type hints generate the parameter schema the LLM uses to call the tool correctly.
 
 ```python
-from google.adk.tools import tool
-
-@tool
 def summarise_text(text: str, max_words: int = 100) -> dict:
     """Summarise the given text to at most max_words words.
     
@@ -258,9 +252,6 @@ Every ADK project uses the same core imports. Memorise this pattern:
 ```python
 # Core agent classes
 from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent, LoopAgent
-
-# Tool decorator
-from google.adk.tools import tool
 
 # Session management
 from google.adk.sessions import InMemorySessionService, DatabaseSessionService

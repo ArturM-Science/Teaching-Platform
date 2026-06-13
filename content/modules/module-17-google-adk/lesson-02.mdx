@@ -10,7 +10,7 @@ slug: "lesson-02"
 Building your first ADK agent takes about 50 lines of Python. This lesson walks through every line — what it does, why it is there, and what happens at runtime.
 
 <LearningObjectives items={[
-  "Define a tool using the @tool decorator and understand how docstrings become descriptions",
+  "Define a tool as a plain Python function and understand how docstrings become descriptions",
   "Construct an LlmAgent with a model, tools, and instruction",
   "Set up an InMemorySessionService and create a session",
   "Use Runner and run_async to execute an agent turn",
@@ -20,16 +20,15 @@ Building your first ADK agent takes about 50 lines of Python. This lesson walks 
 
 ## Step 1: Define your tools
 
-Tools are the actions your agent can take. In ADK, a tool is a Python function decorated with `@tool`. The decorator does three things:
+Tools are the actions your agent can take. In ADK 2.x, a tool is a plain Python function — no decorator needed. ADK inspects each function automatically and does three things:
 
 1. Reads the **docstring** and uses it as the tool description (what the LLM sees)
 2. Reads the **type hints** and generates a JSON schema for the parameters
 3. Registers the function so ADK can call it when the LLM requests it
 
-```python
-from google.adk.tools import tool
+Pass the function directly in the `tools=[]` list and ADK handles the rest.
 
-@tool
+```python
 def get_weather(city: str) -> dict:
     """Get the current weather for a given city.
     
@@ -48,7 +47,6 @@ def get_weather(city: str) -> dict:
     return weather_data.get(city, {"temperature_c": 20, "condition": "Unknown", "humidity_percent": 60})
 
 
-@tool
 def convert_temperature(celsius: float, target_unit: str) -> dict:
     """Convert a temperature from Celsius to another unit.
     
@@ -76,8 +74,8 @@ The docstring is not just documentation — it is the description the LLM reads 
 <Quiz
   question="Where does ADK get the tool description that it shows to the LLM?"
   options={[
-    { text: "From a separate metadata dict you pass to the @tool decorator", correct: false, explanation: "The @tool decorator in ADK 2.0 does not require a separate metadata dict. It reads the description from the function's docstring automatically." },
-    { text: "From the function's docstring", correct: true, explanation: "The @tool decorator reads the function's docstring and uses it as the tool description. The Args section of the docstring becomes per-parameter descriptions." },
+    { text: "From a name= parameter you pass when registering the tool", correct: false, explanation: "ADK 2.x does not require any registration step. You pass the plain function to tools=[] and ADK reads its docstring automatically." },
+    { text: "From the function's docstring", correct: true, explanation: "ADK inspects each function's docstring and uses it as the tool description. The Args section becomes per-parameter descriptions. No decorator or registration needed." },
     { text: "From the function name, converted from snake_case to a sentence", correct: false, explanation: "The function name is used as the tool name (e.g., get_weather), but the description comes from the docstring. Without a docstring, the LLM gets minimal guidance on when to call the tool." },
   ]}
 />
@@ -107,7 +105,7 @@ A few notes on these fields:
 - **`name`**: Identifies this agent in logs and traces. Use a descriptive, lowercase, underscore-separated name.
 - **`model`**: The Gemini model to use. `gemini-2.5-flash` is the fastest and cheapest capable model. Use `gemini-2.0-pro` when you need higher reasoning quality.
 - **`instruction`**: The system prompt. This shapes how the agent behaves, what it prioritises, and what persona it adopts. It does not change between turns.
-- **`tools`**: List of `@tool`-decorated functions this agent can call.
+- **`tools`**: List of plain Python functions this agent can call as tools.
 
 ## Step 3: Set up a session service
 
@@ -220,13 +218,11 @@ Here is a complete, runnable script that brings all the pieces together:
 ```python
 import asyncio
 from google.adk.agents import LlmAgent
-from google.adk.tools import tool
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 from google.genai.types import Content, Part
 
 
-@tool
 def get_weather(city: str) -> dict:
     """Get the current weather for a given city.
     
@@ -244,7 +240,6 @@ def get_weather(city: str) -> dict:
     return weather_data.get(city, {"temperature_c": 20, "condition": "Unknown", "humidity_percent": 60})
 
 
-@tool
 def convert_temperature(celsius: float, target_unit: str) -> dict:
     """Convert a temperature from Celsius to Fahrenheit or Kelvin.
     
@@ -348,7 +343,7 @@ analyst = LlmAgent(
 ```
 
 <Callout type="warning">
-Built-in tools have a hard constraint: **only one built-in tool is allowed per root agent**, and you cannot mix a built-in tool with other `@tool`-decorated functions in the same agent. If you need both web search and a custom tool, the pattern is to put the built-in in a sub-agent and call it from an `LlmAgent` orchestrator that has your custom tools.
+Built-in tools have a hard constraint: **only one built-in tool is allowed per root agent**, and you cannot mix a built-in tool with other custom functions in the same agent. If you need both web search and a custom tool, the pattern is to put the built-in in a sub-agent and call it from an `LlmAgent` orchestrator that has your custom tools.
 </Callout>
 
 ## Local development UI
@@ -385,7 +380,7 @@ adk dev
 <Checkpoint
   moduleSlug="module-17-google-adk"
   items={[
-    "I can write a @tool-decorated function with a proper docstring and type hints",
+    "I can write a tool function with a proper docstring and type hints and pass it to tools=[]",
     "I can construct an LlmAgent with name, model, tools, and instruction",
     "I understand the role of InMemorySessionService and its limitations",
     "I can write an async runner loop that extracts the final response",

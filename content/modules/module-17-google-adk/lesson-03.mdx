@@ -50,10 +50,8 @@ Memory service (long-term):
 Tools access session state via `tool_context`. This is an object ADK passes to your tool function as a special parameter — you declare it in your function signature and ADK injects it automatically.
 
 ```python
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 
-@tool
 def store_research_results(results: list, topic: str, tool_context: ToolContext) -> dict:
     """Store research results in session state for downstream agents.
     
@@ -73,7 +71,6 @@ def store_research_results(results: list, topic: str, tool_context: ToolContext)
     return {"stored": True, "count": len(results)}
 
 
-@tool
 def get_research_results(tool_context: ToolContext) -> dict:
     """Retrieve previously stored research results from session state.
     
@@ -280,14 +277,12 @@ When a `MemoryService` is attached, the agent can store and retrieve facts acros
 import asyncio
 import os
 from google.adk.agents import LlmAgent
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 from google.adk.sessions import DatabaseSessionService
 from google.adk.runners import Runner
 from google.genai.types import Content, Part
 
 
-@tool
 def save_note(content: str, tag: str, tool_context: ToolContext) -> dict:
     """Save a note to the session for later retrieval.
     
@@ -306,7 +301,6 @@ def save_note(content: str, tag: str, tool_context: ToolContext) -> dict:
     return {"saved": True, "note_id": note_id, "total_notes": len(notes)}
 
 
-@tool
 def list_notes(tag: str = "", tool_context: ToolContext = None) -> dict:
     """List all saved notes, optionally filtered by tag.
     

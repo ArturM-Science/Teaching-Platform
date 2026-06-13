@@ -25,11 +25,9 @@ Single agents hit a ceiling quickly. The real power of ADK emerges when you comp
 
 ```python
 from google.adk.agents import LlmAgent, SequentialAgent
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 
 
-@tool
 def plan_research(question: str, tool_context: ToolContext) -> dict:
     """Break a research question into specific sub-questions.
     
@@ -51,7 +49,6 @@ def plan_research(question: str, tool_context: ToolContext) -> dict:
     return {"sub_questions": sub_questions}
 
 
-@tool
 def fetch_research(tool_context: ToolContext) -> dict:
     """Fetch research results for all planned sub-questions.
     
@@ -71,7 +68,6 @@ def fetch_research(tool_context: ToolContext) -> dict:
     return {"results": results}
 
 
-@tool
 def synthesise_findings(tool_context: ToolContext) -> dict:
     """Synthesise all research findings into a final report.
     
@@ -146,11 +142,9 @@ When you run `research_pipeline`, ADK runs `planner_agent` first, then `research
 
 ```python
 from google.adk.agents import LlmAgent, ParallelAgent
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 
 
-@tool
 def search_web(query: str, tool_context: ToolContext) -> dict:
     """Search the web for a query and store results in session state.
     
@@ -166,7 +160,6 @@ def search_web(query: str, tool_context: ToolContext) -> dict:
     return {"results": results, "source": "web"}
 
 
-@tool
 def search_academic(query: str, tool_context: ToolContext) -> dict:
     """Search academic databases for a query and store results in session state.
     
@@ -318,11 +311,9 @@ With `sub_agents` on an `LlmAgent`, each sub-agent is exposed to the orchestrato
 
 ```python
 from google.adk.agents import LlmAgent, LoopAgent
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 
 
-@tool
 def write_or_improve_draft(feedback: str, tool_context: ToolContext) -> dict:
     """Write or improve the research draft based on feedback.
     
@@ -343,7 +334,6 @@ def write_or_improve_draft(feedback: str, tool_context: ToolContext) -> dict:
     return {"draft": draft, "iteration": iteration}
 
 
-@tool
 def review_draft(tool_context: ToolContext) -> dict:
     """Review the draft and decide if it meets quality standards.
     
@@ -478,14 +468,12 @@ Here is a realistic research system that uses all three patterns:
 ```python
 import asyncio
 from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
-from google.adk.tools import tool
-from google.adk.tools.tool_context import ToolContext
+from google.adk.tools import ToolContext
 from google.adk.sessions import InMemorySessionService
 from google.adk.runners import Runner
 from google.genai.types import Content, Part
 
 
-@tool
 def extract_topics(question: str, tool_context: ToolContext) -> dict:
     """Extract key topics from a research question."""
     topics = question.split()[:5]  # Simplified extraction
@@ -494,7 +482,6 @@ def extract_topics(question: str, tool_context: ToolContext) -> dict:
     return {"topics": topics}
 
 
-@tool
 def search_by_topic(topic: str, tool_context: ToolContext) -> dict:
     """Search for information on a specific topic."""
     result = f"Findings about '{topic}': [stub data]"
@@ -504,7 +491,6 @@ def search_by_topic(topic: str, tool_context: ToolContext) -> dict:
     return {"topic": topic, "finding": result}
 
 
-@tool
 def write_report(tool_context: ToolContext) -> dict:
     """Write a final report from all collected findings."""
     question = tool_context.state.get("original_question", "")
