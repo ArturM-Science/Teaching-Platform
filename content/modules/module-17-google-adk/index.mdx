@@ -54,25 +54,55 @@ By the end of this module you will have a **Multi-Agent Research System**: a thr
 
 ## Setup
 
-Install dependencies before starting Lesson 1:
+Python 3.10–3.13 required. All code examples are tested against ADK 2.2.x.
+
+**Step 1 — Create and activate a virtual environment**
 
 ```bash
-pip install google-adk>=2.2.0
+# Create the venv (do this once per project)
+python -m venv .venv
+
+# Activate it — macOS / Linux
+source .venv/bin/activate
+
+# Activate it — Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+
+# Activate it — Windows (Command Prompt)
+.venv\Scripts\activate.bat
+```
+
+You should see `(.venv)` in your prompt. All packages installed after this point stay inside the venv and won't affect your system Python.
+
+**Step 2 — Install dependencies**
+
+```bash
+pip install "google-adk>=2.2.0"
 
 # For Vertex AI deployment (Lesson 5 and Lab — optional):
 pip install "google-cloud-aiplatform[adk]"
 
-# Authenticate with Google (for Vertex AI):
+# Authenticate with Google (for Vertex AI only):
 gcloud auth application-default login
 ```
 
-Set your API key (get one free at [aistudio.google.com](https://aistudio.google.com)):
+**Step 3 — Set your API key inside the venv**
+
+Get a free key at [aistudio.google.com](https://aistudio.google.com), then set it as an environment variable **in the same terminal where the venv is active**:
 
 ```bash
+# macOS / Linux — add to your shell session
 export GOOGLE_API_KEY="your-google-ai-studio-key"
+
+# Windows (PowerShell)
+$env:GOOGLE_API_KEY = "your-google-ai-studio-key"
 ```
 
-Python 3.10–3.13 required. All code examples are tested against ADK 2.2.x.
+To avoid re-setting it every session, add the export line to a `.env` file in your project root and load it with `python-dotenv`, or add it to your shell profile (`~/.zshrc`, `~/.bashrc`).
+
+<Callout type="warning">
+Never commit your API key to git. Add `.env` to your `.gitignore` before you create it.
+</Callout>
 
 ---
 
