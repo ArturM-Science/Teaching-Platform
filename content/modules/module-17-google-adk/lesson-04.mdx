@@ -12,10 +12,11 @@ Single agents hit a ceiling quickly. The real power of ADK emerges when you comp
 <LearningObjectives items={[
   "Build a SequentialAgent pipeline where each stage reads the previous stage's output",
   "Build a ParallelAgent fan-out where multiple agents search concurrently",
+  "Build a LoopAgent that retries until a quality gate passes",
   "Use an LlmAgent as an orchestrator that delegates to sub-agents dynamically",
-  "Compose SequentialAgent and ParallelAgent into nested structures",
+  "Compose SequentialAgent, ParallelAgent, and LoopAgent into nested structures",
   "Register a remote agent as an A2A tool using AgentTool",
-  "Choose between SequentialAgent and LlmAgent orchestrator based on predictability requirements",
+  "Choose the right composition pattern for a given control flow requirement",
 ]} />
 
 ## SequentialAgent: deterministic pipelines
@@ -98,7 +99,7 @@ def synthesise_findings(tool_context: ToolContext) -> dict:
 # Each agent is responsible for one stage of the pipeline
 planner_agent = LlmAgent(
     name="planner",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[plan_research],
     instruction=(
         "You are a research planner. When given a question, use plan_research "
@@ -108,7 +109,7 @@ planner_agent = LlmAgent(
 
 researcher_agent = LlmAgent(
     name="researcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[fetch_research],
     instruction=(
         "You are a researcher. Use fetch_research to retrieve findings for all "
@@ -118,7 +119,7 @@ researcher_agent = LlmAgent(
 
 synthesiser_agent = LlmAgent(
     name="synthesiser",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[synthesise_findings],
     instruction=(
         "You are a synthesis expert. Use synthesise_findings to combine all "
@@ -183,7 +184,7 @@ def search_academic(query: str, tool_context: ToolContext) -> dict:
 
 web_searcher = LlmAgent(
     name="web_searcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_web],
     instruction=(
         "You are a web search specialist. Use the original_question from session state "
@@ -193,7 +194,7 @@ web_searcher = LlmAgent(
 
 academic_searcher = LlmAgent(
     name="academic_searcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_academic],
     instruction=(
         "You are an academic search specialist. Use the original_question from session state "
@@ -230,7 +231,7 @@ from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
 # Step 1: Plan the search
 planner = LlmAgent(
     name="planner",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[plan_research],
     instruction="Break the question into sub-questions and store in session state.",
 )
@@ -244,7 +245,7 @@ parallel_search = ParallelAgent(
 # Step 3: Synthesise all results
 synthesiser = LlmAgent(
     name="synthesiser",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[synthesise_findings],
     instruction=(
         "Combine web_results and academic_results from session state into a report. "
@@ -272,14 +273,14 @@ from google.adk.agents import LlmAgent
 # Sub-agents that the orchestrator can invoke
 web_searcher = LlmAgent(
     name="web_searcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_web],
     instruction="Search the web for the given query and return results.",
 )
 
 critic = LlmAgent(
     name="critic",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[critique_research],
     instruction="Review research findings and identify gaps or inaccuracies.",
 )
@@ -287,7 +288,7 @@ critic = LlmAgent(
 # Orchestrator treats sub-agents as callable tools
 orchestrator = LlmAgent(
     name="orchestrator",
-    model="gemini-2.0-pro",  # Use a stronger model for orchestration
+    model="gemini-2.5-pro",  # Use a stronger model for orchestration
     sub_agents=[web_searcher, critic],
     instruction=(
         "You are a research orchestrator. Given a user's question:\n"
@@ -311,18 +312,114 @@ With `sub_agents` on an `LlmAgent`, each sub-agent is exposed to the orchestrato
   ]}
 />
 
+## LoopAgent: iterative refinement
+
+`LoopAgent` runs its sub-agents repeatedly in a cycle until either `max_iterations` is reached or a sub-agent signals early termination (escalation). This is the right pattern for refinement loops, retry logic, and quality gates.
+
+```python
+from google.adk.agents import LlmAgent, LoopAgent
+from google.adk.tools import tool
+from google.adk.tools.tool_context import ToolContext
+
+
+@tool
+def write_or_improve_draft(feedback: str, tool_context: ToolContext) -> dict:
+    """Write or improve the research draft based on feedback.
+    
+    Args:
+        feedback: Feedback from the previous review, or empty string on first run.
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'draft' string.
+    """
+    existing = tool_context.state.get("draft", "")
+    iteration = tool_context.state.get("iteration", 0) + 1
+    tool_context.state["iteration"] = iteration
+    
+    # In a real system, call an LLM with the feedback to improve the draft
+    draft = existing + f"\n[Revision {iteration} based on: {feedback or 'initial write'}]"
+    tool_context.state["draft"] = draft
+    return {"draft": draft, "iteration": iteration}
+
+
+@tool
+def review_draft(tool_context: ToolContext) -> dict:
+    """Review the draft and decide if it meets quality standards.
+    
+    Args:
+        tool_context: Injected by ADK.
+    
+    Returns:
+        A dict with 'passed' bool, 'feedback' string.
+    """
+    draft = tool_context.state.get("draft", "")
+    iteration = tool_context.state.get("iteration", 0)
+    
+    # In a real system, apply quality criteria: length, citations, structure, etc.
+    passed = len(draft) > 200 or iteration >= 3
+    feedback = "" if passed else "Draft is too brief — add more detail and examples."
+    
+    tool_context.state["review_passed"] = passed
+    tool_context.state["review_feedback"] = feedback
+    return {"passed": passed, "feedback": feedback, "iteration": iteration}
+
+
+drafter = LlmAgent(
+    name="drafter",
+    model="gemini-2.5-flash",
+    tools=[write_or_improve_draft],
+    instruction=(
+        "Write or improve the research draft. Read 'review_feedback' from session state "
+        "for guidance. Call write_or_improve_draft with any feedback you found."
+    ),
+)
+
+reviewer = LlmAgent(
+    name="reviewer",
+    model="gemini-2.5-flash",
+    tools=[review_draft],
+    instruction=(
+        "Review the current draft. Call review_draft. "
+        "If review_passed is True in session state, the loop will stop at max_iterations "
+        "or you can escalate early. Report the outcome clearly."
+    ),
+)
+
+# Runs: drafter → reviewer → drafter → reviewer → ... (up to 4 times)
+refinement_loop = LoopAgent(
+    name="refinement_loop",
+    sub_agents=[drafter, reviewer],
+    max_iterations=4,
+)
+```
+
+<Callout type="insight">
+`LoopAgent` is the right choice when you cannot know in advance how many passes a task needs. A fixed `SequentialAgent` runs each step exactly once. A `LoopAgent` runs the same sequence of steps repeatedly until a condition is met or the iteration cap is hit. It costs more (each iteration adds LLM calls) but is essential for tasks where quality is variable.
+</Callout>
+
+<Quiz
+  question="When is LoopAgent the right choice over SequentialAgent?"
+  options={[
+    { text: "When you want to run the same agents in parallel across multiple inputs", correct: false, explanation: "That is ParallelAgent's job. LoopAgent runs agents sequentially in a cycle, not in parallel." },
+    { text: "When the number of passes needed depends on intermediate quality — you loop until a condition is met", correct: true, explanation: "LoopAgent is designed for iterative refinement: draft → review → revise → review, stopping when quality passes or max_iterations is reached. SequentialAgent always runs exactly once." },
+    { text: "When you need to call the same agent with different inputs at the same time", correct: false, explanation: "That is ParallelAgent's job. LoopAgent calls its sub-agents in order, one at a time, and then repeats the whole cycle." },
+  ]}
+/>
+
 ## When to use which
 
 | Situation | Use |
 |---|---|
-| Steps always happen in the same order | `SequentialAgent` |
+| Steps always happen in the same order, exactly once | `SequentialAgent` |
 | Multiple independent tasks can run at the same time | `ParallelAgent` |
+| You need to retry or refine until quality passes | `LoopAgent` |
 | The order or number of steps depends on intermediate results | `LlmAgent` orchestrator |
 | Some steps are fixed order but one step fans out | `SequentialAgent` wrapping a `ParallelAgent` |
 | A human needs to approve before proceeding | `LlmAgent` orchestrator (can pause and ask) |
 
 <Callout type="insight">
-`SequentialAgent` is deterministic — great for pipelines where the flow never changes. `LlmAgent` as orchestrator is flexible but adds LLM calls for routing decisions. Choose based on whether you need the adaptability. In practice, most production systems use a mix: a fixed outer pipeline (`SequentialAgent`) with one or two adaptive inner steps (`LlmAgent` orchestrator).
+Most production systems combine all four patterns. A common shape: `SequentialAgent` outer pipeline → one step is a `ParallelAgent` fan-out → another step is a `LoopAgent` quality gate → final step is an `LlmAgent` that synthesises and decides. The nesting is the feature.
 </Callout>
 
 ## A2A cross-framework calls with AgentTool
@@ -357,7 +454,7 @@ crewai_writer = AgentTool(
 # ADK orchestrator that calls both remote agents
 orchestrator = LlmAgent(
     name="cross_framework_orchestrator",
-    model="gemini-2.0-pro",
+    model="gemini-2.5-pro",
     tools=[langgraph_researcher, crewai_writer],
     instruction=(
         "You coordinate research and writing across specialised systems.\n"
@@ -422,14 +519,14 @@ def write_report(tool_context: ToolContext) -> dict:
 # Sub-agents for parallel search
 topic_searcher_1 = LlmAgent(
     name="topic_searcher_1",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_by_topic],
     instruction="Search for the first topic in the topics list from session state.",
 )
 
 topic_searcher_2 = LlmAgent(
     name="topic_searcher_2",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_by_topic],
     instruction="Search for the second topic in the topics list from session state.",
 )
@@ -437,7 +534,7 @@ topic_searcher_2 = LlmAgent(
 # Agents for sequential pipeline
 extractor = LlmAgent(
     name="extractor",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[extract_topics],
     instruction="Extract key topics from the question. Call extract_topics.",
 )
@@ -449,7 +546,7 @@ parallel_searchers = ParallelAgent(
 
 writer = LlmAgent(
     name="writer",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[write_report],
     instruction="Write the final report using all findings. Call write_report.",
 )
@@ -495,8 +592,9 @@ if __name__ == "__main__":
   items={[
     "I can build a SequentialAgent pipeline where each stage uses session state to pass data",
     "I can build a ParallelAgent that runs multiple searchers concurrently",
+    "I can build a LoopAgent with max_iterations for iterative refinement",
     "I understand when to use LlmAgent as orchestrator vs SequentialAgent",
-    "I can nest SequentialAgent and ParallelAgent for fan-out/fan-in patterns",
+    "I can nest SequentialAgent, ParallelAgent, and LoopAgent for complex control flows",
     "I can register a remote agent as an A2A tool using AgentTool",
   ]}
   next="/modules/module-17-google-adk/lesson-05"

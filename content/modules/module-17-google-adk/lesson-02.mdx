@@ -91,7 +91,7 @@ from google.adk.agents import LlmAgent
 
 weather_agent = LlmAgent(
     name="weather_assistant",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[get_weather, convert_temperature],
     instruction="""You are a helpful weather assistant.
     
@@ -105,7 +105,7 @@ Always respond in a friendly, conversational tone and include the relevant weath
 A few notes on these fields:
 
 - **`name`**: Identifies this agent in logs and traces. Use a descriptive, lowercase, underscore-separated name.
-- **`model`**: The Gemini model to use. `gemini-2.0-flash` is the fastest and cheapest capable model. Use `gemini-2.0-pro` when you need higher reasoning quality.
+- **`model`**: The Gemini model to use. `gemini-2.5-flash` is the fastest and cheapest capable model. Use `gemini-2.0-pro` when you need higher reasoning quality.
 - **`instruction`**: The system prompt. This shapes how the agent behaves, what it prioritises, and what persona it adopts. It does not change between turns.
 - **`tools`**: List of `@tool`-decorated functions this agent can call.
 
@@ -264,7 +264,7 @@ def convert_temperature(celsius: float, target_unit: str) -> dict:
 
 weather_agent = LlmAgent(
     name="weather_assistant",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[get_weather, convert_temperature],
     instruction=(
         "You are a helpful weather assistant. Use get_weather to check conditions "
@@ -313,6 +313,42 @@ if __name__ == "__main__":
 
 <Callout type="warning">
 ADK 2.0 is async throughout. `runner.run_async()` returns an async generator — you must `async for` over it inside an `async def` function. If you are in a synchronous context (e.g., a script), wrap everything in `asyncio.run(main())`. Do not try to call `next()` on the generator or iterate it synchronously — you will get a runtime error.
+</Callout>
+
+## Built-in tools
+
+ADK ships two built-in tools that need no implementation on your part — they connect directly to Google infrastructure.
+
+**`google_search`** gives your agent real-time web search via Google Search.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.tools import google_search
+
+search_agent = LlmAgent(
+    name="searcher",
+    model="gemini-2.5-flash",
+    tools=[google_search],
+    instruction="Answer questions using real-time web search.",
+)
+```
+
+**`BuiltInCodeExecutor`** lets your agent write and run Python in a secure sandbox — useful for data analysis, calculations, and file processing.
+
+```python
+from google.adk.agents import LlmAgent
+from google.adk.code_executors import BuiltInCodeExecutor
+
+analyst = LlmAgent(
+    name="analyst",
+    model="gemini-2.5-flash",
+    code_executor=BuiltInCodeExecutor(),
+    instruction="Answer data questions by writing and running Python code.",
+)
+```
+
+<Callout type="warning">
+Built-in tools have a hard constraint: **only one built-in tool is allowed per root agent**, and you cannot mix a built-in tool with other `@tool`-decorated functions in the same agent. If you need both web search and a custom tool, the pattern is to put the built-in in a sub-agent and call it from an `LlmAgent` orchestrator that has your custom tools.
 </Callout>
 
 ## Local development UI

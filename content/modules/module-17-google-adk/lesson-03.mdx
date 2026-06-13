@@ -261,7 +261,7 @@ memory_service = InMemoryMemoryService()
 
 agent = LlmAgent(
     name="persistent_assistant",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[my_tools],
     instruction="You are a helpful assistant with persistent memory.",
     memory_service=memory_service,  # Attach memory service to agent
@@ -327,7 +327,7 @@ def list_notes(tag: str = "", tool_context: ToolContext = None) -> dict:
 
 note_agent = LlmAgent(
     name="note_keeper",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[save_note, list_notes],
     instruction=(
         "You are a helpful note-taking assistant. "

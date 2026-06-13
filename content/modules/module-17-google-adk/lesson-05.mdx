@@ -142,7 +142,7 @@ Each trace shows a hierarchy of spans:
 ```
 agent_turn (root span)
 ├── llm_call: planner                    # 450ms
-│   └── model: gemini-2.0-flash
+│   └── model: gemini-2.5-flash
 ├── tool_call: extract_topics            # 12ms
 ├── agent_call: parallel_search          # 890ms
 │   ├── agent_call: web_searcher         # 890ms (concurrent)
@@ -163,12 +163,12 @@ Locally, traces are written to `~/.adk/traces/` as JSON files. You can read them
 
 ADK's cost is almost entirely Gemini API calls. Every LLM call costs money; tool calls do not. Understanding your cost model before production is essential.
 
-### Gemini pricing (approximate, verify at cloud.google.com/vertex-ai/pricing)
+### Gemini pricing (approximate — always verify at cloud.google.com/vertex-ai/pricing)
 
 | Model | Input (per 1M tokens) | Output (per 1M tokens) |
 |---|---|---|
-| Gemini 2.0 Flash | ~$0.10 | ~$0.40 |
-| Gemini 2.0 Pro | ~$1.25 | ~$5.00 |
+| Gemini 2.5 Flash | ~$0.075 | ~$0.30 |
+| Gemini 2.5 Pro | ~$1.25 | ~$10.00 |
 
 ### Counting LLM calls in a pipeline
 
@@ -177,10 +177,10 @@ SequentialAgent([planner, parallel_search, synthesiser])
     where parallel_search = ParallelAgent([web_searcher, academic_searcher])
 
 LLM calls per pipeline run:
-  - planner:           1 call (gemini-2.0-flash)
-  - web_searcher:      1 call (gemini-2.0-flash)
-  - academic_searcher: 1 call (gemini-2.0-flash)
-  - synthesiser:       1 call (gemini-2.0-flash)
+  - planner:           1 call (gemini-2.5-flash)
+  - web_searcher:      1 call (gemini-2.5-flash)
+  - academic_searcher: 1 call (gemini-2.5-flash)
+  - synthesiser:       1 call (gemini-2.5-flash)
 
 Total: 4 LLM calls per pipeline run
 
@@ -241,7 +241,7 @@ gpt_critic = LlmAgent(
 pipeline = SequentialAgent(
     name="mixed_model_pipeline",
     sub_agents=[
-        gemini_planner,      # LlmAgent(model="gemini-2.0-flash")
+        gemini_planner,      # LlmAgent(model="gemini-2.5-flash")
         claude_synthesiser,  # LlmAgent(model=LiteLlm("anthropic/claude-haiku-4-5-20251001"))
         gpt_critic,          # LlmAgent(model=LiteLlm("openai/gpt-4o"))
     ],

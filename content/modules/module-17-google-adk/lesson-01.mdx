@@ -11,7 +11,7 @@ Google's Agent Development Kit (ADK 2.0) is built around one central idea: agent
 
 <LearningObjectives items={[
   "Describe ADK's hierarchical tree model and why it differs from flat agent lists",
-  "Distinguish between LlmAgent, SequentialAgent, and ParallelAgent",
+  "Distinguish between LlmAgent, SequentialAgent, ParallelAgent, and LoopAgent",
   "Explain what the A2A protocol enables that regular Python function calls cannot",
   "Compare ADK with LangGraph and CrewAI at the design philosophy level",
   "Read basic ADK imports and know where each class comes from",
@@ -57,7 +57,7 @@ def search_web(query: str) -> dict:
 
 researcher = LlmAgent(
     name="researcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_web],
     instruction="You are a research assistant. Search for information and summarise your findings clearly.",
 )
@@ -95,8 +95,43 @@ fan_out = ParallelAgent(
 
 Each sub-agent in a `ParallelAgent` gets its own execution context but shares the same session state. After all branches finish, the next agent in the pipeline can read all their results.
 
+### LoopAgent
+
+Runs its sub-agents repeatedly in a cycle. Useful for iterative refinement: draft → review → improve → review, until the quality gate passes or a maximum number of iterations is reached.
+
+```python
+from google.adk.agents import LlmAgent, LoopAgent
+
+drafter = LlmAgent(
+    name="drafter",
+    model="gemini-2.5-flash",
+    tools=[write_draft],
+    instruction="Write or improve the research draft based on any feedback in session state.",
+)
+
+quality_checker = LlmAgent(
+    name="quality_checker",
+    model="gemini-2.5-flash",
+    tools=[check_quality],
+    instruction=(
+        "Review the draft in session state. Call check_quality. "
+        "If quality passes, signal escalation to stop the loop. "
+        "Otherwise write specific feedback to session state for the drafter."
+    ),
+)
+
+# Runs drafter → quality_checker, then repeats — up to 5 times
+refinement_loop = LoopAgent(
+    name="refinement_loop",
+    sub_agents=[drafter, quality_checker],
+    max_iterations=5,
+)
+```
+
+`LoopAgent` always stops at `max_iterations`. A sub-agent can also stop the loop early by signalling escalation — the most common pattern is having the reviewer write a `"done": True` flag to session state and having the orchestrator check it, or using the agent's escalation action to break the cycle.
+
 <Callout type="insight">
-The three agent types compose naturally. A `SequentialAgent` can contain a `ParallelAgent` as one of its steps. A `ParallelAgent` can contain `LlmAgent` branches. A `LlmAgent` can have a `SequentialAgent` as a sub-agent tool. This composability is what makes ADK expressive without being complex.
+The four workflow agent types compose naturally. A `SequentialAgent` can contain a `ParallelAgent` as one of its steps. A `LoopAgent` can wrap a `SequentialAgent` to retry a whole pipeline until quality passes. An `LlmAgent` orchestrator can call any of the others as sub-agents. This composability is what makes ADK expressive without being complex.
 </Callout>
 
 <Quiz
@@ -160,7 +195,7 @@ langgraph_research_tool = AgentTool(
 
 orchestrator = LlmAgent(
     name="orchestrator",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[langgraph_research_tool],
     instruction="Decompose the user's question and delegate research to the appropriate specialist.",
 )
@@ -170,6 +205,8 @@ The `LlmAgent` orchestrator does not know or care that `langgraph_research_tool`
 
 <Callout type="insight">
 The A2A protocol means your ADK agent can call a LangGraph pipeline as a peer — the frameworks are interoperable at the network level, not just the Python level. Two teams using different frameworks can still compose their agents into a single system without forcing either team to change their framework.
+
+A2A is no longer just a Google project. In mid-2025 it was donated to the **Linux Foundation** and ratified as **A2A Protocol v1.0** — an open standard governed by a Technical Steering Committee including AWS, Cisco, Google, IBM, Microsoft, Salesforce, SAP, and ServiceNow. This means the protocol will be maintained independently of any single vendor and is safe to build on long-term.
 </Callout>
 
 <Quiz
@@ -220,7 +257,7 @@ Every ADK project uses the same core imports. Memorise this pattern:
 
 ```python
 # Core agent classes
-from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent, LoopAgent
 
 # Tool decorator
 from google.adk.tools import tool
@@ -252,7 +289,7 @@ pip install google-cloud-aiplatform[adk]
   moduleSlug="module-17-google-adk"
   items={[
     "I can describe the hierarchical tree model and why it aids auditability",
-    "I know the difference between LlmAgent, SequentialAgent, and ParallelAgent",
+    "I know the difference between LlmAgent, SequentialAgent, ParallelAgent, and LoopAgent",
     "I understand what the A2A protocol enables at the network level",
     "I can explain when to choose ADK over LangGraph or CrewAI",
     "I recognise the core ADK import structure",

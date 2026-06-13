@@ -305,7 +305,7 @@ from tools import (
 # ─────────────────────────────────────────────
 planner = LlmAgent(
     name="planner",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[plan_research],
     instruction=(
         "You are a research planner. Given a research question, use plan_research "
@@ -320,7 +320,7 @@ planner = LlmAgent(
 # ─────────────────────────────────────────────
 web_searcher = LlmAgent(
     name="web_searcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_web],
     instruction=(
         "You are a web search specialist. Call search_web to retrieve web results "
@@ -333,7 +333,7 @@ web_searcher = LlmAgent(
 # ─────────────────────────────────────────────
 academic_searcher = LlmAgent(
     name="academic_searcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[search_academic],
     instruction=(
         "You are an academic search specialist. Call search_academic to retrieve "
@@ -354,7 +354,7 @@ parallel_searchers = None  # Replace with ParallelAgent(...)
 # ─────────────────────────────────────────────
 synthesiser = LlmAgent(
     name="synthesiser",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[synthesise_results],
     instruction=(
         "You are a research synthesiser. Call synthesise_results to combine "
@@ -375,7 +375,7 @@ research_pipeline = None  # Replace with SequentialAgent(...)
 # ─────────────────────────────────────────────
 critic = LlmAgent(
     name="critic",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     tools=[critique_synthesis],
     instruction=(
         "You are a research critic. Call critique_synthesis to review the synthesis "
@@ -415,7 +415,7 @@ research_pipeline = SequentialAgent(
 # Completed root_orchestrator
 root_orchestrator = LlmAgent(
     name="root_orchestrator",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     sub_agents=[research_pipeline, critic],
     instruction=(
         "You are a research orchestrator. Given a research question:\n"
@@ -575,7 +575,7 @@ env_vars:
 Create a matching `requirements.txt`:
 
 ```
-google-adk>=2.0.0
+google-adk>=2.2.0
 google-cloud-aiplatform[adk]>=1.60.0
 ```
 
