@@ -86,22 +86,39 @@ pip install "google-cloud-aiplatform[adk]"
 gcloud auth application-default login
 ```
 
-**Step 3 — Set your API key inside the venv**
+**Step 3 — Store your API key in a `.env` file**
 
-Get a free key at [aistudio.google.com](https://aistudio.google.com), then set it as an environment variable **in the same terminal where the venv is active**:
+Get a free key at [aistudio.google.com](https://aistudio.google.com).
+
+First, add `.env` to `.gitignore` so the key is never committed:
 
 ```bash
-# macOS / Linux — add to your shell session
-export GOOGLE_API_KEY="your-google-ai-studio-key"
-
-# Windows (PowerShell)
-$env:GOOGLE_API_KEY = "your-google-ai-studio-key"
+echo ".env" >> .gitignore
 ```
 
-To avoid re-setting it every session, add the export line to a `.env` file in your project root and load it with `python-dotenv`, or add it to your shell profile (`~/.zshrc`, `~/.bashrc`).
+Then create a `.env` file at the root of your project with this content:
+
+```
+GOOGLE_API_KEY=your-google-ai-studio-key
+```
+
+Install `python-dotenv` so your scripts can load it:
+
+```bash
+pip install python-dotenv
+```
+
+At the top of every Python script or notebook, add these two lines **before** any ADK imports:
+
+```python
+from dotenv import load_dotenv
+load_dotenv()
+```
+
+`load_dotenv()` reads `.env` and injects the values into `os.environ`. Any code that calls `os.getenv("GOOGLE_API_KEY")` after this point will find the key automatically — including the ADK internals.
 
 <Callout type="warning">
-Never commit your API key to git. Add `.env` to your `.gitignore` before you create it.
+Always add `.env` to `.gitignore` before creating the file. If you commit it first, rotate your key immediately at [aistudio.google.com](https://aistudio.google.com) — keys in git history are compromised even after deletion.
 </Callout>
 
 ---
