@@ -196,7 +196,7 @@ def run_with_fallback(user_message: str) -> str:
         tier = "secondary"
         client = anthropic.Anthropic()
         response = client.messages.create(
-            model="claude-haiku-3-5-20251001",
+            model="claude-haiku-4-5-20251001",
             max_tokens=512,
             messages=[{"role": "user", "content": user_message}]
         ).content[0].text

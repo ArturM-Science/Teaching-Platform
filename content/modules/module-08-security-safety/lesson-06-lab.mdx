@@ -217,6 +217,10 @@ for probe in set(r["probe_name"] for r in baseline):
 
 Document the delta in `scan_report_hardened.json` (add a `comparison` key with your findings).
 
+<Callout type="tip">
+Don't let these findings live only in this lab. Each vulnerability you just confirmed is, by definition, a failure mode your agent currently exhibits — which makes it exactly the kind of case that belongs in the eval harness you built in Module 4. Add the order-notes injection example (and the other two findings) as **regression cases** in that suite, the same way you'd add a regression case for a functional bug: verify the case fails on the unguarded agent, then confirms a pass once the guardrail is applied. That closes the loop — a future prompt or model change that reopens this vulnerability gets caught in CI, not in the next red-team pass.
+</Callout>
+
 ## Step 5 — Write the compliance posture document
 
 Produce `compliance_posture.md`. Template:

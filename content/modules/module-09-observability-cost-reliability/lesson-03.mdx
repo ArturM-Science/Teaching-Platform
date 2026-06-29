@@ -17,8 +17,8 @@ Every major frontier model prices input and output tokens separately, with outpu
 |---|---|---|---|
 | GPT-4o | $2.50 | $10.00 | 4× |
 | GPT-4o-mini | $0.15 | $0.60 | 4× |
-| Claude Sonnet 3.7 | $3.00 | $15.00 | 5× |
-| Claude Haiku 3.5 | $0.80 | $4.00 | 5× |
+| Claude Sonnet 4.6 | $3.00 | $15.00 | 5× |
+| Claude Haiku 4.5 | $1.00 | $5.00 | 5× |
 | Gemini 1.5 Flash | $0.075 | $0.30 | 4× |
 
 The reason: input tokens are processed in parallel (one forward pass reads all input simultaneously), while output tokens are generated autoregressively — each token requires a full forward pass that depends on all previous tokens. More compute per output token → higher price.
@@ -155,6 +155,24 @@ Semantic caching stores previous LLM responses indexed by the embedding of the q
 Works well: high-traffic FAQ bots, dashboards with a small set of common queries, translation services with repetitive source texts.
 
 Works poorly: agents processing unique user-provided documents, creative writing, search with diverse queries — cache hit rate will be too low to justify the overhead.
+
+## Validate cost cuts against your eval suite
+
+Every optimisation above — model routing, semantic caching, swapping to a cheaper model tier — is also a behaviour change, not just a cost change. "70% of queries route to GPT-4o-mini" is only a win if those queries still pass the same quality bar they did on the bigger model. Don't ship a cost cut on the strength of the dollar savings alone.
+
+Run the eval harness you built in Module 4 against both configurations before and after the change, broken down by category, not as one blended score:
+
+```python
+baseline_results = run_eval_suite(model="gpt-4o", eval_cases=eval_suite)
+optimised_results = run_eval_suite(model="gpt-4o-mini", eval_cases=eval_suite)
+
+for category in ["happy", "adversarial", "edge", "regression"]:
+    base_score = score_by_category(baseline_results, category)
+    opt_score = score_by_category(optimised_results, category)
+    print(f"{category}: {base_score:.0%} → {opt_score:.0%}")
+```
+
+A drop that's concentrated in one category (say, adversarial cases failing more often on the cheaper model) is a different decision than a uniform small drop across all categories — the per-category breakdown tells you which. "Routing 70% of traffic to the smaller model holds 97% of eval performance at 60% of the cost" is a claim you can defend in a review. "It's cheaper and seems fine" is not.
 
 ## Interactive cost explorer
 

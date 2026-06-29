@@ -9,6 +9,39 @@ slug: "lesson-02"
 
 An eval suite is only as good as the cases in it. A suite of 100 happy-path cases will pass even when your agent is broken in the ways that matter. This lesson covers how to build a dataset that actually finds failures — where to get cases, how to categorise them, and how to know when your coverage is good enough.
 
+## Find your failure modes before you categorise anything
+
+The four categories below (happy path, adversarial, edge, regression) are a useful skeleton — but don't fill them in from imagination. The most common mistake in eval dataset construction isn't missing a category, it's writing plausible-sounding cases for categories you invented before reading a single real transcript. That produces a suite that's internally consistent and tests nothing your agent actually gets wrong.
+
+The discipline that fixes this is **error analysis**, and it has three steps, done in order:
+
+**1. Open coding.** Pull 30–100 real transcripts (production logs if you have them, realistic synthetic conversations if you don't yet — Module 9 covers how to capture these as traces). Read each one and write a short free-text note on anything wrong, with no predefined categories. Resist the urge to bucket as you go — the buckets come later, and bucketing early makes you see only the failure modes you already expected.
+
+**2. Axial coding.** Once you have 30–50 notes, cluster them into a small set of recurring categories. These emerge from what you actually observed — "agent calls the search tool twice for comparison queries," "agent answers from memory instead of citing a retrieved source," "agent over-apologises when a tool call fails." This is where your real category names come from, not from a generic template.
+
+**3. Frequency count.** Count how often each category occurs across your sample. This is your Pareto chart. The 2–3 most frequent categories are where your eval-writing time should go first — not the failure mode that's most interesting to think about, the one that's actually most common.
+
+```python
+# A minimal open-coding → axial-coding workflow
+notes = []
+for transcript in sample_transcripts:           # step 1: open coding
+    note = manually_review(transcript)          # free text, no categories yet
+    notes.append({"transcript_id": transcript.id, "note": note})
+
+# step 2: axial coding — cluster notes into categories (manual or LLM-assisted)
+categories = cluster_into_categories(notes)
+
+# step 3: frequency count — this ranks what to build evals for first
+from collections import Counter
+counts = Counter(c["category"] for c in categories)
+for category, n in counts.most_common():
+    print(f"{category}: {n} occurrences ({n / len(categories):.0%})")
+```
+
+<Callout type="warning">
+Skipping straight to "happy / adversarial / edge / regression" without this step produces evals that look complete and miss what's actually breaking. The four categories are where failure modes get organised, not where they come from.
+</Callout>
+
 ## The four categories every suite needs
 
 A complete eval dataset needs cases in four distinct categories. Each catches a different class of failure.

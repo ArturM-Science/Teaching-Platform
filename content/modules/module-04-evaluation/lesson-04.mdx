@@ -72,7 +72,28 @@ score_b = llm_judge(question, response_b)
 winner = "A" if score_a["total"] > score_b["total"] else "B"
 ```
 
-**Calibrate with known-verdict cases.** Before trusting your judge on new cases, run it on cases where the correct verdict is known from human review. Target ≥ 80% agreement. If you're below 80%, the judge prompt is wrong — not the agent.
+**Prefer binary pass/fail over Likert scales for production judges.** The 1–4 / 1–10 scoring shown above is useful for exploratory analysis, but it's noisier than it looks: graders (human or LLM) anchor to the middle of a scale, and "is this a 6 or a 7" is a much less stable question than "did this pass." For any judge that gates a CI pipeline or a deploy decision, collapse the criterion to a clear pass/fail boundary. You can still report the underlying reasoning — just don't make the ship/no-ship decision depend on a number that's hard to draw a line through.
+
+**Calibrate with known-verdict cases — using TPR/TNR, not blanket agreement.** Before trusting your judge on new cases, run it against a held-out set of cases a human has already labeled pass/fail. Don't stop at a single "% agreement" figure — it hides exactly the failure that matters. A judge that agrees with humans 95% of the time can still be missing nearly every real failure, if failures are rare and the judge defaults to "pass." Compute the two numbers separately:
+
+- **True Positive Rate (TPR)** — of the cases humans labeled *fail*, what fraction did the judge also catch as fail? Low TPR means the judge is letting real failures through.
+- **True Negative Rate (TNR)** — of the cases humans labeled *pass*, what fraction did the judge correctly pass? Low TNR means the judge is too trigger-happy, flagging good responses as failures.
+
+```python
+def judge_tpr_tnr(labeled_cases: list[dict]) -> dict:
+    """labeled_cases: [{"human_label": "pass"|"fail", "judge_label": "pass"|"fail"}, ...]"""
+    actual_fails = [c for c in labeled_cases if c["human_label"] == "fail"]
+    actual_passes = [c for c in labeled_cases if c["human_label"] == "pass"]
+
+    true_positives = sum(1 for c in actual_fails if c["judge_label"] == "fail")
+    true_negatives = sum(1 for c in actual_passes if c["judge_label"] == "pass")
+
+    tpr = true_positives / len(actual_fails) if actual_fails else None
+    tnr = true_negatives / len(actual_passes) if actual_passes else None
+    return {"tpr": tpr, "tnr": tnr, "n_fails": len(actual_fails), "n_passes": len(actual_passes)}
+```
+
+A judge with high TNR but low TPR is the dangerous one — it looks trustworthy in a quick spot-check (most things are passes, and it gets those right) while quietly missing the failures you built the judge to catch in the first place. Re-run this validation periodically; judges drift as your product and the underlying model change.
 
 **Run multiple passes, swap order, take the average.** For any pairwise comparison, run the judge with A first, then again with B first, and average the scores. This doesn't eliminate position bias, but it cancels it out.
 
