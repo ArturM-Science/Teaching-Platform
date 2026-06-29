@@ -180,6 +180,55 @@ The calculator below lets you pick a model, set your traffic volume, and toggle 
 
 <TokenCostCalculator />
 
+<FailureMuseum
+  exhibit="The Silent Escalation: $4,300 in Four Days"
+  symptom="Daily LLM spend jumped from $190 to $4,300 with no code change — discovered on day 4 when the monthly invoice estimate triggered a billing alert"
+>
+
+#### What happened
+A document-processing agent routed queries using a lightweight classifier: short or structured inputs went to GPT-4o-mini ($0.15/$0.60 per MTok), complex analysis went to GPT-4o ($2.50/$10.00 per MTok). On average, 74% of traffic routed to the cheap tier — blended cost was $0.0027 per query, well within budget.
+
+On a Tuesday afternoon, a customer began uploading malformed PDFs: valid file headers, but body content that was truncated mid-sentence. The routing classifier received these as inputs, timed out waiting for the embedding service it called, caught the exception, and fell through to the default branch — which was GPT-4o. Every malformed document routed to the expensive tier.
+
+The customer uploaded 1,400 documents over four days before anyone noticed. At $0.031 per query on GPT-4o (versus $0.0027 on the mixed tier), cost ran at 11.5× the normal rate. The billing system had one alert: a fixed monthly cap at $6,000 — which had not yet fired.
+
+#### Root cause
+Two independent gaps compounded:
+
+1. **No per-routing-tier cost tracking.** The team tracked total daily spend, not spend broken down by routing decision. A dashboard showing "GPT-4o-mini share" would have shown the routing mix drop from 74% to 0% on Tuesday afternoon and triggered an immediate investigation.
+
+2. **Silent failure in the routing path.** The embedding service timeout was caught and swallowed. The fallback was the expensive tier, not an error — so the agent appeared healthy by every standard metric: HTTP 200, correct outputs, no elevated error rate. There was no cost-per-routing-decision metric wired to an alert.
+
+#### How to find it
+Add a `routing_decision` tag to every LLM span:
+
+```python
+langfuse_context.update_current_observation(
+    metadata={"routing_decision": "gpt-4o-mini", "routing_reason": "simple"}
+)
+```
+
+Then alert when the fraction of `gpt-4o` spans exceeds a threshold — say, >40% over a 30-minute window (versus the normal ~26%). This alert would have fired within 30 minutes of the malformed uploads starting.
+
+The lesson-05 SLO framework covers this under the "Cost per hour" dashboard panel: alert when cost per hour exceeds 2× the 7-day average. That alert would have fired within 2 hours of the incident starting — not on day 4.
+
+#### Fix
+Never let a routing failure silently escalate to the expensive tier. Make the fallback explicit:
+
+```python
+def route_request(query: str) -> str:
+    try:
+        tier = classify_tier(query)  # may call embedding service
+    except Exception as e:
+        log("WARN", "routing_failed", error=str(e))
+        tier = "gpt-4o-mini"  # fail to cheap, not expensive
+    return tier
+```
+
+Add a cost-per-routing-tier metric and alert on routing mix anomalies. A model routing optimisation that cuts cost 59% is worthless if a single upstream timeout can silently undo it.
+
+</FailureMuseum>
+
 <Quiz
   question="What is the minimum number of tokens a message block must contain to be eligible for Anthropic prompt caching?"
   options={[

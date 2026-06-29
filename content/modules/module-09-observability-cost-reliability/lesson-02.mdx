@@ -229,6 +229,100 @@ Score only a sample of production traces — 5–10% is typical. Scoring every r
   ]}
 />
 
+## Propagating trace context across agent hops
+
+Everything above assumes a single-process agent. Once a task spans multiple agents — System A (LangGraph) handing off to System B (CrewAI), or an orchestrator spawning specialist sub-agents via the A2A protocol — each agent starts its own root span by default. You end up with several disconnected traces in Langfuse, one per agent, with no way to see the full end-to-end timeline for a single user task.
+
+The fix is W3C Trace Context propagation: pass the `traceparent` header from the calling agent into every downstream agent call so all spans share the same `trace_id`.
+
+### The traceparent header
+
+W3C Trace Context (RFC 9546) defines a standard header format:
+
+```
+traceparent: 00-{traceId}-{parentSpanId}-{flags}
+```
+
+- `traceId` — 16-byte hex, globally unique per logical task
+- `parentSpanId` — 8-byte hex, the span ID of the calling span
+- `flags` — `01` = sampled, `00` = not sampled
+
+Example:
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+```
+
+Any agent that receives this header creates its spans as children of the identified parent span. The result is one connected trace tree, even across process and framework boundaries.
+
+### Injecting traceparent in A2A calls
+
+The A2A protocol carries agent-to-agent calls as JSON-RPC over HTTP. Inject the current OTel context into the outgoing request headers using the OTel propagator API:
+
+```python
+from opentelemetry import context, propagate
+import httpx
+
+def call_downstream_agent(agent_url: str, task: dict) -> dict:
+    headers = {}
+    # Inject the current span context as W3C traceparent (and tracestate if present)
+    propagate.inject(headers)
+
+    response = httpx.post(
+        agent_url,
+        json={"jsonrpc": "2.0", "method": "tasks/send", "params": task, "id": 1},
+        headers=headers,
+    )
+    return response.json()
+```
+
+### Extracting traceparent in the receiving agent
+
+The downstream agent extracts the incoming context and makes it the parent for all new spans:
+
+```python
+from opentelemetry import context, propagate
+from opentelemetry.sdk.trace import TracerProvider
+from langfuse.decorators import observe, langfuse_context
+
+tracer = TracerProvider().get_tracer(__name__)
+
+def handle_task(request_headers: dict, task: dict) -> dict:
+    # Restore the upstream trace context from the incoming headers
+    ctx = propagate.extract(request_headers)
+
+    with tracer.start_as_current_span("downstream_agent_run", context=ctx) as span:
+        span.set_attribute("gen_ai.system", "anthropic")
+        span.set_attribute("a2a.task_id", task.get("id", ""))
+        # ... agent logic here
+        return result
+```
+
+### What this looks like in practice
+
+Without propagation, a two-system pipeline produces two separate traces:
+```
+Trace A:  agent_run → llm_call → tool:search → llm_call_2    (System A)
+Trace B:  agent_run → llm_call → tool:write                   (System B)
+```
+
+With propagation, both appear in one connected tree:
+```
+Trace (shared trace_id):
+  └── agent_run (System A)
+        ├── llm_call
+        ├── tool:search
+        ├── llm_call_2
+        └── downstream_agent_run (System B)   ← child of System A's span
+              ├── llm_call
+              └── tool:write
+```
+
+Langfuse renders this as a single waterfall. The total wall-clock time, which system is the bottleneck, and where failures occurred are all visible in one view.
+
+<Callout type="tip">
+The Module 6 cross-system lab ([Exercise 5 — cross-system observability](/modules/module-06-multi-agent-systems/lesson-11-lab-2)) adds wall-clock timing between System A and System B. Extend it with the `propagate.inject` / `propagate.extract` pattern above to turn those timing prints into a connected Langfuse trace. The `traceparent` value to carry is just a header string — it crosses the system boundary inside the existing `ResearchHandoff` JSON or as an HTTP header alongside it.
+</Callout>
+
 ---
 
 [← Lesson 1](/modules/module-09-observability-cost-reliability/lesson-01) · [Lesson 3: The Economics of LLM APIs →](/modules/module-09-observability-cost-reliability/lesson-03)

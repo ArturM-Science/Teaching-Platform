@@ -623,6 +623,8 @@ def run_full_pipeline(question: str) -> str:
 
 (Token usage: System B's is `result.token_usage`; for System A, accumulate `response.usage_metadata` in each node as in the Module 05 lab.) Typical split: System A dominates wall-clock — usually 60–75% — because the critic loop is sequential-with-retries while System B is a straight three-stage pipeline. The number worth staring at: when `critic_revision_count` is 2, System A's share jumps and the *quality score barely moves* — repair loops have steeply diminishing returns, which is exactly why the cap exists.
 
+**Going further — connected traces across the boundary.** The timing above shows two numbers: System A and System B. In a production dashboard you want one connected trace that shows both systems as a single waterfall so you can see where latency actually lives. Module 9's Instrumenting an Agent lesson covers the W3C `traceparent` propagation pattern that makes this possible: inject the header when calling `run_system_b`, extract it at the entry point, and both systems' spans share the same `trace_id` in Langfuse. See [Module 9 — Propagating trace context across agent hops](/modules/module-09-observability-cost-reliability/lesson-02).
+
 </Solution>
 
 <Checkpoint
