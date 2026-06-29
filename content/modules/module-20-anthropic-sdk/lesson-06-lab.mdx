@@ -1,15 +1,15 @@
-﻿---
-title: "Lab: Production Research Agent â€” Raw Anthropic SDK"
+---
+title: "Lab: Production Research Agent — Raw Anthropic SDK"
 module: "module-20-anthropic-sdk"
 lesson: 6
 slug: "lesson-06-lab"
 ---
 
-# Lab: Production Research Agent â€” Raw Anthropic SDK
+# Lab: Production Research Agent — Raw Anthropic SDK
 
-You have learned the API contract, tool use, streaming, multi-agent patterns, and production reliability. Now you combine them. This lab is a capstone for the entire module: build a production-grade research agent using only the `anthropic` package â€” no LangChain, no LangGraph, no frameworks.
+You have learned the API contract, tool use, streaming, multi-agent patterns, and production reliability. Now you combine them. This lab is a capstone for the entire module: build a production-grade research agent using only the `anthropic` package — no LangChain, no LangGraph, no frameworks.
 
-<LabBrief title="Production Research Agent â€” Raw Anthropic SDK" time="2â€“3 hours">
+<LabBrief title="Production Research Agent — Raw Anthropic SDK" time="2–3 hours">
 #### Objective
 Build an async multi-tool research agent using ONLY the `anthropic` package. The agent must: use at least 3 tools (web search stub, calculator, file writer), support prompt caching on its system prompt, track cost per run, handle rate limits with exponential backoff, and support async parallel tool execution.
 
@@ -20,29 +20,29 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 #### Deliverables
-- `agent.py` â€” async agent loop with tool dispatch and MAX_STEPS guard
-- `tools.py` â€” 3 tool schemas + implementations + TOOL_MAP
-- `cost_tracker.py` â€” accumulates usage across calls, prints summary at exit
-- `prompts.py` â€” system prompt with `cache_control` block
+- `agent.py` — async agent loop with tool dispatch and MAX_STEPS guard
+- `tools.py` — 3 tool schemas + implementations + TOOL_MAP
+- `cost_tracker.py` — accumulates usage across calls, prints summary at exit
+- `prompts.py` — system prompt with `cache_control` block
 
 #### Hard constraints
-- Must use `anthropic.AsyncAnthropic()` â€” sync client fails the rubric
+- Must use `anthropic.AsyncAnthropic()` — sync client fails the rubric
 - Prompt caching must be enabled on the system prompt block
 - Rate limit errors must be retried with exponential backoff using `tenacity`
 - Cost tracker must print: input tokens, output tokens, cache hits, estimated USD
-- All tool errors must return `{"error": "...", "retryable": bool}` â€” no unhandled exceptions
-- `MAX_STEPS` must be â‰¤ 10
+- All tool errors must return `{"error": "...", "retryable": bool}` — no unhandled exceptions
+- `MAX_STEPS` must be ≤ 10
 </LabBrief>
 
 ## Run this lab
 
-**Option A â€” local terminal (VS Code, Windows Terminal, etc.)**
+**Option A — local terminal (VS Code, Windows Terminal, etc.)**
 
-Start your terminal, activate a virtual environment, install the dependencies, and run `python agent.py`. Do not start it from within Claude Code â€” the `ANTHROPIC_API_KEY` env var is suppressed in Claude's shell.
+Start your terminal, activate a virtual environment, install the dependencies, and run `python agent.py`. Do not start it from within Claude Code — the `ANTHROPIC_API_KEY` env var is suppressed in Claude's shell.
 
-**Option B â€” Google Colab**
+**Option B — Google Colab**
 
-Everything pre-installed, runs in the browser, no local setup needed. Open the notebook linked below â€” it contains the same starter code and solution reveals as this page.
+Everything pre-installed, runs in the browser, no local setup needed. Open the notebook linked below — it contains the same starter code and solution reveals as this page.
 
 ---
 
@@ -50,10 +50,10 @@ Everything pre-installed, runs in the browser, no local setup needed. Open the n
 
 ```
 research_agent/
-â”œâ”€â”€ agent.py          â† main entry point
-â”œâ”€â”€ tools.py          â† tool schemas, implementations, TOOL_MAP
-â”œâ”€â”€ cost_tracker.py   â† usage accumulator
-â””â”€â”€ prompts.py        â† cached system prompt
+├── agent.py          ← main entry point
+├── tools.py          ← tool schemas, implementations, TOOL_MAP
+├── cost_tracker.py   ← usage accumulator
+└── prompts.py        ← cached system prompt
 ```
 
 ---
@@ -70,13 +70,13 @@ SYSTEM_PROMPT_BLOCKS = [
         "type": "text",
         "text": """You are a research assistant. You have access to three tools:
 
-1. web_search(query: str) â€” Search the web for information. Returns a list of result snippets.
+1. web_search(query: str) — Search the web for information. Returns a list of result snippets.
    Use this when you need factual information you don't already know.
 
-2. calculate(expression: str) â€” Evaluate a mathematical expression. Returns the numeric result.
+2. calculate(expression: str) — Evaluate a mathematical expression. Returns the numeric result.
    Use this for any arithmetic, percentage calculations, or unit conversions.
 
-3. write_file(filename: str, content: str) â€” Write content to a local file.
+3. write_file(filename: str, content: str) — Write content to a local file.
    Use this when asked to save results, create a report, or export data.
 
 Strategy:
@@ -92,14 +92,14 @@ Strategy:
 ```
 
 <details>
-<summary>Reveal solution â€” TODO 1</summary>
+<summary>Reveal solution — TODO 1</summary>
 
 ```python
 SYSTEM_PROMPT_BLOCKS = [
     {
         "type": "text",
         "text": """...""",
-        "cache_control": {"type": "ephemeral"}   # â† add this
+        "cache_control": {"type": "ephemeral"}   # ← add this
     }
 ]
 ```
@@ -127,7 +127,7 @@ WEB_SEARCH_SCHEMA = {
         "properties": {
             "query": {
                 "type": "string",
-                "description": "The search query. Be specific â€” include key terms, date ranges if relevant."
+                "description": "The search query. Be specific — include key terms, date ranges if relevant."
             }
         },
         "required": ["query"]
@@ -232,7 +232,7 @@ ASYNC_TOOL_MAP = {
 ```
 
 <details>
-<summary>Reveal solution â€” TODO 2 (real web search with httpx)</summary>
+<summary>Reveal solution — TODO 2 (real web search with httpx)</summary>
 
 ```python
 async def web_search(query: str) -> dict:
@@ -338,7 +338,7 @@ class CostTracker:
 ```
 
 <details>
-<summary>Reveal solution â€” TODOs 4 and 5</summary>
+<summary>Reveal solution — TODOs 4 and 5</summary>
 
 ```python
 def record(self, usage) -> None:
@@ -473,10 +473,10 @@ if __name__ == "__main__":
 ```
 
 <details>
-<summary>Reveal solution â€” TODOs 6, 7, and 8 (complete agent.py)</summary>
+<summary>Reveal solution — TODOs 6, 7, and 8 (complete agent.py)</summary>
 
 ```python
-# agent.py â€” complete solution
+# agent.py — complete solution
 import asyncio
 import json
 import sys
@@ -502,12 +502,12 @@ MODEL = "claude-sonnet-4-6"
 MAX_STEPS = 10
 tracker = CostTracker(model=MODEL)
 
-# TODO 6 â€” solved
+# TODO 6 — solved
 client = anthropic.AsyncAnthropic()
 
 
 def make_resilient_create(async_client):
-    # TODO 7 â€” solved
+    # TODO 7 — solved
     @retry(
         wait=wait_exponential(multiplier=1, min=1, max=60),
         stop=stop_after_attempt(5),
@@ -531,7 +531,7 @@ async def execute_tool(block) -> dict:
 
 
 async def run_agent(user_question: str) -> str:
-    # TODO 8 â€” solved
+    # TODO 8 — solved
     messages = [{"role": "user", "content": user_question}]
 
     for step in range(MAX_STEPS):
@@ -650,13 +650,13 @@ Notice the cache pattern: the first call writes the cache (`cache_creation_input
 
 If you finish early, try one of these:
 
-1. **Streaming output** â€” modify the agent loop to use `async_client.messages.stream()` and print tokens as they arrive. Hint: streaming and tool use work together (see Lesson 3).
+1. **Streaming output** — modify the agent loop to use `async_client.messages.stream()` and print tokens as they arrive. Hint: streaming and tool use work together (see Lesson 3).
 
-2. **Critic loop** â€” after the agent returns its answer, add a critic worker that scores the answer on accuracy and completeness. If the score is below 7/10, run the agent again with the critic's feedback appended.
+2. **Critic loop** — after the agent returns its answer, add a critic worker that scores the answer on accuracy and completeness. If the score is below 7/10, run the agent again with the critic's feedback appended.
 
-3. **Conversation mode** â€” wrap `run_agent()` in a `while True` loop that reads questions from stdin, maintaining conversation history across turns. How does this affect caching?
+3. **Conversation mode** — wrap `run_agent()` in a `while True` loop that reads questions from stdin, maintaining conversation history across turns. How does this affect caching?
 
-4. **Real web search** â€” swap the stub `web_search` for a real Brave Search or Serper API call (see the solution reveal for `tools.py`). Test with a time-sensitive question.
+4. **Real web search** — swap the stub `web_search` for a real Brave Search or Serper API call (see the solution reveal for `tools.py`). Test with a time-sensitive question.
 
 <Checkpoint
   moduleSlug="module-20-anthropic-sdk"
@@ -665,7 +665,7 @@ If you finish early, try one of these:
     "Prompt caching is enabled and I can see cache_read_tokens > 0 on the second API call",
     "Rate limit errors are retried automatically with exponential backoff",
     "The cost tracker prints input tokens, output tokens, cache hits, and estimated USD",
-    "Tool errors return {error, retryable} dicts â€” no unhandled exceptions propagate",
+    "Tool errors return {error, retryable} dicts — no unhandled exceptions propagate",
   ]}
   next="/modules/module-20-anthropic-sdk"
 />

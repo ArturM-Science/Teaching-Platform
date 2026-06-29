@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Production: Retries, Rate Limits, and Cost Control"
 module: "module-20-anthropic-sdk"
 lesson: 5
@@ -7,7 +7,7 @@ slug: "lesson-05"
 
 # Production: Retries, Rate Limits, and Cost Control
 
-A working agent and a production agent are different things. A working agent returns the right answer in a clean environment. A production agent handles flaky networks, rate-limit spikes, token budget overruns, and cost tracking â€” without crashing, without silently dropping requests, and without burning money unnecessarily.
+A working agent and a production agent are different things. A working agent returns the right answer in a clean environment. A production agent handles flaky networks, rate-limit spikes, token budget overruns, and cost tracking — without crashing, without silently dropping requests, and without burning money unnecessarily.
 
 This lesson covers the four pillars of production reliability with the raw Anthropic SDK: error handling, retry strategies, token counting, and prompt caching.
 
@@ -21,13 +21,13 @@ import anthropic
 try:
     response = client.messages.create(...)
 except anthropic.RateLimitError as e:
-    # HTTP 429 â€” you've exceeded requests-per-minute or tokens-per-minute
+    # HTTP 429 — you've exceeded requests-per-minute or tokens-per-minute
     print(f"Rate limited. Retry after: {e.response.headers.get('retry-after')} seconds")
 except anthropic.APIStatusError as e:
     # Any non-2xx HTTP response (includes RateLimitError as a subclass)
     print(f"API error {e.status_code}: {e.message}")
 except anthropic.APIConnectionError as e:
-    # Network-level failure â€” DNS, TCP, etc.
+    # Network-level failure — DNS, TCP, etc.
     print(f"Connection failed: {e}")
 except anthropic.APITimeoutError as e:
     # Request exceeded the configured timeout
@@ -36,14 +36,14 @@ except anthropic.APITimeoutError as e:
 
 The hierarchy is:
 - `anthropic.APIError` (base class)
-  - `anthropic.APIConnectionError` â€” network problems
-  - `anthropic.APITimeoutError` â€” request timeout
-  - `anthropic.APIStatusError` â€” non-2xx HTTP responses
-    - `anthropic.RateLimitError` â€” 429
-    - `anthropic.AuthenticationError` â€” 401
-    - `anthropic.PermissionDeniedError` â€” 403
-    - `anthropic.NotFoundError` â€” 404
-    - `anthropic.BadRequestError` â€” 400
+  - `anthropic.APIConnectionError` — network problems
+  - `anthropic.APITimeoutError` — request timeout
+  - `anthropic.APIStatusError` — non-2xx HTTP responses
+    - `anthropic.RateLimitError` — 429
+    - `anthropic.AuthenticationError` — 401
+    - `anthropic.PermissionDeniedError` — 403
+    - `anthropic.NotFoundError` — 404
+    - `anthropic.BadRequestError` — 400
 
 Catch the most specific exception you can handle. Catch `APIStatusError` as a fallback for unexpected HTTP errors. Let `APIConnectionError` and `APITimeoutError` propagate to your retry layer.
 
@@ -61,12 +61,12 @@ client = anthropic.Anthropic(
 With `max_retries=3`, the SDK will retry up to 3 times with exponential backoff before raising an exception. This handles transient rate limit spikes without any code on your part.
 
 <Callout type="note">
-Built-in retries only cover `429` and `5xx` responses. They do not retry `400` (bad request â€” fix the input), `401` (authentication â€” fix the key), or `403` (permission denied). For `400` errors during development, read `e.message` carefully â€” it usually tells you exactly what's wrong with the request.
+Built-in retries only cover `429` and `5xx` responses. They do not retry `400` (bad request — fix the input), `401` (authentication — fix the key), or `403` (permission denied). For `400` errors during development, read `e.message` carefully — it usually tells you exactly what's wrong with the request.
 </Callout>
 
 ## Custom retry with tenacity
 
-For finer control â€” custom backoff curves, jitter, retry on specific tool errors, or retrying your whole agent loop rather than just one API call â€” use `tenacity`:
+For finer control — custom backoff curves, jitter, retry on specific tool errors, or retrying your whole agent loop rather than just one API call — use `tenacity`:
 
 ```bash
 pip install tenacity
@@ -128,10 +128,10 @@ def resilient_create(**kwargs):
 <Quiz
   question="The built-in max_retries=3 parameter retries on which status codes by default?"
   options={[
-    { text: "All non-2xx responses including 400 and 401", correct: false, explanation: "400 (bad request) and 401 (authentication error) are client errors â€” retrying them won't help because the request itself is wrong. The SDK only retries transient errors." },
+    { text: "All non-2xx responses including 400 and 401", correct: false, explanation: "400 (bad request) and 401 (authentication error) are client errors — retrying them won't help because the request itself is wrong. The SDK only retries transient errors." },
     { text: "429 (rate limit) and 5xx (server errors)", correct: true, explanation: "Correct. The built-in retry logic covers 429 Too Many Requests and 5xx server-side errors, which are the transient failures that benefit from waiting and retrying." },
     { text: "Only 429 (rate limit)", correct: false, explanation: "Both 429 and 5xx errors are retried by default. 5xx errors indicate server-side problems that often resolve on retry." },
-    { text: "429, 5xx, and connection errors", correct: false, explanation: "Connection errors (network failures) are handled differently â€” they raise APIConnectionError. The built-in retry does cover those too, but the question's answer '429 and 5xx' is the most accurate description of the HTTP status codes." },
+    { text: "429, 5xx, and connection errors", correct: false, explanation: "Connection errors (network failures) are handled differently — they raise APIConnectionError. The built-in retry does cover those too, but the question's answer '429 and 5xx' is the most accurate description of the HTTP status codes." },
   ]}
 />
 
@@ -150,14 +150,14 @@ count = client.messages.count_tokens(
 print(f"This call will consume ~{count.input_tokens} input tokens")
 ```
 
-`count_tokens()` calls the API but does not generate any response â€” it returns only the token count. This is useful for:
+`count_tokens()` calls the API but does not generate any response — it returns only the token count. This is useful for:
 
 - **Budgeting:** checking that a document fits in the context window before sending it
 - **Development:** understanding why a call is expensive
 - **Testing:** verifying that your prompt is not ballooning unexpectedly
 
 <Callout type="warning">
-`count_tokens()` makes a real API call. It is fast and cheap, but it is not free. Use it in development and testing to understand your cost profile. Do not call it before every production inference â€” the overhead adds latency and cost. A better pattern is to count tokens once per prompt template, not once per user request.
+`count_tokens()` makes a real API call. It is fast and cheap, but it is not free. Use it in development and testing to understand your cost profile. Do not call it before every production inference — the overhead adds latency and cost. A better pattern is to count tokens once per prompt template, not once per user request.
 </Callout>
 
 ## Usage tracking
@@ -175,7 +175,7 @@ print(f"Cache create tokens: {response.usage.cache_creation_input_tokens}")  # 0
 
 Pricing (approximate, check anthropic.com/pricing for current rates):
 - `input_tokens`: charged at the full input rate
-- `output_tokens`: charged at the output rate (typically 3-5Ã— the input rate)
+- `output_tokens`: charged at the output rate (typically 3-5× the input rate)
 - `cache_read_input_tokens`: charged at ~10% of the input rate (the cache hit discount)
 - `cache_creation_input_tokens`: charged at ~125% of the input rate (one-time cost to write the cache)
 
@@ -241,7 +241,7 @@ Mark content blocks with `"cache_control": {"type": "ephemeral"}`. The first cal
 ```python
 SYSTEM_PROMPT_TEXT = """You are a research assistant with the following knowledge base:
 
-[Your very long system prompt here â€” tool descriptions, examples, domain knowledge...]
+[Your very long system prompt here — tool descriptions, examples, domain knowledge...]
 
 Total: ~2,000 tokens
 """
@@ -253,7 +253,7 @@ response = client.messages.create(
         {
             "type": "text",
             "text": SYSTEM_PROMPT_TEXT,
-            "cache_control": {"type": "ephemeral"}   # â† cache this block
+            "cache_control": {"type": "ephemeral"}   # ← cache this block
         }
     ],
     messages=[{"role": "user", "content": "What is the capital of France?"}]
@@ -269,7 +269,7 @@ print(f"Cache read:  {response.usage.cache_read_input_tokens}")
   question="What does cache_read_input_tokens > 0 in the response tell you?"
   options={[
     { text: "That the model re-read its training data for this request", correct: false, explanation: "cache_read_input_tokens has nothing to do with training data. It tracks prompt cache hits." },
-    { text: "That the prompt cache was hit â€” some input tokens were served from cache at the discounted rate rather than being processed fresh", correct: true, explanation: "Correct. cache_read_input_tokens > 0 means the cached content block was found in the 5-minute cache, and you were charged the cache hit rate (~10% of normal) for those tokens." },
+    { text: "That the prompt cache was hit — some input tokens were served from cache at the discounted rate rather than being processed fresh", correct: true, explanation: "Correct. cache_read_input_tokens > 0 means the cached content block was found in the 5-minute cache, and you were charged the cache hit rate (~10% of normal) for those tokens." },
     { text: "That you are being charged less than the standard rate for all input tokens", correct: false, explanation: "Only the cached tokens get the discount. Uncached input tokens are still charged at the full input rate." },
     { text: "That the cache TTL was extended", correct: false, explanation: "A cache hit does extend the TTL (resets it to 5 minutes), but cache_read_input_tokens specifically measures how many tokens were served from cache." },
   ]}
@@ -285,7 +285,7 @@ Caching is most effective when:
 Caching does NOT help when:
 - Each call has a completely different system prompt
 - Calls are spaced more than 5 minutes apart (cache expires)
-- Your system prompt is small (< 100 tokens) â€” the overhead isn't worth it
+- Your system prompt is small (< 100 tokens) — the overhead isn't worth it
 - Each user has a unique large system prompt (no sharing between users)
 
 <Callout type="tip">
@@ -298,17 +298,17 @@ Model choice is the biggest cost lever. Use the cheapest model that can reliably
 
 | Model | Best for | Relative cost |
 |---|---|---|
-| `claude-haiku-4-5-20251001` | Classification, routing, simple extraction, worker sub-tasks | 1Ã— |
-| `claude-sonnet-4-6` | Complex reasoning, code generation, orchestration, most production tasks | ~10Ã— |
-| `claude-opus-4-8` | Hardest reasoning tasks, research, maximum quality needed | ~30Ã— |
+| `claude-haiku-4-5-20251001` | Classification, routing, simple extraction, worker sub-tasks | 1× |
+| `claude-sonnet-4-6` | Complex reasoning, code generation, orchestration, most production tasks | ~10× |
+| `claude-opus-4-8` | Hardest reasoning tasks, research, maximum quality needed | ~30× |
 
 A practical pattern: use `haiku` for the critic and worker tasks, `sonnet` for the orchestrator, and only pull `opus` when quality tests show `sonnet` is insufficient.
 
 ```python
-# Orchestrator â€” needs to reason about which tools to use
+# Orchestrator — needs to reason about which tools to use
 orchestrator_model = "claude-sonnet-4-6"
 
-# Workers â€” do well-defined sub-tasks
+# Workers — do well-defined sub-tasks
 worker_model = "claude-haiku-4-5-20251001"
 
 # Never use opus unless you've measured that sonnet isn't good enough

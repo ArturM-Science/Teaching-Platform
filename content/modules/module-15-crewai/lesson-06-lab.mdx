@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Lab: Content Production Pipeline with a Hierarchical Crew"
 module: "module-15-crewai"
 lesson: 6
@@ -9,21 +9,21 @@ slug: "lesson-06-lab"
 
 You've learned the full CrewAI toolkit: agents, tasks, sequential and hierarchical processes, tools, context chains, Flows, and memory. Now you'll assemble all of it into a production-grade content pipeline.
 
-<LabBrief title="Content Production Pipeline" time="2â€“3 hours">
+<LabBrief title="Content Production Pipeline" time="2–3 hours">
 Build a two-crew, Flow-connected content production pipeline:
 
-- **Research crew** (sequential): Researcher â†’ Fact-checker â†’ Summariser
-- **Writing crew** (hierarchical): Writer â†’ Editor â†’ SEO Optimiser, with a custom manager agent
-- **Flow**: research crew â†’ quality gate router â†’ writing crew â†’ publish
+- **Research crew** (sequential): Researcher → Fact-checker → Summariser
+- **Writing crew** (hierarchical): Writer → Editor → SEO Optimiser, with a custom manager agent
+- **Flow**: research crew → quality gate router → writing crew → publish
 - Measure and compare token costs between the two crews
 - Save all task outputs to files using `output_file=`
 </LabBrief>
 
 ## Run this lab
 
-**Option A â€” VS Code / local terminal** (instructions below)
+**Option A — VS Code / local terminal** (instructions below)
 
-**Option B â€” Google Colab** â€” everything pre-installed, runs in the browser, no local setup needed.
+**Option B — Google Colab** — everything pre-installed, runs in the browser, no local setup needed.
 
 <ColabButton notebook="module-20-lab" />
 
@@ -35,11 +35,11 @@ Build a two-crew, Flow-connected content production pipeline:
 pip install crewai crewai-tools langchain-anthropic
 ```
 
-Environment variables (no hardcoded keys â€” ever):
+Environment variables (no hardcoded keys — ever):
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-# Optional â€” needed only if you use SerperDevTool for web search:
+# Optional — needed only if you use SerperDevTool for web search:
 # export SERPER_API_KEY="your-serper-key"
 ```
 
@@ -67,7 +67,7 @@ Plus a `README.md` comparing sequential vs hierarchical token costs (see Rubric 
 
 ## Hard constraints
 
-Before you start, read these â€” they are checked in the rubric:
+Before you start, read these — they are checked in the rubric:
 
 1. Writing crew **must** use `Process.hierarchical` with a custom `manager_agent`
 2. Flow **must** use `@router` for the quality gate (reject drafts under 150 words)
@@ -86,7 +86,7 @@ import os
 from crewai import Agent
 from langchain_anthropic import ChatAnthropic
 
-# â”€â”€ LLMs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── LLMs ─────────────────────────────────────────────────────────────
 # TODO 1: Create two LLM instances:
 #   - worker_llm: claude-haiku-4-5-20251001 (for all workers)
 #   - manager_llm: claude-haiku-4-5-20251001 (use the same model for now;
@@ -94,7 +94,7 @@ from langchain_anthropic import ChatAnthropic
 worker_llm = None   # TODO 1
 manager_llm = None  # TODO 1
 
-# â”€â”€ Research crew agents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Research crew agents ─────────────────────────────────────────────
 # TODO 2: Define `researcher` with:
 #   role="Senior Research Scientist"
 #   goal="Find precise, evidence-backed technical information"
@@ -116,7 +116,7 @@ fact_checker = None  # TODO 3
 #   llm=worker_llm, allow_delegation=False, verbose=True
 summariser = None  # TODO 4
 
-# â”€â”€ Writing crew agents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Writing crew agents ──────────────────────────────────────────────
 # TODO 5: Define `writer` with:
 #   role="Technical Content Writer"
 #   goal="Write clear, engaging articles from research summaries"
@@ -227,7 +227,7 @@ seo_optimiser = Agent(
     goal="Optimise content for search without compromising readability",
     backstory=(
         "Digital marketing specialist with 6 years in technical SEO. "
-        "You insert keywords naturally â€” never at the expense of clarity â€” "
+        "You insert keywords naturally — never at the expense of clarity — "
         "and always include a meta description suggestion."
     ),
     llm=worker_llm,
@@ -261,7 +261,7 @@ import os
 
 os.makedirs("outputs", exist_ok=True)
 
-# â”€â”€ Research crew tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Research crew tasks ──────────────────────────────────────────────
 # TODO 9: Define `research_task`:
 #   description: "Research {topic}. Find 5 key recent developments with data."
 #   expected_output: numbered list of 5 developments, each with name +
@@ -272,7 +272,7 @@ research_task = None  # TODO 9
 
 # TODO 10: Define `fact_check_task`:
 #   description: "Review the research output and verify the top 3 claims."
-#   expected_output: for each claim â€” confirmed/disputed + one-sentence evidence note
+#   expected_output: for each claim — confirmed/disputed + one-sentence evidence note
 #   agent=fact_checker
 #   context=[research_task]
 #   output_file="outputs/02_fact_check.md"
@@ -281,20 +281,20 @@ fact_check_task = None  # TODO 10
 # TODO 11: Define `summary_task`:
 #   description: "Summarise the verified research into an executive briefing."
 #   expected_output: 3-section summary: Key Findings (bullets), Verified Claims,
-#                    Open Questions (2â€“3 items the research didn't resolve)
+#                    Open Questions (2–3 items the research didn't resolve)
 #   agent=summariser
 #   context=[research_task, fact_check_task]
 #   output_file="outputs/03_summary.md"
 summary_task = None  # TODO 11
 
-# â”€â”€ Writing crew tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ── Writing crew tasks ───────────────────────────────────────────────
 # TODO 12: Define `draft_task`:
 #   description: "Write a 250+ word article on {topic} from the research summary."
 #   expected_output: a structured article with intro, 3 body sections, conclusion;
 #                    minimum 250 words; no unsupported claims
 #   agent=writer
 #   output_file="outputs/04_draft.md"
-#   (No context= â€” writing crew receives the summary via Flow state)
+#   (No context= — writing crew receives the summary via Flow state)
 draft_task = None  # TODO 12
 
 # TODO 13: Define `edit_task`:
@@ -360,9 +360,9 @@ summary_task = Task(
     ),
     expected_output=(
         "A 3-section executive briefing: "
-        "(1) Key Findings â€” 4-5 bullet points; "
-        "(2) Verified Claims â€” only the confirmed facts; "
-        "(3) Open Questions â€” 2-3 things the research did not resolve."
+        "(1) Key Findings — 4-5 bullet points; "
+        "(2) Verified Claims — only the confirmed facts; "
+        "(3) Open Questions — 2-3 things the research did not resolve."
     ),
     agent=summariser,
     context=[research_task, fact_check_task],
@@ -406,7 +406,7 @@ seo_task = Task(
     expected_output=(
         "The final article with a 155-character meta description on the first line "
         "(format: 'Meta: <description>'). "
-        "Keywords from the topic inserted naturally â€” never forced. "
+        "Keywords from the topic inserted naturally — never forced. "
         "All original content preserved."
     ),
     agent=seo_optimiser,
@@ -557,7 +557,7 @@ class ContentPipeline(Flow):
     def revise(self, short_draft):
         word_count = len(short_draft.split())
         print(
-            f"\n[Flow] Draft rejected â€” only {word_count} words "
+            f"\n[Flow] Draft rejected — only {word_count} words "
             f"(minimum 150 required). Revision needed."
         )
         return "Revision needed."
@@ -578,8 +578,8 @@ from crews import research_crew, writing_crew
 
 # TODO 23: Print usage_metrics for research_crew and writing_crew separately
 #   Format:
-#     Research crew  â€” total: N tokens | requests: N
-#     Writing crew   â€” total: N tokens | requests: N
+#     Research crew  — total: N tokens | requests: N
+#     Writing crew   — total: N tokens | requests: N
 
 if __name__ == "__main__":
     flow = ContentPipeline()
@@ -613,8 +613,8 @@ if __name__ == "__main__":
     print("\n=== Token Usage ===")
     rm = research_crew.usage_metrics
     wm = writing_crew.usage_metrics
-    print(f"Research crew  â€” total: {rm.total_tokens:,} tokens | requests: {rm.successful_requests}")
-    print(f"Writing crew   â€” total: {wm.total_tokens:,} tokens | requests: {wm.successful_requests}")
+    print(f"Research crew  — total: {rm.total_tokens:,} tokens | requests: {rm.successful_requests}")
+    print(f"Writing crew   — total: {wm.total_tokens:,} tokens | requests: {wm.successful_requests}")
 
     total = rm.total_tokens + wm.total_tokens
     print(f"Combined total: {total:,} tokens")
@@ -654,8 +654,8 @@ Create a `README.md` with:
 
 | Crew | Process | Total tokens | Requests | Tokens/request |
 |---|---|---|---|---|
-| Research | Sequential | â€” | â€” | â€” |
-| Writing | Hierarchical | â€” | â€” | â€” |
+| Research | Sequential | — | — | — |
+| Writing | Hierarchical | — | — | — |
 
 Fill in the numbers from your `runner.py` output.
 
@@ -676,14 +676,14 @@ Fill in the numbers from your `runner.py` output.
 **Total: 100 points**
 
 <Callout type="tip">
-If the writing crew's quality gate rejects the draft (under 150 words), check the `editor` agent's `expected_output` in `tasks.py`. The `expected_output` for `edit_task` should explicitly state "minimum 200 words" â€” the editor agent will enforce this, and the final `seo_task` output inherits the length. A tight `expected_output` is your primary quality lever.
+If the writing crew's quality gate rejects the draft (under 150 words), check the `editor` agent's `expected_output` in `tasks.py`. The `expected_output` for `edit_task` should explicitly state "minimum 200 words" — the editor agent will enforce this, and the final `seo_task` output inherits the length. A tight `expected_output` is your primary quality lever.
 </Callout>
 
 ## Extension challenges
 
 Once the core pipeline works, try these:
 
-**Extension 1 â€” Add web search to the researcher**
+**Extension 1 — Add web search to the researcher**
 
 ```python
 from crewai_tools import SerperDevTool
@@ -691,7 +691,7 @@ from crewai_tools import SerperDevTool
 # Requires SERPER_API_KEY
 ```
 
-**Extension 2 â€” Structured output from the writing crew**
+**Extension 2 — Structured output from the writing crew**
 
 ```python
 from pydantic import BaseModel
@@ -707,7 +707,7 @@ class Article(BaseModel):
 # Access result.pydantic.word_count to drive the quality gate
 ```
 
-**Extension 3 â€” Run the quality gate three times**
+**Extension 3 — Run the quality gate three times**
 
 Modify the Flow so that if the first writing attempt is rejected, it runs the writing crew again (up to 3 times total) before giving up. Use `self.state` to track the attempt count.
 

@@ -1,4 +1,4 @@
-﻿---
+---
 title: "Multi-Agent Patterns with the Raw SDK"
 module: "module-20-anthropic-sdk"
 lesson: 4
@@ -7,11 +7,11 @@ slug: "lesson-04"
 
 # Multi-Agent Patterns with the Raw SDK
 
-In Module 06 you learned what multi-agent systems are conceptually. This lesson shows you how to implement three core patterns â€” sequential, parallel, and critic-loop â€” using only the `anthropic` package and Python's standard library. No framework required.
+In Module 06 you learned what multi-agent systems are conceptually. This lesson shows you how to implement three core patterns — sequential, parallel, and critic-loop — using only the `anthropic` package and Python's standard library. No framework required.
 
 ## The core insight: a worker is a function call
 
-When you use `messages.create()` inside a tool function, you get a worker agent. The orchestrator calls the tool, the tool calls `messages.create()`, and the result comes back as a tool result. The orchestrator has no idea â€” nor does it need to â€” that the tool made an LLM call.
+When you use `messages.create()` inside a tool function, you get a worker agent. The orchestrator calls the tool, the tool calls `messages.create()`, and the result comes back as a tool result. The orchestrator has no idea — nor does it need to — that the tool made an LLM call.
 
 ```python
 import anthropic
@@ -25,15 +25,15 @@ def summarise_worker(text: str, max_words: int = 100) -> dict:
         model="claude-haiku-4-5-20251001",   # cheaper model for simple sub-tasks
         max_tokens=512,
         system="You are a precise summariser. Return only the summary, no preamble.",
-        messages=[{"role": "user", "content": f"Summarise in â‰¤{max_words} words:\n\n{text}"}]
+        messages=[{"role": "user", "content": f"Summarise in ≤{max_words} words:\n\n{text}"}]
     )
     return {"summary": response.content[0].text, "words": len(response.content[0].text.split())}
 ```
 
-Notice that `summarise_worker` has its own `messages` list â€” completely independent of the orchestrator's history. Context is not shared automatically.
+Notice that `summarise_worker` has its own `messages` list — completely independent of the orchestrator's history. Context is not shared automatically.
 
 <Callout type="insight">
-Each worker call is a separate, independent API call. The model powering the worker has no awareness of the orchestrator's conversation. If a worker needs context from the orchestrator, you must pass it explicitly as part of the worker's system prompt or user message. Design your orchestrator to extract and pass what each worker needs â€” no more, no less.
+Each worker call is a separate, independent API call. The model powering the worker has no awareness of the orchestrator's conversation. If a worker needs context from the orchestrator, you must pass it explicitly as part of the worker's system prompt or user message. Design your orchestrator to extract and pass what each worker needs — no more, no less.
 </Callout>
 
 ## Pattern 1: Sequential pipeline
@@ -82,7 +82,7 @@ TOOL_MAP = {
 }
 
 # The orchestrator runs a standard agent loop (from Lesson 2)
-# It will naturally call summarise first, then translate â€” guided by its system prompt
+# It will naturally call summarise first, then translate — guided by its system prompt
 orchestrator_response = run_agent(
     user_question="Summarise the following article and translate the summary to Spanish: [article text here]",
     tools=[summarise_tool_schema, translate_tool_schema],
@@ -91,7 +91,7 @@ orchestrator_response = run_agent(
 )
 ```
 
-The orchestrator decides the order â€” but you can enforce order with the system prompt. Workers are just functions as far as the orchestrator is concerned.
+The orchestrator decides the order — but you can enforce order with the system prompt. Workers are just functions as far as the orchestrator is concerned.
 
 ## Pattern 2: Parallel workers with AsyncAnthropic
 
@@ -106,7 +106,7 @@ async_client = anthropic.AsyncAnthropic()
 
 
 async def analyse_document(document: str, question: str) -> str:
-    """Async worker â€” makes a non-blocking API call."""
+    """Async worker — makes a non-blocking API call."""
     response = await async_client.messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=512,
@@ -130,13 +130,13 @@ for i, result in enumerate(results):
     print(f"Document {i+1}: {result}\n")
 ```
 
-`asyncio.gather()` fires all worker calls simultaneously. Instead of 3 Ã— 2s = 6s wait time, you get roughly max(2s, 2s, 2s) = 2s â€” three times faster.
+`asyncio.gather()` fires all worker calls simultaneously. Instead of 3 × 2s = 6s wait time, you get roughly max(2s, 2s, 2s) = 2s — three times faster.
 
 <Quiz
   question="What is the key difference between anthropic.Anthropic() and anthropic.AsyncAnthropic()?"
   options={[
     { text: "AsyncAnthropic uses a different API endpoint and has different rate limits", correct: false, explanation: "Both clients call the same API endpoints with the same rate limits. The difference is how they wait for responses." },
-    { text: "Anthropic() blocks until the response arrives; AsyncAnthropic() returns a coroutine you await, allowing other tasks to run while waiting", correct: true, explanation: "Correct. AsyncAnthropic() is the async version â€” it returns awaitables and works with asyncio.gather() for parallel execution. Anthropic() is synchronous and blocks the thread." },
+    { text: "Anthropic() blocks until the response arrives; AsyncAnthropic() returns a coroutine you await, allowing other tasks to run while waiting", correct: true, explanation: "Correct. AsyncAnthropic() is the async version — it returns awaitables and works with asyncio.gather() for parallel execution. Anthropic() is synchronous and blocks the thread." },
     { text: "AsyncAnthropic() automatically retries failed calls; Anthropic() does not", correct: false, explanation: "Both clients support the same max_retries parameter. Retry behavior is not the difference." },
     { text: "AsyncAnthropic() only works with streaming", correct: false, explanation: "AsyncAnthropic() works with both streaming and non-streaming calls, just like the sync client." },
   ]}
@@ -200,7 +200,7 @@ async def execute_tool_async(block) -> dict:
 
 ## Pattern 3: Critic loop
 
-The critic loop improves output quality by having a separate model review and suggest revisions. The orchestrator runs three agents in sequence: drafter â†’ critic â†’ reviser.
+The critic loop improves output quality by having a separate model review and suggest revisions. The orchestrator runs three agents in sequence: drafter → critic → reviser.
 
 ```python
 def drafter_worker(task: str) -> str:
@@ -270,7 +270,7 @@ print(result)
   options={[
     { text: "Each worker maintains its own complete conversation history shared with the orchestrator", correct: false, explanation: "Workers do not share history with the orchestrator. Each worker call is independent." },
     { text: "The orchestrator maintains its own conversation history; each worker call starts fresh with its own isolated messages list", correct: true, explanation: "Correct. The orchestrator's messages list grows with each tool call round-trip. Worker calls are separate API calls with their own fresh messages lists. The orchestrator must explicitly pass any context workers need." },
-    { text: "Anthropic's API automatically maintains shared context across all related calls", correct: false, explanation: "The API is completely stateless. There is no automatic context sharing between calls â€” not even calls made by the same client object." },
+    { text: "Anthropic's API automatically maintains shared context across all related calls", correct: false, explanation: "The API is completely stateless. There is no automatic context sharing between calls — not even calls made by the same client object." },
     { text: "History is shared automatically when using AsyncAnthropic()", correct: false, explanation: "AsyncAnthropic() is simply the async version of the sync client. It has no shared-state behavior." },
   ]}
 />
@@ -286,12 +286,12 @@ The raw SDK is the right tool in specific situations. Knowing when to stop and r
 | Conditional branching with state | Manageable by hand | Purpose-built |
 | Human-in-the-loop interrupts | Manual implementation | `interrupt_before` |
 | Parallel fan-out | `asyncio.gather` | Built-in |
-| Debugging a framework | Essential | â€” |
+| Debugging a framework | Essential | — |
 
 The rule of thumb: if you can describe the agent's control flow in a linear sequence of steps with no branching state machine, the raw SDK is simpler. Once you need a stateful graph with conditional edges, checkpointing, and interrupts, LangGraph earns its weight.
 
 <Callout type="insight">
-The raw SDK patterns in this lesson map directly onto what LangGraph does internally. A LangGraph node is a function that receives state and returns updated state â€” equivalent to a worker function. A LangGraph edge is a conditional check on state â€” equivalent to an `if response.stop_reason == ...` check. Understanding the raw SDK makes LangGraph transparent.
+The raw SDK patterns in this lesson map directly onto what LangGraph does internally. A LangGraph node is a function that receives state and returns updated state — equivalent to a worker function. A LangGraph edge is a conditional check on state — equivalent to an `if response.stop_reason == ...` check. Understanding the raw SDK makes LangGraph transparent.
 </Callout>
 
 <Checkpoint
