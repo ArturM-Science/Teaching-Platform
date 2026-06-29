@@ -1,13 +1,13 @@
----
+﻿---
 title: "Your First Crew: Agents, Tasks, and Process.sequential"
-module: "module-20-crewai"
+module: "module-15-crewai"
 lesson: 2
 slug: "lesson-02"
 ---
 
 # Your First Crew: Agents, Tasks, and Process.sequential
 
-The fastest way to understand CrewAI is to build something real and watch it run. In this lesson you'll write a complete research → analysis → report pipeline from scratch. By the end you'll have a working crew, understand what every configuration option does, and know how to inspect outputs and token usage.
+The fastest way to understand CrewAI is to build something real and watch it run. In this lesson you'll write a complete research â†’ analysis â†’ report pipeline from scratch. By the end you'll have a working crew, understand what every configuration option does, and know how to inspect outputs and token usage.
 
 <LearningObjectives items={[
   "Write a full three-agent sequential crew end-to-end",
@@ -31,24 +31,24 @@ Set your API key:
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-That's all you need to run the examples in this lesson. No Serper key, no database — just the LLM.
+That's all you need to run the examples in this lesson. No Serper key, no database â€” just the LLM.
 
 ## A complete sequential crew (60 lines)
 
 This crew answers technical questions with a three-stage pipeline:
 
-1. **Researcher** — finds and synthesises information
-2. **Analyst** — evaluates what the researcher found
-3. **Writer** — produces the final report
+1. **Researcher** â€” finds and synthesises information
+2. **Analyst** â€” evaluates what the researcher found
+3. **Writer** â€” produces the final report
 
 ```python
 from crewai import Agent, Task, Crew, Process
 from langchain_anthropic import ChatAnthropic
 
-# ── LLM ─────────────────────────────────────────────────────────────
+# â”€â”€ LLM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 llm = ChatAnthropic(model="claude-haiku-4-5-20251001")
 
-# ── Agents ───────────────────────────────────────────────────────────
+# â”€â”€ Agents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 researcher = Agent(
     role="Senior Technical Researcher",
     goal="Find precise, well-sourced answers to technical questions",
@@ -88,7 +88,7 @@ writer = Agent(
     max_iter=3,
 )
 
-# ── Tasks ────────────────────────────────────────────────────────────
+# â”€â”€ Tasks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 research_task = Task(
     description=(
         "Research the current state of {topic}. "
@@ -129,7 +129,7 @@ report_task = Task(
     output_file="report.md",
 )
 
-# ── Crew ─────────────────────────────────────────────────────────────
+# â”€â”€ Crew â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 crew = Crew(
     agents=[researcher, analyst, writer],
     tasks=[research_task, analysis_task, report_task],
@@ -137,7 +137,7 @@ crew = Crew(
     verbose=True,
 )
 
-# ── Run ──────────────────────────────────────────────────────────────
+# â”€â”€ Run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 result = crew.kickoff(inputs={"topic": "large language model efficiency"})
 
 print("\n=== Final Report ===")
@@ -153,7 +153,7 @@ Run it:
 python crew.py
 ```
 
-You'll see verbose output for each agent as it works through its task — what the agent is thinking, what tools it uses, and what output it produces before moving on.
+You'll see verbose output for each agent as it works through its task â€” what the agent is thinking, what tools it uses, and what output it produces before moving on.
 
 ## Key configuration options explained
 
@@ -163,7 +163,7 @@ You'll see verbose output for each agent as it works through its task — what t
 agent = Agent(..., allow_delegation=False)
 ```
 
-When `allow_delegation=True`, an agent can ask other agents for help — even in sequential mode. This is most meaningful in hierarchical mode, where the manager controls delegation. In sequential mode with no manager, delegation rarely does what you expect. Set it to `False` for most agents in `Process.sequential`.
+When `allow_delegation=True`, an agent can ask other agents for help â€” even in sequential mode. This is most meaningful in hierarchical mode, where the manager controls delegation. In sequential mode with no manager, delegation rarely does what you expect. Set it to `False` for most agents in `Process.sequential`.
 
 **Rule of thumb:** `allow_delegation=False` unless you're using `Process.hierarchical` and you specifically want worker agents to be able to consult each other.
 
@@ -174,7 +174,7 @@ agent = Agent(..., verbose=True)
 crew = Crew(..., verbose=True)
 ```
 
-`verbose=True` on an agent prints the agent's internal reasoning and tool calls. `verbose=True` on the crew prints higher-level orchestration events. Use both in development so you can see exactly what's happening. Set `verbose=False` in production — the stdout overhead adds latency.
+`verbose=True` on an agent prints the agent's internal reasoning and tool calls. `verbose=True` on the crew prints higher-level orchestration events. Use both in development so you can see exactly what's happening. Set `verbose=False` in production â€” the stdout overhead adds latency.
 
 ### max_iter
 
@@ -182,10 +182,10 @@ crew = Crew(..., verbose=True)
 agent = Agent(..., max_iter=5)
 ```
 
-`max_iter` limits how many tool-call iterations an agent can make within a single task. The default is 5. If an agent has tools and tends to loop — calling the same tool repeatedly — lower this value. If your tasks are complex and require many tool calls, raise it. Without tools, this setting has no effect.
+`max_iter` limits how many tool-call iterations an agent can make within a single task. The default is 5. If an agent has tools and tends to loop â€” calling the same tool repeatedly â€” lower this value. If your tasks are complex and require many tool calls, raise it. Without tools, this setting has no effect.
 
 <Callout type="tip">
-Run your first crew with `verbose=True` on both agents and the crew so you can see exactly what each agent is doing and which tools it calls. Once it works reliably, set `verbose=False` for production. The verbose output is one of CrewAI's best debugging tools — use it early.
+Run your first crew with `verbose=True` on both agents and the crew so you can see exactly what each agent is doing and which tools it calls. Once it works reliably, set `verbose=False` for production. The verbose output is one of CrewAI's best debugging tools â€” use it early.
 </Callout>
 
 ## Variable interpolation with kickoff(inputs=...)
@@ -221,14 +221,14 @@ Then: `crew.kickoff(inputs={"length": "200", "topic": "AI safety", "audience": "
 
 `crew.kickoff()` returns a `CrewOutput` object.
 
-**`result.raw`** — always available. The raw string output of the last task in the crew.
+**`result.raw`** â€” always available. The raw string output of the last task in the crew.
 
 ```python
 result = crew.kickoff(inputs={"topic": "..."})
 print(result.raw)   # "## Executive Report\n\n### Summary\n..."
 ```
 
-**`result.pydantic`** — available only when the last task has `output_pydantic` set to a Pydantic model. The output is parsed and validated into a model instance.
+**`result.pydantic`** â€” available only when the last task has `output_pydantic` set to a Pydantic model. The output is parsed and validated into a model instance.
 
 ```python
 from pydantic import BaseModel
@@ -287,7 +287,7 @@ UsageMetrics(
 )
 ```
 
-`total_tokens` is your cost driver. `successful_requests` matches the number of LLM calls made — useful for checking whether agents made unexpected extra calls (which can indicate tool-use loops).
+`total_tokens` is your cost driver. `successful_requests` matches the number of LLM calls made â€” useful for checking whether agents made unexpected extra calls (which can indicate tool-use loops).
 
 You can compare metrics across runs to understand how different configurations affect cost:
 
@@ -304,7 +304,7 @@ print("Vague descriptions:", crew_b.usage_metrics.total_tokens)
 Tight `expected_output` descriptions typically reduce tokens because agents spend fewer iterations reformatting their output.
 
 <Callout type="note">
-`crew.usage_metrics` reflects all LLM calls made by the crew — including any retries, tool-use steps, and manager calls in hierarchical mode. It is reset each time you call `crew.kickoff()`, so if you run the same crew twice in a script, `usage_metrics` reflects only the most recent run.
+`crew.usage_metrics` reflects all LLM calls made by the crew â€” including any retries, tool-use steps, and manager calls in hierarchical mode. It is reset each time you call `crew.kickoff()`, so if you run the same crew twice in a script, `usage_metrics` reflects only the most recent run.
 </Callout>
 
 ## Putting it all together: what to verify
@@ -313,15 +313,15 @@ After running the crew, check these things:
 
 1. **Did each agent complete its task?** Look for "Task completed" in verbose output.
 2. **Does `result.raw` match the format described in `expected_output`?** If not, tighten the description.
-3. **Are `successful_requests` what you expected?** 3 agents × 1 task each = at least 3 requests. More requests mean tool calls or retries happened.
+3. **Are `successful_requests` what you expected?** 3 agents Ã— 1 task each = at least 3 requests. More requests mean tool calls or retries happened.
 4. **Is `output_file` created?** Check the working directory.
 
 <Quiz
   question="What does `crew.kickoff(inputs={'topic': 'quantum computing'})` do with `{topic}` in a task description?"
   options={[
-    { text: "It replaces `{topic}` with `'quantum computing'` in the task description and expected_output strings before the agent sees them", correct: true, explanation: "Correct. CrewAI performs string interpolation on all task descriptions and expected_output strings using the inputs dict. The agent never sees the placeholder — only the substituted value." },
+    { text: "It replaces `{topic}` with `'quantum computing'` in the task description and expected_output strings before the agent sees them", correct: true, explanation: "Correct. CrewAI performs string interpolation on all task descriptions and expected_output strings using the inputs dict. The agent never sees the placeholder â€” only the substituted value." },
     { text: "It passes the topic as a separate system message to each agent", correct: false, explanation: "CrewAI does not send a separate system message. Interpolation happens inline in the task description and expected_output strings before they are sent to the agent." },
-    { text: "It stores the topic in crew state, and agents must explicitly call crew.state.get('topic') to access it", correct: false, explanation: "There is no crew.state in basic sequential mode. Variable interpolation in task strings is automatic — no explicit retrieval needed." },
+    { text: "It stores the topic in crew state, and agents must explicitly call crew.state.get('topic') to access it", correct: false, explanation: "There is no crew.state in basic sequential mode. Variable interpolation in task strings is automatic â€” no explicit retrieval needed." },
     { text: "It does nothing unless the agent has a tool that reads from the inputs dict", correct: false, explanation: "Variable interpolation is built into CrewAI's task rendering and requires no tools. Any {placeholder} in a task description is replaced automatically." },
   ]}
 />
@@ -331,13 +331,13 @@ After running the crew, check these things:
   options={[
     { text: "result.raw is always the final string output; result.pydantic is a validated Pydantic model instance, only available when the task has output_pydantic set", correct: true, explanation: "Correct. result.raw is always available and contains the raw string. result.pydantic is only populated when output_pydantic is set on the final task and the LLM output can be parsed into the model." },
     { text: "result.raw is the output of the first task; result.pydantic is the output of the last task", correct: false, explanation: "result.raw is always the output of the final task in the crew, not the first. Task outputs from intermediate tasks are accessible via the task objects themselves." },
-    { text: "result.raw contains debug logs; result.pydantic contains the clean output", correct: false, explanation: "result.raw is the final agent output string — not debug logs. Debug information goes to stdout when verbose=True. Both raw and pydantic are output representations, not debug channels." },
-    { text: "They contain the same data in different formats — you should always use result.pydantic", correct: false, explanation: "result.pydantic is None unless you explicitly set output_pydantic on the task. result.raw is the reliable fallback — always check it first." },
+    { text: "result.raw contains debug logs; result.pydantic contains the clean output", correct: false, explanation: "result.raw is the final agent output string â€” not debug logs. Debug information goes to stdout when verbose=True. Both raw and pydantic are output representations, not debug channels." },
+    { text: "They contain the same data in different formats â€” you should always use result.pydantic", correct: false, explanation: "result.pydantic is None unless you explicitly set output_pydantic on the task. result.raw is the reliable fallback â€” always check it first." },
   ]}
 />
 
 <Checkpoint
-  moduleSlug="module-20-crewai"
+  moduleSlug="module-15-crewai"
   items={[
     "I can write a complete three-agent sequential crew from scratch",
     "I understand what allow_delegation, verbose, and max_iter each control",
@@ -345,5 +345,5 @@ After running the crew, check these things:
     "I can read final output from result.raw and inspect token usage from crew.usage_metrics",
     "I know when to use output_pydantic for structured, typed outputs",
   ]}
-  next="/modules/module-20-crewai/lesson-03"
+  next="/modules/module-15-crewai/lesson-03"
 />

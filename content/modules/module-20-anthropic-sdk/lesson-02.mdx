@@ -1,6 +1,6 @@
----
+﻿---
 title: "Tool Use: Schemas, the Loop, and Convergence"
-module: "module-15-anthropic-sdk"
+module: "module-20-anthropic-sdk"
 lesson: 2
 slug: "lesson-02"
 ---
@@ -35,7 +35,7 @@ get_weather_tool = {
 }
 ```
 
-The `description` field is the most important part — it tells the model when and why to call the tool. A vague description produces unreliable tool selection. A precise description with examples produces reliable tool selection.
+The `description` field is the most important part â€” it tells the model when and why to call the tool. A vague description produces unreliable tool selection. A precise description with examples produces reliable tool selection.
 
 The `input_schema` follows JSON Schema. The model reads this to know what arguments to pass, so every property needs a clear `description`.
 
@@ -67,7 +67,7 @@ if response.stop_reason == "tool_use":
             print(f"Tool call ID: {block.id}")
 ```
 
-The `block.input` is already parsed into a Python dict. The `block.id` is a unique string like `"toolu_01XFDUDYJgAACTvnkyLAND"` — you need it when you return the result.
+The `block.input` is already parsed into a Python dict. The `block.id` is a unique string like `"toolu_01XFDUDYJgAACTvnkyLAND"` â€” you need it when you return the result.
 
 ## Executing the tool and returning the result
 
@@ -101,7 +101,7 @@ messages.append({"role": "user", "content": tool_results})
 ```
 
 <Callout type="warning">
-You MUST append the complete assistant message (with its `tool_use` blocks) to history before adding the `tool_result`. If you skip the assistant message and only add the `tool_result`, the API will return a `400` error because there is a `tool_result` in history with no matching `tool_use` block. The message order must always be: `assistant (with tool_use)` → `user (with tool_result)`.
+You MUST append the complete assistant message (with its `tool_use` blocks) to history before adding the `tool_result`. If you skip the assistant message and only add the `tool_result`, the API will return a `400` error because there is a `tool_result` in history with no matching `tool_use` block. The message order must always be: `assistant (with tool_use)` â†’ `user (with tool_result)`.
 </Callout>
 
 <Quiz
@@ -143,12 +143,12 @@ def run_agent(user_question: str) -> str:
         steps += 1
 
         if response.stop_reason == "end_turn":
-            # Model finished — extract and return the text
+            # Model finished â€” extract and return the text
             text_blocks = [b for b in response.content if b.type == "text"]
             return text_blocks[0].text if text_blocks else ""
 
         if response.stop_reason != "tool_use":
-            # max_tokens or stop_sequence — handle as needed
+            # max_tokens or stop_sequence â€” handle as needed
             raise RuntimeError(f"Unexpected stop_reason: {response.stop_reason}")
 
         # Append the full assistant message (includes tool_use blocks)
@@ -199,9 +199,9 @@ This is a complete, production-usable agent loop in about 50 lines. Let's examin
 
 An agent loop has three exit conditions:
 
-1. **Normal exit:** `stop_reason == "end_turn"` — the model decided it was done.
-2. **Step limit:** `steps >= MAX_STEPS` — we hit our guard and raise an error.
-3. **Unexpected stop_reason:** `"max_tokens"` or `"stop_sequence"` — we raise rather than silently continue.
+1. **Normal exit:** `stop_reason == "end_turn"` â€” the model decided it was done.
+2. **Step limit:** `steps >= MAX_STEPS` â€” we hit our guard and raise an error.
+3. **Unexpected stop_reason:** `"max_tokens"` or `"stop_sequence"` â€” we raise rather than silently continue.
 
 The step limit is non-negotiable. Without it, a bug in your tool (e.g., always returning an error) can cause the agent to call the same tool forever, burning tokens until you manually kill the process.
 
@@ -226,8 +226,8 @@ This catches the common failure mode where the model tries the same failing tool
   question="Why do we append the full assistant message (including tool_use blocks) rather than just the text?"
   options={[
     { text: "Because the API requires assistant messages to always be a list, not a string", correct: false, explanation: "The messages array accepts both string and list content. That's not the reason." },
-    { text: "Because tool_result blocks reference tool_use block IDs — if the tool_use blocks aren't in history, the API can't match results to calls", correct: true, explanation: "Correct. The tool_use_id in each tool_result must match the id of a tool_use block in the preceding assistant message. Without the assistant message in history, the IDs have nothing to reference." },
-    { text: "Because we need the text content for display purposes", correct: false, explanation: "Display is a separate concern. The reason for appending the full message is structural — the API needs to see the tool_use blocks to validate the tool_result IDs." },
+    { text: "Because tool_result blocks reference tool_use block IDs â€” if the tool_use blocks aren't in history, the API can't match results to calls", correct: true, explanation: "Correct. The tool_use_id in each tool_result must match the id of a tool_use block in the preceding assistant message. Without the assistant message in history, the IDs have nothing to reference." },
+    { text: "Because we need the text content for display purposes", correct: false, explanation: "Display is a separate concern. The reason for appending the full message is structural â€” the API needs to see the tool_use blocks to validate the tool_result IDs." },
     { text: "Because the API compresses duplicate content between calls", correct: false, explanation: "The API has no compression or deduplication. You send the full history on every call." },
   ]}
 />
@@ -237,7 +237,7 @@ This catches the common failure mode where the model tries the same failing tool
 <Callout type="warning">
 **Failure case: The Infinite Loop**
 
-A developer builds a weather agent. Their tool implementation raises a `KeyError` when the city isn't found. They catch the exception but forget to include the `tool_result` in the messages history. The conversation history now has a `tool_use` block with no matching `tool_result`. The API rejects the next call with a 400 error. The developer adds error handling but mistakenly appends the `tool_result` to `messages` before appending the assistant message. Now the order is: `user → tool_result → assistant (with tool_use)` instead of `user → assistant (with tool_use) → user (with tool_result)`. The API rejects again.
+A developer builds a weather agent. Their tool implementation raises a `KeyError` when the city isn't found. They catch the exception but forget to include the `tool_result` in the messages history. The conversation history now has a `tool_use` block with no matching `tool_result`. The API rejects the next call with a 400 error. The developer adds error handling but mistakenly appends the `tool_result` to `messages` before appending the assistant message. Now the order is: `user â†’ tool_result â†’ assistant (with tool_use)` instead of `user â†’ assistant (with tool_use) â†’ user (with tool_result)`. The API rejects again.
 
 **Fix:** Always follow this exact order:
 1. `messages.append({"role": "assistant", "content": response.content})`
@@ -252,21 +252,21 @@ Never append the user tool_result message before the assistant message. Never sk
 Every tool call involves exactly four steps. Memorise this sequence:
 
 ```
-1. API call   →  response with stop_reason="tool_use" and tool_use blocks
-2. Append     →  full assistant message (with tool_use blocks) to messages
-3. Execute    →  run the tool, collect result
-4. Append     →  user message with tool_result blocks to messages
-   ↓
+1. API call   â†’  response with stop_reason="tool_use" and tool_use blocks
+2. Append     â†’  full assistant message (with tool_use blocks) to messages
+3. Execute    â†’  run the tool, collect result
+4. Append     â†’  user message with tool_result blocks to messages
+   â†“
 repeat from step 1 until stop_reason == "end_turn"
 ```
 
 <Checkpoint
-  moduleSlug="module-15-anthropic-sdk"
+  moduleSlug="module-20-anthropic-sdk"
   items={[
     "I can write a complete tool schema with name, description, and input_schema",
-    "I know the correct message order: assistant (tool_use) → user (tool_result)",
+    "I know the correct message order: assistant (tool_use) â†’ user (tool_result)",
     "I can write the full agent loop with a MAX_STEPS guard",
     "I understand why appending the full assistant message is required",
   ]}
-  next="/modules/module-15-anthropic-sdk/lesson-03"
+  next="/modules/module-20-anthropic-sdk/lesson-03"
 />

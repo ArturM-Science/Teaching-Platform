@@ -1,13 +1,13 @@
----
+﻿---
 title: "Mental Model: Roles, Tasks, Crews, and the Process Abstraction"
-module: "module-20-crewai"
+module: "module-15-crewai"
 lesson: 1
 slug: "lesson-01"
 ---
 
 # Mental Model: Roles, Tasks, Crews, and the Process Abstraction
 
-You've probably managed a project before — even informally. You know who to ask about what, what a good deliverable looks like, and roughly what order things need to happen. CrewAI formalises exactly that intuition into code.
+You've probably managed a project before â€” even informally. You know who to ask about what, what a good deliverable looks like, and roughly what order things need to happen. CrewAI formalises exactly that intuition into code.
 
 The core idea: you describe your team (who they are, what they want, what they know) and what needs to be done. CrewAI works out how to run it.
 
@@ -23,9 +23,9 @@ The core idea: you describe your team (who they are, what they want, what they k
 
 Every CrewAI system is built from three concepts:
 
-- **Agent** — who is doing the work
-- **Task** — what needs to be done
-- **Crew** — how the team is run
+- **Agent** â€” who is doing the work
+- **Task** â€” what needs to be done
+- **Crew** â€” how the team is run
 
 That's it. Once you internalise these three, the rest of the API is just configuration.
 
@@ -52,7 +52,7 @@ researcher = Agent(
 )
 ```
 
-These three fields — `role`, `goal`, `backstory` — become the agent's system prompt. Under the hood CrewAI concatenates them into something like:
+These three fields â€” `role`, `goal`, `backstory` â€” become the agent's system prompt. Under the hood CrewAI concatenates them into something like:
 
 ```
 You are a Senior Research Scientist.
@@ -82,13 +82,13 @@ research_task = Task(
 )
 ```
 
-The `description` tells the agent what to do. The `expected_output` tells the agent what good looks like — and in hierarchical mode, the manager validates the agent's response against it before accepting it.
+The `description` tells the agent what to do. The `expected_output` tells the agent what good looks like â€” and in hierarchical mode, the manager validates the agent's response against it before accepting it.
 
 Think of `expected_output` as your acceptance criteria. Vague acceptance criteria produce vague outputs.
 
 ### Crew: how
 
-The Crew assembles agents and tasks and specifies the process — the order and coordination strategy.
+The Crew assembles agents and tasks and specifies the process â€” the order and coordination strategy.
 
 ```python
 from crewai import Crew, Process
@@ -108,24 +108,24 @@ print(result.raw)
 
 ## The role / goal / backstory trio in depth
 
-These three fields shape behaviour more than any other configuration. They are not cosmetic labels — they are the agent's identity.
+These three fields shape behaviour more than any other configuration. They are not cosmetic labels â€” they are the agent's identity.
 
 **`role`** is used as a short identifier. It appears in verbose output, in delegation messages, and in the manager's routing decisions during hierarchical runs. Keep it specific: "Senior Research Scientist" is better than "Researcher" because it signals seniority and scope to other agents that might delegate to it.
 
 **`goal`** is the agent's optimisation target. It should be one sentence describing what success looks like from the agent's perspective. The agent will implicitly bias its outputs toward satisfying this goal, even when the task description pulls in a slightly different direction. If these conflict, goal usually wins.
 
-**`backstory`** is expertise context. It makes the agent's behaviour credible by giving the LLM a persona to inhabit. A researcher with a "PhD in quantum physics" writes differently about quantum topics than one with no backstory — the LLM draws on that persona when choosing vocabulary, depth, and caveats.
+**`backstory`** is expertise context. It makes the agent's behaviour credible by giving the LLM a persona to inhabit. A researcher with a "PhD in quantum physics" writes differently about quantum topics than one with no backstory â€” the LLM draws on that persona when choosing vocabulary, depth, and caveats.
 
 <Callout type="insight">
-The `backstory` field is not decoration — invest time in it. A researcher whose backstory says "You are known for citing only peer-reviewed sources and flagging when evidence is weak" will produce outputs that reflect exactly those traits. A vague backstory produces generic outputs. Two or three specific sentences describing expertise, working style, and known limitations are worth more than a paragraph of fluff.
+The `backstory` field is not decoration â€” invest time in it. A researcher whose backstory says "You are known for citing only peer-reviewed sources and flagging when evidence is weak" will produce outputs that reflect exactly those traits. A vague backstory produces generic outputs. Two or three specific sentences describing expertise, working style, and known limitations are worth more than a paragraph of fluff.
 </Callout>
 
 ## Tasks as contracts: description and expected_output
 
 The `description` and `expected_output` fields work as a pair:
 
-- `description` drives the agent's reasoning — it's the instruction
-- `expected_output` drives the agent's formatting — it's the acceptance criterion
+- `description` drives the agent's reasoning â€” it's the instruction
+- `expected_output` drives the agent's formatting â€” it's the acceptance criterion
 
 When you write `expected_output`, think in format terms: bullet list vs numbered list, word count, whether citations are required, whether a structured JSON is expected. The agent will try to match what you describe.
 
@@ -157,7 +157,7 @@ summary_task = Task(
 )
 ```
 
-When `summary_task` runs, the outputs of `research_task` and `analysis_task` are automatically injected into the writer's context. The writer sees what the researcher found and what the analyst concluded — without you having to wire any of it manually.
+When `summary_task` runs, the outputs of `research_task` and `analysis_task` are automatically injected into the writer's context. The writer sees what the researcher found and what the analyst concluded â€” without you having to wire any of it manually.
 
 You can chain as many context dependencies as you need. In sequential process, this is how information flows down the pipeline.
 
@@ -167,10 +167,10 @@ You can chain as many context dependencies as you need. In sequential process, t
 
 ### Process.sequential
 
-Tasks run in the order they appear in the `tasks` list. Each task gets context from tasks listed in its `context=[]`. There is no manager — tasks just run one after another.
+Tasks run in the order they appear in the `tasks` list. Each task gets context from tasks listed in its `context=[]`. There is no manager â€” tasks just run one after another.
 
 ```
-task_1 → task_2 → task_3 → done
+task_1 â†’ task_2 â†’ task_3 â†’ done
 ```
 
 Sequential is predictable, cheap, and appropriate for well-defined pipelines where every step is known in advance.
@@ -182,16 +182,16 @@ CrewAI creates a manager agent (using `manager_llm` or a custom `manager_agent`)
 1. The manager reads all tasks and decides what to do first
 2. It assigns a task to a worker agent
 3. When the worker responds, the manager checks the output against `expected_output`
-4. If unsatisfied, the manager reassigns — to the same or a different worker
+4. If unsatisfied, the manager reassigns â€” to the same or a different worker
 5. When all tasks are satisfied, the manager synthesises the final answer
 
 ```
-manager → assign → worker_A → validate → OK
-manager → assign → worker_B → validate → not OK → reassign → worker_B → validate → OK
-manager → synthesise → done
+manager â†’ assign â†’ worker_A â†’ validate â†’ OK
+manager â†’ assign â†’ worker_B â†’ validate â†’ not OK â†’ reassign â†’ worker_B â†’ validate â†’ OK
+manager â†’ synthesise â†’ done
 ```
 
-Hierarchical is adaptive, has implicit quality control, and costs 30–60% more tokens due to the manager's routing calls.
+Hierarchical is adaptive, has implicit quality control, and costs 30â€“60% more tokens due to the manager's routing calls.
 
 ```python
 from crewai import Crew, Process
@@ -220,21 +220,21 @@ Understanding where CrewAI sits helps you choose the right tool for the job.
 | Onboarding time | High | Medium | Low |
 | Hierarchical QA | Manual | Manual | Built-in |
 
-**LangGraph** gives you complete control — you wire every edge, every condition, every state transition. That's powerful but verbose. CrewAI infers the execution graph from your task list and `context` declarations.
+**LangGraph** gives you complete control â€” you wire every edge, every condition, every state transition. That's powerful but verbose. CrewAI infers the execution graph from your task list and `context` declarations.
 
-**AutoGen** organises agents into a conversation thread. Messages flow between agents and you control turn-taking. CrewAI uses a structured task pipeline — there's no open conversation, just task → output → next task.
+**AutoGen** organises agents into a conversation thread. Messages flow between agents and you control turn-taking. CrewAI uses a structured task pipeline â€” there's no open conversation, just task â†’ output â†’ next task.
 
 The right tool depends on how well-defined your pipeline is. If the structure is clear and stable, CrewAI's abstraction saves significant time. If you need fine-grained control over routing logic or need resumability, LangGraph is a better fit.
 
 <Callout type="note">
-CrewAI does not expose the underlying execution graph to you directly. If you need to inspect or modify how the orchestration works at a low level — for debugging, auditing, or custom routing — you will need to switch to LangGraph or add a Flow (covered in Lesson 5). CrewAI trades transparency for ease of use.
+CrewAI does not expose the underlying execution graph to you directly. If you need to inspect or modify how the orchestration works at a low level â€” for debugging, auditing, or custom routing â€” you will need to switch to LangGraph or add a Flow (covered in Lesson 5). CrewAI trades transparency for ease of use.
 </Callout>
 
 <Quiz
   question="What does `context=[task_a, task_b]` do in a Task definition?"
   options={[
     { text: "It runs task_a and task_b before this task and injects their outputs into this task's prompt", correct: true, explanation: "Correct. The output of every task listed in context= is automatically included in the prompt when this task runs. The agent can see what those tasks produced." },
-    { text: "It specifies that task_a and task_b must complete successfully before this task is scheduled", correct: false, explanation: "That's a side effect, not the primary purpose. The main effect is that their outputs are injected as context into this task's prompt — the agent actively reads those outputs." },
+    { text: "It specifies that task_a and task_b must complete successfully before this task is scheduled", correct: false, explanation: "That's a side effect, not the primary purpose. The main effect is that their outputs are injected as context into this task's prompt â€” the agent actively reads those outputs." },
     { text: "It allows the agent to call task_a and task_b as sub-tasks during execution", correct: false, explanation: "context= does not create callable sub-tasks. It passes completed outputs as read-only context. The agent cannot re-run those tasks from within this one." },
     { text: "It creates a parallel execution branch where task_a and task_b run at the same time", correct: false, explanation: "CrewAI does not parallelize tasks via context=. Context tasks run to completion before the dependent task starts, but in the sequence determined by the Crew's process." },
   ]}
@@ -244,14 +244,14 @@ CrewAI does not expose the underlying execution graph to you directly. If you ne
   question="Which Process type automatically creates a manager agent that validates worker outputs?"
   options={[
     { text: "Process.hierarchical", correct: true, explanation: "Correct. Process.hierarchical auto-creates a manager (using manager_llm or manager_agent) that assigns tasks, validates outputs against expected_output, and reassigns if unsatisfied." },
-    { text: "Process.sequential", correct: false, explanation: "Sequential runs tasks in order with no manager. There is no validation step — each task's output goes directly to the next task's context." },
+    { text: "Process.sequential", correct: false, explanation: "Sequential runs tasks in order with no manager. There is no validation step â€” each task's output goes directly to the next task's context." },
     { text: "Process.parallel", correct: false, explanation: "There is no Process.parallel in CrewAI. The two options are sequential and hierarchical." },
     { text: "Any process type, as long as verbose=True is set", correct: false, explanation: "verbose=True only controls logging output. It has no effect on which process type is used or whether a manager agent is created." },
   ]}
 />
 
 <Checkpoint
-  moduleSlug="module-20-crewai"
+  moduleSlug="module-15-crewai"
   items={[
     "I can name CrewAI's three building blocks: Agent, Task, and Crew",
     "I understand that role, goal, and backstory become the agent's system prompt",
@@ -259,5 +259,5 @@ CrewAI does not expose the underlying execution graph to you directly. If you ne
     "I can explain the difference between Process.sequential and Process.hierarchical",
     "I understand when CrewAI is a better fit than LangGraph or AutoGen",
   ]}
-  next="/modules/module-20-crewai/lesson-02"
+  next="/modules/module-15-crewai/lesson-02"
 />

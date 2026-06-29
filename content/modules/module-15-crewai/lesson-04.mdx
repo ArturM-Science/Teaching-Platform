@@ -1,13 +1,13 @@
----
+﻿---
 title: "Hierarchical Process: Manager Agent, Delegation, and Token Overhead"
-module: "module-20-crewai"
+module: "module-15-crewai"
 lesson: 4
 slug: "lesson-04"
 ---
 
 # Hierarchical Process: Manager Agent, Delegation, and Token Overhead
 
-Sequential mode is predictable and cheap. But sometimes you need a pipeline that can catch bad outputs, reassign work, and adapt — without you hardcoding every retry condition. That's what `Process.hierarchical` provides: an automatic manager that validates each worker's output and replans when something isn't good enough.
+Sequential mode is predictable and cheap. But sometimes you need a pipeline that can catch bad outputs, reassign work, and adapt â€” without you hardcoding every retry condition. That's what `Process.hierarchical` provides: an automatic manager that validates each worker's output and replans when something isn't good enough.
 
 The catch is cost. The manager's routing calls are not free. This lesson teaches you exactly how hierarchical works, when it's worth the overhead, and how to measure the difference.
 
@@ -23,21 +23,21 @@ The catch is cost. The manager's routing calls are not free. This lesson teaches
 
 When you set `process=Process.hierarchical`, CrewAI creates a manager agent before the crew runs. The manager reads your task list and orchestrates the workers in a five-step loop:
 
-1. **Plan** — the manager reads all tasks and decides what to assign first and to whom
-2. **Assign** — the manager delegates a task to a worker agent
-3. **Execute** — the worker runs the task using its tools and LLM
-4. **Validate** — the manager compares the worker's output against the task's `expected_output`
-5. **Accept or reassign** — if the output is satisfactory, the manager moves to the next task; if not, it reassigns (to the same or a different worker) and loops from step 2
+1. **Plan** â€” the manager reads all tasks and decides what to assign first and to whom
+2. **Assign** â€” the manager delegates a task to a worker agent
+3. **Execute** â€” the worker runs the task using its tools and LLM
+4. **Validate** â€” the manager compares the worker's output against the task's `expected_output`
+5. **Accept or reassign** â€” if the output is satisfactory, the manager moves to the next task; if not, it reassigns (to the same or a different worker) and loops from step 2
 
 ```
-manager ──plan──► task_1 ──assign──► researcher
-                                         │
-                          ◄──output──────┘
-                          │
+manager â”€â”€planâ”€â”€â–º task_1 â”€â”€assignâ”€â”€â–º researcher
+                                         â”‚
+                          â—„â”€â”€outputâ”€â”€â”€â”€â”€â”€â”˜
+                          â”‚
                     validate vs expected_output
-                          │
-                   OK? ───┴──► task_2 ──assign──► analyst
-                   NO? ───────► reassign ──► researcher
+                          â”‚
+                   OK? â”€â”€â”€â”´â”€â”€â–º task_2 â”€â”€assignâ”€â”€â–º analyst
+                   NO? â”€â”€â”€â”€â”€â”€â”€â–º reassign â”€â”€â–º researcher
 ```
 
 When all tasks are validated, the manager synthesises the final answer.
@@ -90,7 +90,7 @@ analysis_task = Task(
     context=[research_task],
 )
 
-# ── Hierarchical crew ────────────────────────────────────────────────
+# â”€â”€ Hierarchical crew â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 crew = Crew(
     agents=[researcher, analyst],
     tasks=[research_task, analysis_task],
@@ -106,7 +106,7 @@ print(crew.usage_metrics)
 
 ## Using a custom manager agent
 
-Instead of letting CrewAI auto-create the manager, you can define one yourself. This gives the manager its own role, goal, backstory — and its own tools:
+Instead of letting CrewAI auto-create the manager, you can define one yourself. This gives the manager its own role, goal, backstory â€” and its own tools:
 
 ```python
 manager = Agent(
@@ -121,7 +121,7 @@ manager = Agent(
         "for giving precise, actionable feedback when reassigning work."
     ),
     llm=llm,
-    allow_delegation=True,    # manager must delegate — always True for manager
+    allow_delegation=True,    # manager must delegate â€” always True for manager
     verbose=True,
 )
 
@@ -139,15 +139,15 @@ Use a custom manager when:
 - You want the manager's reasoning to reflect a specific domain or style
 - You're debugging and need to inspect the manager's full system prompt
 
-When you set `manager_agent`, do not also set `manager_llm` — they are mutually exclusive.
+When you set `manager_agent`, do not also set `manager_llm` â€” they are mutually exclusive.
 
 <Callout type="insight">
-The hierarchical process's real value is implicit quality control. In sequential mode, a bad output silently propagates — the analyst takes bad research at face value, the writer takes bad analysis at face value. In hierarchical mode, the manager validates each output against `expected_output` before accepting it. One well-written `expected_output` description can prevent an entire class of downstream errors. This is why tight `expected_output` strings matter even more in hierarchical mode than in sequential.
+The hierarchical process's real value is implicit quality control. In sequential mode, a bad output silently propagates â€” the analyst takes bad research at face value, the writer takes bad analysis at face value. In hierarchical mode, the manager validates each output against `expected_output` before accepting it. One well-written `expected_output` description can prevent an entire class of downstream errors. This is why tight `expected_output` strings matter even more in hierarchical mode than in sequential.
 </Callout>
 
 ## allow_delegation on workers
 
-By default, worker agents have `allow_delegation=False`. This means a worker cannot ask another worker for help — it can only use its own tools and LLM.
+By default, worker agents have `allow_delegation=False`. This means a worker cannot ask another worker for help â€” it can only use its own tools and LLM.
 
 Set `allow_delegation=True` on a worker when you want the manager to be able to ask it to consult another worker:
 
@@ -165,11 +165,11 @@ junior_researcher = Agent(
     goal="Answer domain-specific technical questions with precision",
     backstory="PhD in quantum computing. You answer specific technical questions.",
     llm=llm,
-    allow_delegation=False,  # focused executor — does not delegate further
+    allow_delegation=False,  # focused executor â€” does not delegate further
 )
 ```
 
-In practice, `allow_delegation=True` on workers adds complexity and cost. Use it only when your tasks genuinely require inter-agent consultation — for example, when an analyst might need to ask a specialist a targeted question before completing their output.
+In practice, `allow_delegation=True` on workers adds complexity and cost. Use it only when your tasks genuinely require inter-agent consultation â€” for example, when an analyst might need to ask a specialist a targeted question before completing their output.
 
 ## Measuring the token overhead
 
@@ -219,14 +219,14 @@ def make_tasks(researcher, analyst):
 
 inputs = {"topic": "AI inference optimisation"}
 
-# ── Sequential run ───────────────────────────────────────────────────
+# â”€â”€ Sequential run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 r1, a1 = make_agents()
 t1, t2 = make_tasks(r1, a1)
 seq_crew = Crew(agents=[r1, a1], tasks=[t1, t2], process=Process.sequential, verbose=False)
 seq_crew.kickoff(inputs=inputs)
 seq_metrics = seq_crew.usage_metrics
 
-# ── Hierarchical run ─────────────────────────────────────────────────
+# â”€â”€ Hierarchical run â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 r2, a2 = make_agents()
 t3, t4 = make_tasks(r2, a2)
 hier_crew = Crew(
@@ -236,9 +236,9 @@ hier_crew = Crew(
 hier_crew.kickoff(inputs=inputs)
 hier_metrics = hier_crew.usage_metrics
 
-# ── Compare ──────────────────────────────────────────────────────────
-print(f"Sequential  — total tokens: {seq_metrics.total_tokens:,}  |  requests: {seq_metrics.successful_requests}")
-print(f"Hierarchical — total tokens: {hier_metrics.total_tokens:,}  |  requests: {hier_metrics.successful_requests}")
+# â”€â”€ Compare â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+print(f"Sequential  â€” total tokens: {seq_metrics.total_tokens:,}  |  requests: {seq_metrics.successful_requests}")
+print(f"Hierarchical â€” total tokens: {hier_metrics.total_tokens:,}  |  requests: {hier_metrics.successful_requests}")
 overhead = (hier_metrics.total_tokens - seq_metrics.total_tokens) / seq_metrics.total_tokens * 100
 print(f"Overhead: {overhead:.1f}%")
 ```
@@ -246,15 +246,15 @@ print(f"Overhead: {overhead:.1f}%")
 Typical output:
 
 ```
-Sequential   — total tokens: 3,241  |  requests: 2
-Hierarchical — total tokens: 4,892  |  requests: 5
+Sequential   â€” total tokens: 3,241  |  requests: 2
+Hierarchical â€” total tokens: 4,892  |  requests: 5
 Overhead: 51.0%
 ```
 
-The extra requests in hierarchical output are the manager's planning, validation, and synthesis calls. Those calls are the dominant cost — not the workers' extra reasoning.
+The extra requests in hierarchical output are the manager's planning, validation, and synthesis calls. Those calls are the dominant cost â€” not the workers' extra reasoning.
 
 <Callout type="note">
-The overhead percentage varies by task. Simple tasks with clear `expected_output` descriptions produce less overhead because the manager validates and accepts quickly — fewer reassignment loops. Complex tasks with vague acceptance criteria can produce 80–100% overhead as the manager loops multiple times before accepting an output. Writing tight `expected_output` strings reduces hierarchical cost, sometimes dramatically.
+The overhead percentage varies by task. Simple tasks with clear `expected_output` descriptions produce less overhead because the manager validates and accepts quickly â€” fewer reassignment loops. Complex tasks with vague acceptance criteria can produce 80â€“100% overhead as the manager loops multiple times before accepting an output. Writing tight `expected_output` strings reduces hierarchical cost, sometimes dramatically.
 </Callout>
 
 ## When to use hierarchical vs sequential
@@ -266,12 +266,12 @@ Use **Process.sequential** when:
 - You want predictable, auditable execution where every step runs exactly once
 
 Use **Process.hierarchical** when:
-- Tasks require quality gates — you need a check before output propagates
+- Tasks require quality gates â€” you need a check before output propagates
 - Outputs are hard to specify precisely and the manager's judgment adds value
 - Your pipeline involves replanning (a failed step might need a different approach)
 - You want dynamic reassignment without writing retry logic yourself
 
-Use **neither** — use LangGraph — when:
+Use **neither** â€” use LangGraph â€” when:
 - You need checkpointing or resumability (the crew can be interrupted and restarted)
 - You need fine-grained control over routing logic
 - You need to inspect or modify the execution graph at runtime
@@ -280,17 +280,17 @@ Use **neither** — use LangGraph — when:
 
 Answer these questions in order:
 
-1. Can I write a precise `expected_output` for every task? → If yes, sequential is likely sufficient.
-2. Will a bad output from task N cascade into task N+1 in a way that's hard to detect? → If yes, hierarchical's validation loop helps.
-3. Do I have a token budget constraint? → If tight, sequential only.
-4. Do my tasks require dynamic reassignment based on content? → If yes, hierarchical. If the condition is complex, use a Flow.
+1. Can I write a precise `expected_output` for every task? â†’ If yes, sequential is likely sufficient.
+2. Will a bad output from task N cascade into task N+1 in a way that's hard to detect? â†’ If yes, hierarchical's validation loop helps.
+3. Do I have a token budget constraint? â†’ If tight, sequential only.
+4. Do my tasks require dynamic reassignment based on content? â†’ If yes, hierarchical. If the condition is complex, use a Flow.
 
 <Quiz
   question="What does the hierarchical manager do if it is unsatisfied with a worker's output?"
   options={[
-    { text: "It reassigns the task — to the same agent or a different one — and loops until the output meets expected_output criteria", correct: true, explanation: "Correct. The manager validates the output against expected_output after each worker response. If unsatisfied, it can reassign to the same worker with corrective feedback, or route to a different worker entirely." },
-    { text: "It raises a TaskFailedError that you must handle in your calling code", correct: false, explanation: "The manager does not raise an exception — it loops internally. The reassignment happens automatically within the crew run. Your calling code only sees the final result (or a failure if max_iter is exhausted)." },
-    { text: "It appends a warning to result.raw and continues to the next task", correct: false, explanation: "The manager does not append warnings and continue. It validates before accepting — an unsatisfactory output triggers reassignment, not a warning note." },
+    { text: "It reassigns the task â€” to the same agent or a different one â€” and loops until the output meets expected_output criteria", correct: true, explanation: "Correct. The manager validates the output against expected_output after each worker response. If unsatisfied, it can reassign to the same worker with corrective feedback, or route to a different worker entirely." },
+    { text: "It raises a TaskFailedError that you must handle in your calling code", correct: false, explanation: "The manager does not raise an exception â€” it loops internally. The reassignment happens automatically within the crew run. Your calling code only sees the final result (or a failure if max_iter is exhausted)." },
+    { text: "It appends a warning to result.raw and continues to the next task", correct: false, explanation: "The manager does not append warnings and continue. It validates before accepting â€” an unsatisfactory output triggers reassignment, not a warning note." },
     { text: "It asks the user to review the output via a console prompt", correct: false, explanation: "CrewAI does not prompt for human review automatically. Human-in-the-loop review requires explicit configuration via human_input=True on the task, which is separate from the hierarchical validation loop." },
   ]}
 />
@@ -298,7 +298,7 @@ Answer these questions in order:
 <Quiz
   question="Which CrewAI Crew parameter lets you specify a custom orchestrator agent with its own tools and backstory?"
   options={[
-    { text: "manager_agent", correct: true, explanation: "Correct. manager_agent accepts an Agent instance that you define — giving you full control over the manager's role, goal, backstory, and tools. When set, manager_llm is not used." },
+    { text: "manager_agent", correct: true, explanation: "Correct. manager_agent accepts an Agent instance that you define â€” giving you full control over the manager's role, goal, backstory, and tools. When set, manager_llm is not used." },
     { text: "manager_llm", correct: false, explanation: "manager_llm specifies only the LLM to use for an auto-created manager. It does not let you configure the manager's role, goal, backstory, or tools. For full customisation, use manager_agent." },
     { text: "orchestrator_agent", correct: false, explanation: "There is no orchestrator_agent parameter in CrewAI. The correct parameter is manager_agent." },
     { text: "process_manager", correct: false, explanation: "There is no process_manager parameter in CrewAI. The correct parameter is manager_agent." },
@@ -306,7 +306,7 @@ Answer these questions in order:
 />
 
 <Checkpoint
-  moduleSlug="module-20-crewai"
+  moduleSlug="module-15-crewai"
   items={[
     "I can describe the five-step hierarchical orchestration loop: plan, assign, execute, validate, accept/reassign",
     "I know how to configure Process.hierarchical with both manager_llm and a custom manager_agent",
@@ -314,5 +314,5 @@ Answer these questions in order:
     "I can explain when hierarchical's implicit quality control justifies its token overhead",
     "I understand what allow_delegation=True on a worker agent enables",
   ]}
-  next="/modules/module-20-crewai/lesson-05"
+  next="/modules/module-15-crewai/lesson-05"
 />

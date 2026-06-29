@@ -1,6 +1,6 @@
----
+﻿---
 title: "Streaming, Structured Outputs, and Vision"
-module: "module-15-anthropic-sdk"
+module: "module-20-anthropic-sdk"
 lesson: 3
 slug: "lesson-03"
 ---
@@ -11,7 +11,7 @@ Three capabilities that transform what your agent can do: streaming turns a slow
 
 ## Streaming
 
-Without streaming, `messages.create()` waits for the entire response to be generated before returning. For a 500-token response at typical generation speed, that's a 5–10 second pause before anything appears. With streaming, you receive tokens as they are generated.
+Without streaming, `messages.create()` waits for the entire response to be generated before returning. For a 500-token response at typical generation speed, that's a 5â€“10 second pause before anything appears. With streaming, you receive tokens as they are generated.
 
 ```python
 import anthropic
@@ -51,15 +51,15 @@ print(f"Stop reason:   {final_message.stop_reason}")
 `stream.get_final_message()` returns the same `Message` object you would get from a non-streaming call. Call it after iterating the stream, not before.
 
 <Callout type="warning">
-Calling `stream.get_final_message()` before you finish iterating `stream.text_stream` will block until generation completes — which defeats the purpose of streaming. Always iterate the stream first, then get the final message.
+Calling `stream.get_final_message()` before you finish iterating `stream.text_stream` will block until generation completes â€” which defeats the purpose of streaming. Always iterate the stream first, then get the final message.
 </Callout>
 
 <Quiz
-  question="Does response.usage work mid-stream — for example, after receiving 50 tokens but before the stream closes?"
+  question="Does response.usage work mid-stream â€” for example, after receiving 50 tokens but before the stream closes?"
   options={[
-    { text: "Yes — usage is updated incrementally as tokens arrive", correct: false, explanation: "Usage statistics are computed server-side only after generation completes. They cannot be read mid-stream." },
-    { text: "No — usage is only available after the stream closes, via stream.get_final_message()", correct: true, explanation: "Correct. You must wait for the stream to finish before calling get_final_message() to read usage stats." },
-    { text: "Yes — but only input_tokens, not output_tokens", correct: false, explanation: "Neither input nor output tokens are available mid-stream. Both are only available after stream.get_final_message()." },
+    { text: "Yes â€” usage is updated incrementally as tokens arrive", correct: false, explanation: "Usage statistics are computed server-side only after generation completes. They cannot be read mid-stream." },
+    { text: "No â€” usage is only available after the stream closes, via stream.get_final_message()", correct: true, explanation: "Correct. You must wait for the stream to finish before calling get_final_message() to read usage stats." },
+    { text: "Yes â€” but only input_tokens, not output_tokens", correct: false, explanation: "Neither input nor output tokens are available mid-stream. Both are only available after stream.get_final_message()." },
     { text: "It depends on the model", correct: false, explanation: "Usage availability is an API contract, not model-specific. No model returns mid-stream usage." },
   ]}
 />
@@ -88,7 +88,7 @@ if response.stop_reason == "tool_use":
 
 ## Structured outputs
 
-Sometimes you need the model to return structured data — a JSON object you can parse into a Pydantic model, a list of items, a classification with a confidence score. The API has no native "JSON mode" switch, but there are two reliable techniques.
+Sometimes you need the model to return structured data â€” a JSON object you can parse into a Pydantic model, a list of items, a classification with a confidence score. The API has no native "JSON mode" switch, but there are two reliable techniques.
 
 ### Technique 1: Explicit instruction + Pydantic validation
 
@@ -119,12 +119,12 @@ print(result.confidence)   # e.g. 0.95
 ```
 
 <Callout type="tip">
-Always validate with Pydantic — never assume the model returned valid JSON. Even well-instructed models occasionally add a trailing comma or wrap the JSON in markdown code fences. `model_validate_json()` gives you a clean error to handle rather than a cryptic `KeyError` buried in your business logic.
+Always validate with Pydantic â€” never assume the model returned valid JSON. Even well-instructed models occasionally add a trailing comma or wrap the JSON in markdown code fences. `model_validate_json()` gives you a clean error to handle rather than a cryptic `KeyError` buried in your business logic.
 </Callout>
 
 ### Technique 2: JSON prefill
 
-The prefill technique is more reliable. You append an assistant message that starts with `{` — the model then continues from that point and is very unlikely to produce non-JSON:
+The prefill technique is more reliable. You append an assistant message that starts with `{` â€” the model then continues from that point and is very unlikely to produce non-JSON:
 
 ```python
 response = client.messages.create(
@@ -133,7 +133,7 @@ response = client.messages.create(
     system="Respond only with JSON. No explanation, no markdown.",
     messages=[
         {"role": "user", "content": "Classify: 'The product broke after two days. Very disappointed.'"},
-        {"role": "assistant", "content": "{"},   # ← prefill forces JSON start
+        {"role": "assistant", "content": "{"},   # â† prefill forces JSON start
     ]
 )
 
@@ -147,18 +147,18 @@ result = SentimentResult.model_validate_json(raw)
 The prefill trick works because the model generates a continuation of the assistant message, not a fresh response. Starting from `{` makes any non-JSON continuation grammatically wrong in the model's learned distribution.
 
 <Quiz
-  question="What does the prefill technique do — why does prepending an assistant message that starts with '{' help produce valid JSON?"
+  question="What does the prefill technique do â€” why does prepending an assistant message that starts with '{' help produce valid JSON?"
   options={[
     { text: "It activates a hidden JSON mode in the API", correct: false, explanation: "There is no hidden JSON mode. The prefill works by conditioning the model's continuation." },
     { text: "The model generates a continuation of the assistant message, so starting with '{' makes non-JSON continuations extremely unlikely", correct: true, explanation: "Correct. The model treats the prefill as the beginning of its own response and generates what comes next. Starting from '{' strongly biases toward valid JSON structure." },
-    { text: "It forces the model to use a smaller output vocabulary", correct: false, explanation: "Vocabulary is not restricted. The effect is probabilistic — the '{' start strongly conditions the distribution toward JSON-shaped text." },
+    { text: "It forces the model to use a smaller output vocabulary", correct: false, explanation: "Vocabulary is not restricted. The effect is probabilistic â€” the '{' start strongly conditions the distribution toward JSON-shaped text." },
     { text: "It only works with claude-opus models", correct: false, explanation: "The prefill technique works with all Claude models that support the messages API." },
   ]}
 />
 
 ## Vision
 
-Claude can reason about images. Images are passed as content blocks inside user messages, just like text — but with `"type": "image"` instead of `"type": "text"`.
+Claude can reason about images. Images are passed as content blocks inside user messages, just like text â€” but with `"type": "image"` instead of `"type": "text"`.
 
 ### Base64 images
 
@@ -263,12 +263,12 @@ invoice = InvoiceData.model_validate_json("{" + response.content[0].text)
 ```
 
 <Checkpoint
-  moduleSlug="module-15-anthropic-sdk"
+  moduleSlug="module-20-anthropic-sdk"
   items={[
     "I can use client.messages.stream() and iterate stream.text_stream",
     "I know that usage stats require stream.get_final_message() after the stream closes",
     "I can use the prefill technique to force valid JSON output",
     "I can pass base64 and URL images in user message content blocks",
   ]}
-  next="/modules/module-15-anthropic-sdk/lesson-04"
+  next="/modules/module-20-anthropic-sdk/lesson-04"
 />

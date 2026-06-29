@@ -1,13 +1,13 @@
----
+﻿---
 title: "The API Contract: Messages, Roles, and Content Blocks"
-module: "module-15-anthropic-sdk"
+module: "module-20-anthropic-sdk"
 lesson: 1
 slug: "lesson-01"
 ---
 
 # The API Contract: Messages, Roles, and Content Blocks
 
-Every call to Claude — whether you use the raw SDK, LangGraph, or CrewAI — eventually becomes a single HTTP POST to the Messages API. This lesson teaches you that API in full. Once you understand the exact shape of the request and the response, every framework becomes readable, every bug becomes findable.
+Every call to Claude â€” whether you use the raw SDK, LangGraph, or CrewAI â€” eventually becomes a single HTTP POST to the Messages API. This lesson teaches you that API in full. Once you understand the exact shape of the request and the response, every framework becomes readable, every bug becomes findable.
 
 ## Installation and setup
 
@@ -24,7 +24,7 @@ client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from environment
 The `Anthropic()` constructor looks for your API key in the environment variable `ANTHROPIC_API_KEY`. You can also pass it explicitly with `api_key="sk-ant-..."`, but using environment variables is the right default for any code that might touch version control.
 
 <Callout type="warning">
-`max_tokens` is required in every `messages.create()` call. Omitting it raises a validation error immediately — Claude has no default. This differs from some other SDKs. Always set it, even if you set it high.
+`max_tokens` is required in every `messages.create()` call. Omitting it raises a validation error immediately â€” Claude has no default. This differs from some other SDKs. Always set it, even if you set it high.
 </Callout>
 
 ## Your first call
@@ -63,7 +63,7 @@ response = client.messages.create(
         {"role": "user",    "content": "..."},
     ],
     tools=[...],                      # optional: tool schemas
-    temperature=1.0,                  # optional: 0.0–1.0, default 1.0
+    temperature=1.0,                  # optional: 0.0â€“1.0, default 1.0
     stop_sequences=["DONE"],          # optional: custom stop strings
 )
 ```
@@ -77,7 +77,7 @@ The messages array represents the conversation history. Each entry is a dict wit
 There is no `"system"` role in the messages array. The system prompt is a separate top-level parameter named `system`. This is a frequent source of confusion for developers who come from OpenAI's API, where `{"role": "system", ...}` is a messages-array entry.
 
 <Callout type="warning">
-**Common mistake:** placing the system prompt inside the messages array as `{"role": "system", "content": "..."}`. The Anthropic API will return a `400 Bad Request` — `"system"` is not a valid role value. Always pass the system prompt as the `system=` parameter.
+**Common mistake:** placing the system prompt inside the messages array as `{"role": "system", "content": "..."}`. The Anthropic API will return a `400 Bad Request` â€” `"system"` is not a valid role value. Always pass the system prompt as the `system=` parameter.
 </Callout>
 
 ### Content: string or list of blocks
@@ -85,10 +85,10 @@ There is no `"system"` role in the messages array. The system prompt is a separa
 The `content` value of each message can be either a plain string (shorthand) or a list of **content blocks** (full form):
 
 ```python
-# Shorthand — fine for simple text
+# Shorthand â€” fine for simple text
 {"role": "user", "content": "What's the weather like?"}
 
-# Full form — required when mixing content types
+# Full form â€” required when mixing content types
 {"role": "user", "content": [
     {"type": "text", "text": "Describe this image:"},
     {"type": "image", "source": {"type": "url", "url": "https://..."}},
@@ -135,7 +135,7 @@ Image blocks can only appear in `user` messages. Vision is covered in depth in L
 }
 ```
 
-This block appears in **assistant** messages when the model decides to call a tool. You never write this block yourself — the API produces it. Your job is to detect it in the response and act on it. Tool use is covered in depth in Lesson 2.
+This block appears in **assistant** messages when the model decides to call a tool. You never write this block yourself â€” the API produces it. Your job is to detect it in the response and act on it. Tool use is covered in depth in Lesson 2.
 
 ### 4. Tool result block
 
@@ -147,7 +147,7 @@ This block appears in **assistant** messages when the model decides to call a to
 }
 ```
 
-This block appears in **user** messages when you feed a tool's output back to the model. You write this block yourself, after executing the tool. The `tool_use_id` must match the `id` from the corresponding `tool_use` block — this is how the model knows which tool call produced which result. Tool use is covered in depth in Lesson 2.
+This block appears in **user** messages when you feed a tool's output back to the model. You write this block yourself, after executing the tool. The `tool_use_id` must match the `id` from the corresponding `tool_use` block â€” this is how the model knows which tool call produced which result. Tool use is covered in depth in Lesson 2.
 
 <Quiz
   question="Which stop_reason value means the model wants to call a tool?"
@@ -164,9 +164,9 @@ This block appears in **user** messages when you feed a tool's output back to th
 ```python
 response = client.messages.create(...)
 
-response.id              # "msg_01XFDUDYJgAACTvnkyLAND" — unique message ID
-response.model           # "claude-sonnet-4-6" — model that was used
-response.role            # "assistant" — always
+response.id              # "msg_01XFDUDYJgAACTvnkyLAND" â€” unique message ID
+response.model           # "claude-sonnet-4-6" â€” model that was used
+response.role            # "assistant" â€” always
 response.content         # list of content blocks
 response.stop_reason     # "end_turn" | "tool_use" | "max_tokens" | "stop_sequence"
 response.usage.input_tokens    # tokens consumed by your input
@@ -187,10 +187,10 @@ The `stop_reason` is your primary dispatch signal in an agent loop. Check it bef
 <Quiz
   question="Which role is NOT valid inside the messages array?"
   options={[
-    { text: "user", correct: false, explanation: "user is a valid role — it represents turns from the human side of the conversation." },
-    { text: "assistant", correct: false, explanation: "assistant is a valid role — it represents turns from the model." },
+    { text: "user", correct: false, explanation: "user is a valid role â€” it represents turns from the human side of the conversation." },
+    { text: "assistant", correct: false, explanation: "assistant is a valid role â€” it represents turns from the model." },
     { text: "system", correct: true, explanation: "Correct. There is no system role in the Anthropic messages array. The system prompt goes in the separate system= parameter, not in the messages list." },
-    { text: "Both user and assistant are invalid", correct: false, explanation: "Both user and assistant are valid roles — they are the only two valid roles." },
+    { text: "Both user and assistant are invalid", correct: false, explanation: "Both user and assistant are valid roles â€” they are the only two valid roles." },
   ]}
 />
 
@@ -223,7 +223,7 @@ print(response.stop_reason)
 print(f"Used {response.usage.input_tokens} input tokens, {response.usage.output_tokens} output tokens")
 ```
 
-The model has access to the full messages history. You maintain that history in your application. The API is stateless — every call sends the entire conversation from scratch.
+The model has access to the full messages history. You maintain that history in your application. The API is stateless â€” every call sends the entire conversation from scratch.
 
 <Callout type="insight">
 The API is completely stateless. The model has no memory between calls unless you include prior turns in the messages array. This is both a constraint and a feature: you have full control over what the model remembers. In a production system, you manage conversation history in your own data store.
@@ -234,10 +234,10 @@ The API is completely stateless. The model has no memory between calls unless yo
 Because `response.content` is a list and may contain multiple blocks (especially when tools are involved), it is good practice to be explicit about which block you want:
 
 ```python
-# Fragile — assumes content[0] is always a text block
+# Fragile â€” assumes content[0] is always a text block
 text = response.content[0].text
 
-# Safer — find the first text block explicitly
+# Safer â€” find the first text block explicitly
 text_blocks = [b for b in response.content if b.type == "text"]
 text = text_blocks[0].text if text_blocks else ""
 ```
@@ -245,12 +245,12 @@ text = text_blocks[0].text if text_blocks else ""
 In Lesson 2, when tool use blocks appear alongside text blocks, you will need the explicit filter.
 
 <Checkpoint
-  moduleSlug="module-15-anthropic-sdk"
+  moduleSlug="module-20-anthropic-sdk"
   items={[
     "I can explain the difference between the system= parameter and a system role in messages",
     "I know the four content block types and when each appears",
     "I know all four stop_reason values and what action each requires",
     "I can write a multi-turn messages.create() call from memory",
   ]}
-  next="/modules/module-15-anthropic-sdk/lesson-02"
+  next="/modules/module-20-anthropic-sdk/lesson-02"
 />
