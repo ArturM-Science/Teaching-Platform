@@ -3,7 +3,8 @@
 import { useState } from 'react'
 
 interface QuizOption {
-  text: string
+  label: string
+  text?: string
   correct?: boolean
   explanation?: string
 }
@@ -43,7 +44,7 @@ export function Quiz({ question, options }: { question: string; options: QuizOpt
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs font-medium">
                   {indicator}
                 </span>
-                <span>{opt.text}</span>
+                <span>{opt.label ?? opt.text}</span>
               </span>
             </button>
           )
