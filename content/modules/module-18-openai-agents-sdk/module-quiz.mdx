@@ -1,0 +1,94 @@
+---
+title: "Module Quiz — OpenAI Agents SDK"
+module: "module-18-openai-agents-sdk"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 18 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-18-openai-agents-sdk"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "You use `@function_tool` on a function whose `user_id` parameter has no type annotation. What happens?",
+      options: [
+        { label: "The SDK defaults to `str` for untyped parameters" },
+        { label: "The SDK raises an error at import time — all parameters must have type annotations for schema generation to succeed", correct: true },
+        { label: "The tool is registered but the model may skip that parameter when calling the tool" },
+        { label: "It works fine; type annotations are optional and only affect generated documentation" }
+      ],
+      explanation: "`@function_tool` generates a JSON schema from the function's type annotations. If any parameter lacks a type annotation, the SDK cannot generate the schema and raises an error at import time — before any run begins. This is different from runtime failures; the decorator itself fails during module load."
+    },
+    {
+      type: 'match',
+      question: "Match each OpenAI Agents SDK primitive to its role.",
+      pairs: [
+        { left: "Agent", right: "An LLM configuration with instructions, tools, and optional handoffs" },
+        { left: "Runner.run()", right: "Executes an agent loop until end_turn or max_turns is reached" },
+        { left: "handoff()", right: "Transfers control to another agent; the calling agent stops processing" },
+        { left: "InputGuardrail", right: "Runs in parallel with the first LLM call to check the user's input" },
+        { left: "RunConfig(max_turns=10)", right: "Caps the number of turns to prevent infinite agent loops" }
+      ]
+    },
+    {
+      question: "Agent A hands off to Agent B. Agent B completes its task. When does Agent A resume processing?",
+      options: [
+        { label: "Agent A resumes after Agent B calls handoff() back to Agent A" },
+        { label: "Agent A resumes automatically once Agent B returns end_turn" },
+        { label: "Agent A never resumes — handoff is one-way; the run continues with Agent B until completion", correct: true },
+        { label: "Agent A resumes if RunConfig(return_to_caller=True) is set" }
+      ],
+      explanation: "Handoffs in the OpenAI Agents SDK are one-way transfers of control. When Agent A hands off to Agent B, Agent A stops. The run continues with Agent B as the active agent until it ends or hands off to yet another agent. There is no automatic return-to-caller mechanism."
+    },
+    {
+      question: "You add an InputGuardrail to block jailbreak attempts. A user sends a benign question. How does this affect latency?",
+      options: [
+        { label: "It adds the full guardrail inference time before the agent's LLM call begins" },
+        { label: "It adds no latency on the happy path — InputGuardrail runs in parallel with the first agent LLM call", correct: true },
+        { label: "It adds latency only if the guardrail model is larger than the agent model" },
+        { label: "It adds half the guardrail inference time because the SDK pipelines the check" }
+      ],
+      explanation: "InputGuardrails run in parallel with the first agent LLM call. On the happy path (guardrail passes), the only cost is the time difference between the guardrail and the agent model, which is often zero if both complete at the same time. The SDK only blocks if the guardrail trips — at which point it raises InputGuardrailTripwireTriggered and the agent result is discarded."
+    },
+    {
+      type: 'order',
+      question: "Put the events in a guarded OpenAI Agents SDK run in the correct order.",
+      steps: [
+        "Runner.run() receives the user input",
+        "InputGuardrail and first agent LLM call execute in parallel",
+        "If guardrail trips, raise InputGuardrailTripwireTriggered and stop",
+        "Agent processes its LLM response and executes any tool calls",
+        "OutputGuardrail checks the final response before returning to the caller"
+      ]
+    },
+    {
+      question: "You build a two-agent pipeline: Router → Specialist. Under load, you see the run looping indefinitely. What is the most likely cause and fix?",
+      options: [
+        { label: "max_turns defaults to None — the loop runs forever. Set RunConfig(max_turns=10) to cap it", correct: true },
+        { label: "Both agents must have the same model; mismatched models cause retry loops" },
+        { label: "Handoff chains require explicit termination with handoff(None) at the end" },
+        { label: "The SDK rate-limits circular handoffs; set RunConfig(allow_circular=True) to allow them" }
+      ],
+      explanation: "RunConfig(max_turns) has no default limit in the SDK. Without it, a circular handoff (Router → Specialist → Router → ...) or a misbehaving agent that never reaches end_turn will run until you kill the process. Always set a max_turns in production."
+    },
+    {
+      question: "You add an OutputGuardrail to check every response for PII before returning it to the user. A product manager asks why the app feels slower than before. What is the correct explanation?",
+      options: [
+        { label: "OutputGuardrails run after the agent completes — they add the guardrail inference time to every request", correct: true },
+        { label: "OutputGuardrails run in parallel with the agent, similar to InputGuardrails" },
+        { label: "OutputGuardrails only add latency when they trip, not on clean responses" },
+        { label: "The slowdown is caused by the OutputGuardrail consuming tokens from the rate limit budget" }
+      ],
+      explanation: "Unlike InputGuardrails (which run in parallel with the first LLM call), OutputGuardrails run after the agent has fully completed. This means every request waits for both the agent response and the guardrail check sequentially. Use OutputGuardrails only when the risk justifies the latency cost."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-18-openai-agents-sdk/lesson-05-lab)

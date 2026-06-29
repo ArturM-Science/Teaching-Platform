@@ -1,0 +1,94 @@
+---
+title: "Module Quiz — CrewAI: Role-Based Agent Teams"
+module: "module-15-crewai"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 15 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-15-crewai"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "A CrewAI agent has role='Analyst', goal='Identify risks', and backstory='You are a skeptic who always asks what could go wrong.' Which field most directly determines what vocabulary and perspective the agent uses in its output?",
+      options: [
+        { label: "role — it is the primary identity the LLM inhabits" },
+        { label: "backstory — it provides the expertise context and working style the LLM draws on when generating text", correct: true },
+        { label: "goal — it overrides both role and backstory if they conflict" },
+        { label: "All three are concatenated with equal weight into the system prompt" }
+      ],
+      explanation: "backstory is where specificity lives. A vague backstory produces generic outputs; two or three sentences about domain expertise, working style, and known limitations shapes vocabulary, depth, and tone more than the short role and goal fields."
+    },
+    {
+      type: 'match',
+      question: "Match each CrewAI construct to its primary function.",
+      pairs: [
+        { left: "Agent.backstory", right: "Expertise context that shapes the LLM's persona and output style" },
+        { left: "Task.expected_output", right: "Acceptance criterion used by the hierarchical manager to validate worker output" },
+        { left: "crew.kickoff(inputs={...})", right: "Runs the pipeline and substitutes {placeholder} strings in task descriptions" },
+        { left: "crew.usage_metrics", right: "Token count and request count for the most recent kickoff call" },
+        { left: "@router decorator in a Flow", right: "Branching logic that returns a string key to activate a @listen branch" }
+      ]
+    },
+    {
+      question: "You run a three-agent sequential crew and notice the final report ignores the analyst's risk findings even though analysis_task is listed in report_task's context=[]. What is the most likely cause?",
+      options: [
+        { label: "context= only works in Process.hierarchical, not Process.sequential" },
+        { label: "The analyst's expected_output is too vague, so the output is not self-contained enough to be useful when injected as context", correct: true },
+        { label: "You must set allow_delegation=True on the writer agent for it to read context" },
+        { label: "context= injects a reference to the task object, not the completed output text" }
+      ],
+      explanation: "context= unconditionally injects each listed task's output text into the prompt. If the analyst's output is vague or poorly structured, the writer may not be able to act on it. Tight expected_output descriptions — specifying format, sections, required data — are what make context useful."
+    },
+    {
+      type: 'order',
+      question: "Put the steps of CrewAI's Process.hierarchical orchestration loop in the correct order.",
+      steps: [
+        "Manager reads all tasks and decides what to assign first",
+        "Manager delegates a task to a worker agent",
+        "Worker executes the task using its tools and LLM",
+        "Manager compares the worker output against the task's expected_output",
+        "Manager accepts the output or reassigns with corrective feedback"
+      ]
+    },
+    {
+      question: "Your hierarchical crew is spending 70% more tokens than the equivalent sequential crew. You need to reduce cost without switching to sequential. Which change is most likely to reduce the overhead?",
+      options: [
+        { label: "Set verbose=True on all agents so the manager has more debugging information" },
+        { label: "Tighten the expected_output descriptions so the manager validates and accepts quickly with fewer reassignment loops", correct: true },
+        { label: "Add more agents to the crew so each worker handles a smaller subtask" },
+        { label: "Increase max_iter on each worker agent" }
+      ],
+      explanation: "The dominant hierarchical cost is manager routing and validation calls. With vague expected_output descriptions, the manager loops through multiple reassignment attempts before accepting. Tight, concrete format descriptions cause the manager to accept on the first or second attempt — reducing overhead from 50-100% down toward 30%."
+    },
+    {
+      question: "In a CrewAI Flow, what happens if a @router method returns a string key that does not match any @listen decorator?",
+      options: [
+        { label: "CrewAI raises a RoutingError exception" },
+        { label: "The Flow ends at that step — no matching @listen fires", correct: true },
+        { label: "The Flow re-runs the @router method with an empty string argument" },
+        { label: "The Flow falls through to the next method in definition order" }
+      ],
+      explanation: "@router returns a string key that CrewAI looks up against registered @listen decorators. If no match exists, the Flow terminates at that step without error. This means a typo in the return string silently ends the pipeline — always test routing branches."
+    },
+    {
+      question: "A teammate says your pipeline needs checkpointing: if it crashes halfway through, it should resume from step 6 rather than restart from step 1. Should you use CrewAI or LangGraph?",
+      options: [
+        { label: "CrewAI — set memory=True and it will persist progress automatically" },
+        { label: "CrewAI — use output_file= on each task to checkpoint outputs to disk" },
+        { label: "LangGraph — it has first-class checkpoint support via SqliteSaver; CrewAI crews run to completion or fail entirely with no built-in resume", correct: true },
+        { label: "Either — CrewAI Flows support checkpoint_on_failure=True as a parameter" }
+      ],
+      explanation: "CrewAI has no built-in checkpointing. output_file= writes outputs after each task completes but does not enable resumption — a crash mid-task means the output is never written and you restart from the beginning. LangGraph's checkpointer stores state after every node, enabling true resume from the last successful checkpoint."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-15-crewai/lesson-06-lab)

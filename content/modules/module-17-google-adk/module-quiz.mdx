@@ -1,0 +1,94 @@
+---
+title: "Module Quiz — Google ADK: Hierarchical Agent Trees"
+module: "module-17-google-adk"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 17 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-17-google-adk"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "You build an ADK tool function that returns a plain string: `return 'Paris'`. In ADK 2.x the agent never uses this result. Why?",
+      options: [
+        { label: "Tool functions must be async; synchronous functions are silently ignored" },
+        { label: "ADK 2.x tool functions must return a dict — plain strings are not recognized as valid tool output", correct: true },
+        { label: "The function needs the @tool decorator to be registered as a tool" },
+        { label: "ADK requires tool results to be wrapped in a ToolResult dataclass" }
+      ],
+      explanation: "ADK 2.x expects tool functions to return dicts. A plain string return value causes the framework to silently drop the result or raise an error, depending on the version. The correct pattern is `return {'city': 'Paris'}` or `return {'result': 'Paris'}`."
+    },
+    {
+      type: 'match',
+      question: "Match each ADK agent type to the scenario it is best suited for.",
+      pairs: [
+        { left: "LlmAgent", right: "Tasks requiring reasoning, tool selection, and unstructured decision-making" },
+        { left: "SequentialAgent", right: "A fixed pipeline where sub-agents run in a guaranteed order" },
+        { left: "ParallelAgent", right: "Independent sub-tasks that can run concurrently to reduce latency" },
+        { left: "LoopAgent", right: "Iterative refinement where a sub-agent repeats until a condition is met" },
+        { left: "A2A protocol", right: "Communication between agents deployed on separate infrastructure" }
+      ]
+    },
+    {
+      question: "Your root LlmAgent has `google_search` as a built-in tool. You add a custom `database_lookup` function tool. The agent now fails to use either tool correctly. What is the constraint you violated?",
+      options: [
+        { label: "Root agents cannot have more than 5 tools total" },
+        { label: "Custom function tools must be defined before built-in tools in the tools list" },
+        { label: "ADK allows only one built-in tool per root agent — mixing built-in tools with custom function tools is not supported", correct: true },
+        { label: "google_search requires a separate API key configuration when combined with custom tools" }
+      ],
+      explanation: "ADK's root agent has a constraint: you can use one built-in tool (google_search, code_execution, etc.) OR custom function tools, but not both on the same root agent. The workaround is to move one category of tools to a sub-agent and have the root orchestrate them."
+    },
+    {
+      type: 'order',
+      question: "Put the steps of an ADK agent's tool execution cycle in the correct order.",
+      steps: [
+        "LlmAgent receives a user message and generates a response",
+        "Response includes a function call (tool_name + arguments)",
+        "ADK runtime looks up the function in the agent's tool registry",
+        "Function executes and returns a dict result",
+        "ADK appends the result as a function response and calls the LLM again"
+      ]
+    },
+    {
+      question: "Your ADK agent works correctly in development but loses all user session data on every production restart. You are using InMemorySessionService. What must you change, and what is the tradeoff?",
+      options: [
+        { label: "Switch to DatabaseSessionService — it persists sessions but adds latency to every read/write", correct: true },
+        { label: "Set session_ttl=0 to disable expiry and keep sessions in memory indefinitely" },
+        { label: "Use VertexAI as the runner — it automatically persists sessions" },
+        { label: "Call session_service.flush() before each restart to write sessions to disk" }
+      ],
+      explanation: "InMemorySessionService stores all sessions in a Python dict; they are gone when the process exits. DatabaseSessionService writes to a persistent store (Firestore, Cloud SQL, etc.). The tradeoff is that every session read and write now involves a database round-trip, which adds latency compared to in-memory access."
+    },
+    {
+      question: "An ADK tool function needs to read and write values to the current session. How does it access the session from within the function?",
+      options: [
+        { label: "Import the global session object from `adk.session`" },
+        { label: "Declare a `tool_context: ToolContext` parameter — ADK injects it automatically at call time", correct: true },
+        { label: "Pass the session service as the first argument when registering the tool" },
+        { label: "Call `agent.get_session()` from within the function using the agent reference" }
+      ],
+      explanation: "ADK uses dependency injection for tool context. If your tool function declares a parameter of type ToolContext, ADK injects the current session context automatically — you do not need to retrieve or pass it manually. Inside the function, `tool_context.state` gives you read/write access to the session's state dict."
+    },
+    {
+      question: "You need your ADK agent to be accessible via a public HTTPS endpoint with automatic scaling. Which deployment command handles all of this in one step?",
+      options: [
+        { label: "`adk dev` — starts a local server with HTTPS via ngrok" },
+        { label: "`adk eval` — benchmarks the agent and deploys the best version" },
+        { label: "`adk deploy` — packages the agent into a container and deploys to Cloud Run with autoscaling and HTTPS", correct: true },
+        { label: "You must write a Dockerfile, push to Artifact Registry, and configure Cloud Run manually" }
+      ],
+      explanation: "`adk deploy` abstracts the full deployment pipeline: it packages your agent, pushes a container image, and deploys to Cloud Run with autoscaling and a managed HTTPS endpoint. `adk dev` is for local development only. `adk eval` runs evaluation benchmarks but does not deploy."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-17-google-adk/lesson-05-lab)

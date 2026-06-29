@@ -1,0 +1,94 @@
+---
+title: "Module Quiz — Anthropic SDK: Direct API Mastery"
+module: "module-20-anthropic-sdk"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 20 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-20-anthropic-sdk"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "You call `client.messages.create()` and get a 400 error with the message 'messages: roles must alternate between user and assistant'. What is the most likely cause?",
+      options: [
+        { label: "You forgot to include max_tokens in the request" },
+        { label: "You included a message with `role: 'system'` inside the messages array", correct: true },
+        { label: "Two consecutive user messages were sent without an assistant turn between them" },
+        { label: "The messages array is empty" }
+      ],
+      explanation: "The Anthropic Messages API does not allow a 'system' role inside the messages array. System instructions go in a top-level `system` parameter. Putting `{'role': 'system', 'content': '...'}` in the messages list violates the alternating role requirement and returns a 400 error."
+    },
+    {
+      type: 'match',
+      question: "Match each Anthropic API concept to its description.",
+      pairs: [
+        { left: "stop_reason == 'tool_use'", right: "The model wants to call one or more tools; the loop must execute them and continue" },
+        { left: "stop_reason == 'end_turn'", right: "The model finished its response; the loop should extract and return the text" },
+        { left: "stop_reason == 'max_tokens'", right: "The response was cut off; max_tokens was reached before the model finished" },
+        { left: "cache_control: {type: 'ephemeral'}", right: "Marks a content block for prompt caching with a 5-minute TTL" },
+        { left: "AsyncAnthropic()", right: "Async client required for asyncio.gather() parallel worker calls" }
+      ]
+    },
+    {
+      question: "Your tool loop runs a tool call and appends the result as a user message. The next API call returns a 400 error about message ordering. What did you do wrong?",
+      options: [
+        { label: "Tool results must be sent as assistant messages, not user messages" },
+        { label: "You must append the full assistant message (including the tool_use block) before appending the user message containing the tool_result", correct: true },
+        { label: "tool_result content blocks cannot be mixed with text content blocks in the same message" },
+        { label: "You must call client.messages.create() with a new client instance after each tool call" }
+      ],
+      explanation: "The correct sequence is: append the full assistant message (role='assistant', content=response.content), then append the user message containing the tool_result blocks. Appending the tool_result without first appending the assistant turn that requested it breaks the alternating role requirement."
+    },
+    {
+      type: 'order',
+      question: "Put the steps of the Anthropic SDK tool use loop in the correct order.",
+      steps: [
+        "Call messages.create() with tools defined",
+        "Check response.stop_reason",
+        "If stop_reason == 'tool_use', extract tool_use blocks from response.content",
+        "Execute each tool and collect results",
+        "Append assistant message and user message with tool_result blocks, then call messages.create() again"
+      ]
+    },
+    {
+      question: "An agent loop has been running for 47 iterations without converging. You have no MAX_STEPS guard. What happens next?",
+      options: [
+        { label: "The SDK automatically raises a ConvergenceError after 50 steps" },
+        { label: "The loop continues indefinitely until it hits a rate limit or you kill the process", correct: true },
+        { label: "Claude's model stops generating tool_use calls after 50 iterations" },
+        { label: "The built-in max_retries=2 parameter caps the total number of API calls" }
+      ],
+      explanation: "The raw SDK has no built-in loop limit. Without a MAX_STEPS guard in your own code, a misbehaving agent loop will run until it hits a rate limit, exhausts your budget, or you kill the process. max_retries only controls retry behavior for 429 and 5xx errors — it has nothing to do with the tool loop iteration count."
+    },
+    {
+      question: "You add `cache_control: {type: 'ephemeral'}` to your 2,000-token system prompt. After 6 minutes of inactivity, the next request takes as long as the first. Why?",
+      options: [
+        { label: "The cache is invalidated when the model version is updated" },
+        { label: "The prompt cache TTL is 5 minutes — after 6 minutes of inactivity the cache expires and the first call re-writes it at 125% of normal input cost", correct: true },
+        { label: "cache_control only caches tool schemas, not system prompt text" },
+        { label: "The cache is invalidated if any other part of the request changes, including the user message" }
+      ],
+      explanation: "The prompt cache TTL is 5 minutes. A cache hit resets the timer. After 6 minutes of inactivity, the cache entry expires. The next call writes the cache again (at 125% input cost), and only subsequent calls within 5 minutes benefit from the 10% cache read rate."
+    },
+    {
+      question: "Your production deployment intermittently fails with `anthropic.BadRequestError` (400). The built-in max_retries=3 does not help. Why not, and what should you do?",
+      options: [
+        { label: "max_retries only covers network errors; add explicit retry logic for 400 status codes" },
+        { label: "Built-in retries only cover 429 and 5xx — 400 is a client error indicating a malformed request that won't be fixed by retrying; investigate and fix the request construction instead", correct: true },
+        { label: "Increase max_retries to 10; 400 errors are covered but only after the first 3 failures" },
+        { label: "Switch to AsyncAnthropic() — it retries 400 errors by default" }
+      ],
+      explanation: "The built-in retry logic covers 429 (rate limit) and 5xx (server errors) only — errors that are transient and may succeed on retry. A 400 error means the request itself is malformed: wrong role, missing required field, invalid parameter. Retrying a malformed request will always fail. Read the error message, fix the request construction, and redeploy."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-20-anthropic-sdk/lesson-06-lab)

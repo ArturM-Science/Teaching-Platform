@@ -1,0 +1,94 @@
+---
+title: "Module Quiz — LangGraph: Stateful Agent Pipelines"
+module: "module-16-langgraph"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 16 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-16-langgraph"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "Your LangGraph node mutates state directly: `state['count'] += 1`. The graph runs without errors. What is the actual problem?",
+      options: [
+        { label: "LangGraph will raise a TypeError because TypedDict fields are read-only" },
+        { label: "The mutation works locally but will silently corrupt state in checkpointed or parallel graphs because nodes must return a dict of updates, not mutate in place", correct: true },
+        { label: "It will fail only if the graph uses SqliteSaver as the checkpointer" },
+        { label: "Direct mutation is fine; it is equivalent to returning {'count': state['count'] + 1}" }
+      ],
+      explanation: "Nodes must return a dict of fields to update — LangGraph merges those updates into the current state snapshot. Mutating in place appears to work in simple sequential graphs but causes correctness bugs in checkpointed and parallel graphs where state snapshots are written and restored across steps."
+    },
+    {
+      type: 'match',
+      question: "Match each LangGraph concept to its role.",
+      pairs: [
+        { left: "TypedDict subclass", right: "Defines the schema and field types for the graph's shared state" },
+        { left: "Annotated[list, operator.add]", right: "Reducer that appends incoming lists rather than overwriting the field" },
+        { left: "MemorySaver", right: "In-process checkpointer that stores state in a dict; not persistent across restarts" },
+        { left: "interrupt_before=[...]", right: "Pauses the graph before specified nodes so a human can review or edit state" },
+        { left: "Send(node_name, state)", right: "Dynamically spawns a parallel branch with a custom state payload" }
+      ]
+    },
+    {
+      question: "Your chatbot resumes from the wrong point in a conversation after a server restart. You are using MemorySaver. What must you change?",
+      options: [
+        { label: "Pass a different thread_id for each user session" },
+        { label: "Switch to SqliteSaver or PostgresSaver so checkpoints persist across process restarts", correct: true },
+        { label: "Set checkpointer=None and manage state yourself" },
+        { label: "Call graph.get_state(config) before each invoke to reload the checkpoint manually" }
+      ],
+      explanation: "MemorySaver stores checkpoints in a Python dict in RAM. When the process restarts, all checkpoints are lost. SqliteSaver writes to a file; PostgresSaver writes to a database. Either persists checkpoints across restarts, so the graph resumes from the correct point when the same thread_id is used."
+    },
+    {
+      type: 'order',
+      question: "Put the steps for resuming a human-in-the-loop LangGraph run in the correct order.",
+      steps: [
+        "Graph runs until it hits interrupt_before=[\"review_node\"]",
+        "Graph pauses and returns control to the caller with stop reason 'interrupt'",
+        "Human calls graph.get_state(config) to inspect the current state",
+        "Human optionally updates state with graph.update_state(config, {field: new_value})",
+        "Caller resumes the graph with graph.invoke(None, config)"
+      ]
+    },
+    {
+      question: "You have two parallel branches that both append items to the same `results` list in state. On merge, you see only the last branch's items. What is the fix?",
+      options: [
+        { label: "Set `parallel_merge=True` in the graph compile options" },
+        { label: "Declare the field as `Annotated[list[str], operator.add]` so LangGraph uses the add reducer to concatenate rather than overwrite on merge", correct: true },
+        { label: "Use Send() instead of conditional branching" },
+        { label: "Have each branch write to a separate field and merge them in a subsequent node" }
+      ],
+      explanation: "Without a reducer, LangGraph's default merge behavior overwrites the field with the last writer's value. The `Annotated[list, operator.add]` annotation tells LangGraph to concatenate all incoming values. This is the standard pattern for any field written by multiple parallel branches."
+    },
+    {
+      question: "A user sends a new message while an existing run on the same thread_id is still executing. You are using LangGraph Platform. Which double-texting mode best preserves message order while still processing all messages?",
+      options: [
+        { label: "reject — discard the new message entirely" },
+        { label: "interrupt — cancel the current run immediately and start fresh" },
+        { label: "enqueue — queue the new message and process it after the current run completes", correct: true },
+        { label: "rollback — rewind state to before the current run and restart with both messages" }
+      ],
+      explanation: "enqueue buffers the incoming message and processes it after the current run finishes, preserving ordering and not losing any messages. interrupt cancels the current run (losing in-progress work). reject drops the message. rollback rewinds state, which can cause double-processing of earlier messages."
+    },
+    {
+      question: "You want to stream individual tokens to the user as they arrive during a LangGraph node that calls an LLM. Which approach works?",
+      options: [
+        { label: "Use `stream_mode='values'` — it streams tokens from all LLM calls in the graph" },
+        { label: "Use `stream_mode='updates'` — it streams state updates token by token" },
+        { label: "Use `graph.astream_events()` and filter for `on_chat_model_stream` events", correct: true },
+        { label: "Tokens cannot be streamed from within a LangGraph node; you must use LangGraph Platform" }
+      ],
+      explanation: "`stream_mode='values'` and `stream_mode='updates'` emit state snapshots after each node completes — not tokens mid-generation. `astream_events()` is the LangGraph primitive that surfaces low-level events including `on_chat_model_stream`, which fires for each token produced by a model inside any node."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-16-langgraph/lesson-05-lab)

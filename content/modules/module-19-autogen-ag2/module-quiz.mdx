@@ -1,0 +1,93 @@
+---
+title: "Module Quiz — AutoGen / AG2: Conversational Multi-Agent Systems"
+module: "module-19-autogen-ag2"
+lesson: 100
+slug: "module-quiz"
+---
+
+# Module 19 Quiz
+
+Score 80% or higher to mark this module complete.
+
+<ModuleQuiz
+  moduleSlug="module-19-autogen-ag2"
+  passPercent={80}
+  next="Framework electives complete — return to the module map."
+  questions={[
+    {
+      question: "You have a GroupChat with 4 agents, `speaker_selection_method='auto'`, and `max_round=12`. How many minimum LLM calls will this produce for a run that goes to completion?",
+      options: [
+        { label: "12 — one per round" },
+        { label: "16 — four agents × four selected rounds" },
+        { label: "24 — 12 agent turns plus 12 GroupChatManager routing calls", correct: true },
+        { label: "48 — four agents × 12 rounds" }
+      ],
+      explanation: "With `speaker_selection_method='auto'`, the GroupChatManager makes one LLM call per round to decide which agent speaks next. That doubles the minimum LLM call count: 12 agent turns + 12 routing calls = 24 minimum. With `speaker_selection_method='round_robin'` there are no routing calls — 12 turns cost 12 LLM calls."
+    },
+    {
+      type: 'match',
+      question: "Match each AutoGen termination mechanism to how it works.",
+      pairs: [
+        { left: "is_termination_msg", right: "A function that inspects each message and returns True to stop the chat" },
+        { left: "max_round", right: "Hard cap on the number of rounds — stops the chat unconditionally when reached" },
+        { left: "UserProxyAgent.human_input_mode='TERMINATE'", right: "Asks the human whether to continue after each agent response" },
+        { left: "Belt-and-braces termination", right: "Using both is_termination_msg AND max_round to guard against both failure modes" }
+      ]
+    },
+    {
+      question: "Why is it important to set max_round even when is_termination_msg is configured?",
+      options: [
+        { label: "max_round is required by AutoGen — it raises an error if omitted" },
+        { label: "If the agent never produces the termination string (due to a bug or model drift), max_round prevents an uncapped loop that accumulates cost indefinitely", correct: true },
+        { label: "is_termination_msg only works with UserProxyAgent; max_round is needed for AssistantAgent" },
+        { label: "max_round reduces token usage per round by truncating messages" }
+      ],
+      explanation: "is_termination_msg depends on the model producing a specific output — which can fail due to model drift, instruction following failures, or bugs. Without max_round as a fallback, the chat loop runs indefinitely, accumulating tokens and cost. Belt-and-braces means both guards are active: termination string OR round limit."
+    },
+    {
+      question: "In a 12-round GroupChat, which round is typically the most expensive in token cost and why?",
+      options: [
+        { label: "Round 1 — the initial system prompt is longest" },
+        { label: "Round 12 — by this point the full conversation history is included in every agent's context, so each call pays for all prior messages", correct: true },
+        { label: "The round where GroupChatManager selects the most verbose agent" },
+        { label: "Each round costs the same; AutoGen truncates history to a fixed window" }
+      ],
+      explanation: "AutoGen appends every message to the conversation history, and each LLM call receives the full accumulated history. By round 12, each call is paying for 11 rounds of prior messages as input tokens. Token cost grows roughly linearly with round number — round 12 can be 5-10× more expensive than round 1."
+    },
+    {
+      type: 'order',
+      question: "Put the steps of an AutoGen nested chat in the correct order.",
+      steps: [
+        "Outer GroupChat reaches the trigger agent's turn",
+        "Trigger agent initiates a nested chat (a separate ConversableAgent.initiate_chat call)",
+        "Nested chat runs to completion with its own agents and conversation history",
+        "Nested chat's summary is extracted and injected into the outer conversation",
+        "Outer GroupChat continues with the next round using the summary as context"
+      ]
+    },
+    {
+      question: "You switch a GroupChat from `speaker_selection_method='auto'` to `speaker_selection_method='round_robin'`. What is the effect on cost and control?",
+      options: [
+        { label: "Cost decreases because each agent handles fewer messages; control increases because you define the order" },
+        { label: "Cost decreases by eliminating one LLM routing call per round; control increases because agent order is predictable and deterministic", correct: true },
+        { label: "Cost stays the same; round_robin only affects which agent speaks first" },
+        { label: "Cost increases because round_robin causes agents to repeat messages" }
+      ],
+      explanation: "With 'auto', GroupChatManager makes an extra LLM call each round to select the next speaker. 'round_robin' eliminates those routing calls entirely, reducing minimum calls per round from 2 to 1. The tradeoff is reduced flexibility — the order is fixed regardless of conversation state."
+    },
+    {
+      question: "You use `summary_method='reflection_with_llm'` to summarise a nested chat. What hidden cost does this introduce?",
+      options: [
+        { label: "It uses a larger model automatically, increasing cost per token" },
+        { label: "It makes an additional LLM call per nested chat to generate the summary, beyond all the calls the nested chat itself made", correct: true },
+        { label: "It disables token caching for the outer conversation" },
+        { label: "It counts the nested chat's turns toward the outer chat's max_round limit" }
+      ],
+      explanation: "`reflection_with_llm` calls an LLM to compress the nested chat history into a summary. This is one extra LLM call per nested chat invocation — hidden from the outer turn count and easy to overlook in cost estimates. `summary_method='last_msg'` avoids this cost by using the final message directly."
+    }
+  ]}
+/>
+
+---
+
+[← Lab](/modules/module-19-autogen-ag2/lesson-05-lab)
